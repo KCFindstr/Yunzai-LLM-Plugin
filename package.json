@@ -1,0 +1,21 @@
+{
+  "name": "yunzai-llm-plugin",
+  "version": "1.0.0",
+  "description": "Yunzai-Bot LLM (Large Language Model) 智能对话插件，支持 OpenAI、DeepSeek、Claude、Ollama 等",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "yunzai",
+    "yunzai-bot",
+    "llm",
+    "openai",
+    "deepseek",
+    "chatgpt",
+    "plugin"
+  ],
+  "author": "",
+  "license": "MIT"
+}

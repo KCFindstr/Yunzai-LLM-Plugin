@@ -1,0 +1,56 @@
+# Yunzai-LLM-Plugin 配置文件
+
+# ----------------- LLM API 服务配置 -----------------
+# API 基础地址 (支持任何兼容 OpenAI 格式的接口，如 OpenAI、DeepSeek、OneAPI、Ollama、Moonshot 等)
+# 常用地址示例:
+#   OpenAI:       https://api.openai.com/v1
+#   DeepSeek:     https://api.deepseek.com/v1
+#   Ollama(本地):  http://127.0.0.1:11434/v1
+#   Moonshot(Kimi): https://api.moonshot.cn/v1
+#   通义千问:     https://dashscope.aliyuncs.com/compatible-mode/v1
+apiUrl: "https://api.deepseek.com/v1"
+
+# API 密钥 (Bearer Token)
+apiKey: "sk-your-api-key-here"
+
+# 默认使用的模型名称
+# 例如: deepseek-chat, gpt-4o-mini, gpt-4o, claude-3-5-sonnet, qwen-plus, llama3
+model: "deepseek-chat"
+
+# 系统预设提示词 (System Prompt / 人设设定)
+systemPrompt: "你是一个友好、幽默且富有智慧的 QQ 聊天助手。请用自然、亲切的中文与用户交流，回答要精炼准确，排版清晰。"
+
+# 生成温度 (0.0 ~ 2.0，数值越高越富有创造力，数值越低回答越严谨)
+temperature: 0.7
+
+# 最大输出 Token 数
+maxTokens: 2048
+
+# 请求超时时间 (单位：秒)
+timeout: 60
+
+# ----------------- 触发与交互设置 -----------------
+# 触发前缀列表 (发送这些前缀 + 内容即可触发 AI 回答)
+prefix:
+  - "#chat"
+  - "#ai"
+  - "chat"
+  - "ai"
+
+# 是否在群聊中 @机器人 时自动触发
+atReply: true
+
+# 是否引用回复用户的原消息
+replyQuote: true
+
+# ----------------- 上下文多轮对话记忆 -----------------
+# 上下文记忆的最大轮数 (每轮包含用户问题和 AI 回复各一条，设置为 0 则关闭记忆)
+historyLimit: 10
+
+# 上下文记忆有效时间 (单位：分钟，超时后自动重置记忆)
+historyTimeout: 30
+
+# 群聊记忆隔离模式:
+# true  = 每位群成员拥有独立的对话记忆
+# false = 同一个群内所有成员共享该群的公共对话记忆
+isolateUserInGroup: true
