@@ -1,12 +1,10 @@
 import configManager from './config.js'
+import type { ChatMessage, SessionState, YunzaiEvent } from '../types/index.js'
 
 class MemoryManager {
-  constructor() {
-    // key => { lastTime: number, messages: Array<{ role: string, content: string }> }
-    this.sessions = new Map()
-  }
+  private sessions = new Map<string, SessionState>()
 
-  getSessionKey(e) {
+  getSessionKey(e: YunzaiEvent): string {
     const cfg = configManager.get()
     const isGroup = Boolean(e.group_id || e.isGroup)
     const userId = String(e.user_id || e.sender?.user_id)
@@ -21,7 +19,7 @@ class MemoryManager {
     return `private:${userId}`
   }
 
-  getMessages(e) {
+  getMessages(e: YunzaiEvent): ChatMessage[] {
     const cfg = configManager.get()
     if (!cfg.historyLimit || cfg.historyLimit <= 0) {
       return []
@@ -41,7 +39,7 @@ class MemoryManager {
     return session.messages
   }
 
-  addMessage(e, role, content) {
+  addMessage(e: YunzaiEvent, role: 'user' | 'assistant', content: string): void {
     const cfg = configManager.get()
     if (!cfg.historyLimit || cfg.historyLimit <= 0) return
 
@@ -62,12 +60,12 @@ class MemoryManager {
     }
   }
 
-  clearSession(e) {
+  clearSession(e: YunzaiEvent): boolean {
     const key = this.getSessionKey(e)
     return this.sessions.delete(key)
   }
 
-  clearAll() {
+  clearAll(): void {
     this.sessions.clear()
   }
 }

@@ -1,8 +1,16 @@
-import plugin from '../../../lib/plugins/plugin.js'
 import configManager from '../lib/config.js'
 import memoryManager from '../lib/memory.js'
+import type { YunzaiEvent } from '../types/index.js'
 
-export class LLMManage extends plugin {
+const BasePlugin = (typeof plugin !== 'undefined' ? plugin : class {
+  e!: YunzaiEvent
+  constructor(public init: any) {}
+  reply(msg: any, quote?: boolean, data?: any) {
+    return this.e?.reply(msg, quote, data)
+  }
+}) as any
+
+export class LLMManage extends BasePlugin {
   constructor() {
     super({
       name: 'LLM插件管理',
@@ -36,9 +44,10 @@ export class LLMManage extends plugin {
     })
   }
 
-  async help(e) {
+  async help(): Promise<boolean> {
+    const e = this.e as YunzaiEvent
     const msg = [
-      '🤖 === Yunzai-LLM-Plugin 帮助指南 === 🤖',
+      '🤖 === Yunzai-LLM-Plugin 帮助指南 (TS版) === 🤖',
       '',
       '【常用指令】',
       '• #chat <问题>  : 与 AI 进行对话 (支持多轮记忆)',
@@ -58,7 +67,8 @@ export class LLMManage extends plugin {
     return true
   }
 
-  async status(e) {
+  async status(): Promise<boolean> {
+    const e = this.e as YunzaiEvent
     const cfg = configManager.get()
     const history = memoryManager.getMessages(e)
     const key = memoryManager.getSessionKey(e)
@@ -83,7 +93,8 @@ export class LLMManage extends plugin {
     return true
   }
 
-  async clearMemory(e) {
+  async clearMemory(): Promise<boolean> {
+    const e = this.e as YunzaiEvent
     const cleared = memoryManager.clearSession(e)
     if (cleared) {
       await e.reply('✨ 当前会话的上下文记忆已清空，开启全新的对话吧！', true)
@@ -93,9 +104,10 @@ export class LLMManage extends plugin {
     return true
   }
 
-  async switchModel(e) {
-    const match = e.msg.match(/^#llm切换模型\s*(.+)$/)
-    const newModel = match[1]?.trim()
+  async switchModel(): Promise<boolean> {
+    const e = this.e as YunzaiEvent
+    const match = (e.msg || '').match(/^#llm切换模型\s*(.+)$/)
+    const newModel = match?.[1]?.trim()
     if (!newModel) {
       await e.reply('请指定模型名称，例如：#llm切换模型 deepseek-chat', true)
       return true
@@ -106,16 +118,16 @@ export class LLMManage extends plugin {
     return true
   }
 
-  async setSystemPrompt(e) {
-    const match = e.msg.match(/^#llm设置提示词\s*([\s\S]+)$/)
-    const prompt = match[1]?.trim()
+  async setSystemPrompt(): Promise<boolean> {
+    const e = this.e as YunzaiEvent
+    const match = (e.msg || '').match(/^#llm设置提示词\s*([\s\S]+)$/)
+    const prompt = match?.[1]?.trim()
     if (!prompt) {
       await e.reply('请提供提示词内容', true)
       return true
     }
 
     configManager.set('systemPrompt', prompt)
-    // 清空当前记忆以应用新人设
     memoryManager.clearSession(e)
     await e.reply('✅ 系统提示词已更新，并已重置当前对话记忆！', true)
     return true

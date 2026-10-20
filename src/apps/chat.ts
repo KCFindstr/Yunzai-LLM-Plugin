@@ -1,8 +1,17 @@
-import plugin from '../../../lib/plugins/plugin.js'
 import configManager from '../lib/config.js'
 import { askLLM } from '../lib/llm.js'
+import type { YunzaiEvent } from '../types/index.js'
 
-export class LLMChat extends plugin {
+// 运行时兼容：若 global.plugin 存在则继承，否则使用空基类（供测试/编译）
+const BasePlugin = (typeof plugin !== 'undefined' ? plugin : class {
+  e!: YunzaiEvent
+  constructor(public init: any) {}
+  reply(msg: any, quote?: boolean, data?: any) {
+    return this.e?.reply(msg, quote, data)
+  }
+}) as any
+
+export class LLMChat extends BasePlugin {
   constructor() {
     super({
       name: 'LLM智能对话',
@@ -25,7 +34,8 @@ export class LLMChat extends plugin {
   /**
    * 通过 #chat 或 #ai 指令触发
    */
-  async onChatCommand(e) {
+  async onChatCommand(): Promise<boolean> {
+    const e = this.e as YunzaiEvent
     const rawMsg = (e.msg || '').trim()
     const match = rawMsg.match(/^#?(chat|ai)\s*([\s\S]*)$/i)
     if (!match) return false
@@ -42,7 +52,8 @@ export class LLMChat extends plugin {
   /**
    * 群聊中 @机器人 时自动触发
    */
-  async onAtMessage(e) {
+  async onAtMessage(): Promise<boolean> {
+    const e = this.e as YunzaiEvent
     const cfg = configManager.get()
     if (!cfg.atReply) return false
 
@@ -67,7 +78,7 @@ export class LLMChat extends plugin {
   /**
    * 请求 LLM 并回复
    */
-  async replyLLM(e, query) {
+  async replyLLM(e: YunzaiEvent, query: string): Promise<boolean> {
     const cfg = configManager.get()
     const reply = await askLLM(e, query)
     await e.reply(reply, cfg.replyQuote)

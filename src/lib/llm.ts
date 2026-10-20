@@ -1,7 +1,8 @@
 import configManager from './config.js'
 import memoryManager from './memory.js'
+import type { ChatMessage, YunzaiEvent } from '../types/index.js'
 
-export async function askLLM(e, query) {
+export async function askLLM(e: YunzaiEvent, query: string): Promise<string> {
   const cfg = configManager.get()
 
   if (!cfg.apiKey || cfg.apiKey.includes('your-api-key')) {
@@ -13,7 +14,7 @@ export async function askLLM(e, query) {
 
   // 构建消息数组
   const history = memoryManager.getMessages(e)
-  const messages = []
+  const messages: ChatMessage[] = []
 
   if (cfg.systemPrompt) {
     messages.push({
@@ -54,7 +55,9 @@ export async function askLLM(e, query) {
 
     if (!response.ok) {
       const errText = await response.text()
-      logger.error(`[Yunzai-LLM-Plugin] API 请求失败 [HTTP ${response.status}]: ${errText}`)
+      if (typeof logger !== 'undefined') {
+        logger.error(`[Yunzai-LLM-Plugin] API 请求失败 [HTTP ${response.status}]: ${errText}`)
+      }
       let detail = errText
       try {
         const parsed = JSON.parse(errText)
@@ -63,7 +66,7 @@ export async function askLLM(e, query) {
       return `【LLM 请求出错】HTTP ${response.status}: ${detail}`
     }
 
-    const data = await response.json()
+    const data: any = await response.json()
     const replyContent = data.choices?.[0]?.message?.content?.trim()
 
     if (!replyContent) {
@@ -75,12 +78,14 @@ export async function askLLM(e, query) {
     memoryManager.addMessage(e, 'assistant', replyContent)
 
     return replyContent
-  } catch (err) {
+  } catch (err: any) {
     clearTimeout(timer)
     if (err.name === 'AbortError') {
       return `【LLM 请求超时】请求超过了 ${cfg.timeout || 60} 秒，请检查网络连接或稍后重试。`
     }
-    logger.error(`[Yunzai-LLM-Plugin] 调用异常: ${err.message}`)
+    if (typeof logger !== 'undefined') {
+      logger.error(`[Yunzai-LLM-Plugin] 调用异常: ${err.message}`)
+    }
     return `【LLM 发生异常】${err.message}`
   }
 }
