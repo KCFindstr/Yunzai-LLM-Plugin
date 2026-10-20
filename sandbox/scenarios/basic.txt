@@ -1,0 +1,109 @@
+// 沙盒基础场景（配合 --mock 模拟 LLM 使用）：node sandbox/run.mjs --mock --script sandbox/scenarios/basic.txt
+
+// 不@ 机器人：不应回复（下一条 expect 只会匹配到之后 @ 的回复）
+g 今天天气不错
+sleep 1500
+
+// @ 普通聊天
+ga 你好呀
+expect 模拟回复.*你好呀
+
+// 只@不说话：本地随机回复，不调用模型
+ga
+expect 在呢|嗯|怎么啦|咋了|我在|？
+
+// 引用机器人消息继续聊（不@）
+gr 继续说说
+expect 模拟回复.*继续说说
+
+// 分条发送
+ga 分两条说
+expect 第一条消息
+expect 第二条消息
+
+// 太长 -> 合并转发
+ga 来段长文
+expect 合并转发
+
+// 自然语言 -> 指令（未安装游戏插件时模型会被告知没有插件能处理）
+ga 帮我查查深渊数据
+expect 帮不了|插件|深渊|uid|绑定
+
+// 主人指令不允许通过对话执行
+ga 帮我重启一下机器人
+expect 帮不了
+
+// 管理：私聊
+p #llm帮助
+expect 使用说明
+p #llm状态
+expect 模型：mock
+p #llm模型列表
+expect mock
+p #llm额度
+expect 用量|暂无
+p #llm设置 chat.groupContext 4
+expect chat.groupContext = 4
+p #llm测试指令 #深渊
+expect 处理|插件
+
+// 表情包：私聊发图片添加 -> 模拟视觉模型命名 -> 群里触发发送
+pi red #llm添加表情
+expect 测试表情
+pm #llm添加表情
+expect 开心|测试表情|已存在
+p #llm表情列表
+expect 测试表情
+ga 发个表情看看
+expect 表情包
+
+// 导入机器人收藏表情（NapCat fetch_custom_face）
+p #llm导入收藏表情 4
+expect 获取到
+expect 新增
+
+// 只有明确的指令才添加：不带图片 -> 提示；之后单独发的图片只会被当作聊天，不会被添加
+p #llm添加表情
+expect 没有找到图片
+pi blue
+expect 模拟回复
+// 引用（回复）一条图片消息来添加
+pi yellow
+expect 模拟回复
+pr #llm添加表情
+expect 测试表情|已存在
+// 非管理员不能添加
+gu red #llm添加表情
+expect 只有管理员
+
+// 图片输入
+gi green 这是什么
+expect 模拟回复.*这是什么
+
+// 群里不能设置密钥
+ma #llm设置密钥 mock sk-test
+expect 私聊
+
+// 普通用户私聊默认不回复；主人私聊会回复
+pu 你好
+sleep 1500
+p 你好
+expect 模拟回复.*你好
+
+// 长期记忆：模型调用 memory 工具 -> 之后的对话前缀里带上记忆 -> 用户可查看 / 让机器人忘记
+ga 记住我最喜欢胡桃
+expect 记住啦
+ga 你记得我什么
+expect 我记得.*最喜欢胡桃
+ga #llm记忆
+expect 关于你的长期记忆
+ga #llm忘记我
+expect 已删除|没有记着
+// Yunzai drops identical text from the same user within 1s
+sleep 1200
+ga 你记得我什么
+expect 还不了解你
+
+// 清除记忆
+ga #llm清除记忆
+expect 忘掉|还没聊过

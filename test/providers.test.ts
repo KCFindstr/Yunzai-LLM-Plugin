@@ -1,0 +1,245 @@
+import { mockServer } from './helpers.ts'
+import assert from 'node:assert/strict'
+import { after, describe, it } from 'node:test'
+import { chat } from '../src/llm/index.ts'
+import type { ChatParams, Msg } from '../src/llm/types.ts'
+import type { ModelConfig, ProviderConfig } from '../src/core/configTypes.ts'
+
+const tools = [{ name: 'get_weather', description: 'weather', parameters: { type: 'object', properties: { city: { type: 'string' } } } }]
+
+function params(provider: ProviderConfig, model: Partial<ModelConfig>, messages: Msg[], extra: Partial<ChatParams> = {}): ChatParams {
+  return {
+    provider: { maxRetries: 0, ...provider },
+    model: { id: 'm', provider: 'p', model: 'test-model', ...model } as ModelConfig,
+    system: 'SYS',
+    messages,
+    tools,
+    thinking: 'low',
+    maxTokens: 512,
+    temperature: null,
+    ...extra,
+  }
+}
+
+const userMsg: Msg = { role: 'user', content: [{ type: 'text', text: '天气如何' }, { type: 'image', data: 'AAAA', mime: 'image/png' }] }
+
+describe('openai chat completions', () => {
+  it('builds request, parses tool calls, usage and cost', async () => {
+    const srv = await mockServer(() => [
+      200,
+      {
+        choices: [
+          {
+            finish_reason: 'tool_calls',
+            message: {
+              role: 'assistant',
+              content: null,
+              reasoning_content: 'thinking...',
+              tool_calls: [{ id: 'c1', type: 'function', function: { name: 'get_weather', arguments: '{"city":"上海"}' } }],
+            },
+          },
+        ],
+        usage: { prompt_tokens: 1000, completion_tokens: 50, prompt_tokens_details: { cached_tokens: 800 }, cost: 0.0012 },
+      },
+    ])
+    after(srv.close)
+    const res = await chat(params({ type: 'openai', baseUrl: `${srv.url}/v1`, apiKey: 'k1' }, {}, [userMsg]))
+    const req = srv.requests[0]
+    assert.equal(req.url, '/v1/chat/completions')
+    assert.equal(req.headers.authorization, 'Bearer k1')
+    assert.equal(req.body.messages[0].role, 'system')
+    assert.equal(req.body.messages[1].content[1].type, 'image_url')
+    assert.match(req.body.messages[1].content[1].image_url.url, /^data:image\/png;base64,AAAA/)
+    assert.equal(req.body.max_tokens, 512, 'compat servers get max_tokens')
+    assert.equal(req.body.reasoning_effort, 'low')
+    assert.equal(req.body.tools[0].function.name, 'get_weather')
+    assert.equal(req.body.prompt_cache_key, undefined, 'only sent to api.openai.com by default')
+    assert.deepEqual(res.toolCalls, [{ id: 'c1', name: 'get_weather', args: { city: '上海' } }])
+    assert.equal(res.usage.cacheRead, 800)
+    assert.equal(res.usage.input, 200)
+    assert.equal(res.usage.cost, 0.0012)
+    assert.equal(res.native?.data.reasoning_content, 'thinking...', 'reasoning_content kept for replay')
+  })
+
+  it('replays native assistant + tool results and strips <think>', async () => {
+    const srv = await mockServer(() => [200, { choices: [{ message: { content: '<think>hmm</think>晴天' }, finish_reason: 'stop' }], usage: {} }])
+    after(srv.close)
+    const native = { provider: 'openai' as const, model: 'test-model', data: { role: 'assistant', content: null, reasoning_content: 'r', tool_calls: [{ id: 'c1', type: 'function', function: { name: 'get_weather', arguments: '{}' } }] } }
+    const msgs: Msg[] = [
+      userMsg,
+      { role: 'assistant', content: '', toolCalls: [{ id: 'c1', name: 'get_weather', args: {} }], native },
+      { role: 'tool', results: [{ id: 'c1', name: 'get_weather', content: '晴' }] },
+    ]
+    const res = await chat(params({ type: 'openai', baseUrl: srv.url, apiKey: 'k' }, { vision: false }, msgs))
+    const body = srv.requests[0].body
+    assert.equal(body.messages[1].content[1].text, '[图片]', 'images dropped for non-vision models')
+    assert.equal(body.messages[2].reasoning_content, 'r')
+    assert.deepEqual(body.messages[3], { role: 'tool', tool_call_id: 'c1', content: '晴' })
+    assert.equal(res.text, '晴天')
+  })
+
+  it('rotates keys on 401 and retries 429', async () => {
+    const srv = await mockServer((req, n) =>
+      n === 1 ? [401, { error: { message: 'bad key' } }] : n === 2 ? [429, { error: { message: 'slow down' } }] : [200, { choices: [{ message: { content: 'ok' } }] }],
+    )
+    after(srv.close)
+    const res = await chat(params({ type: 'openai', baseUrl: srv.url, apiKey: ['bad', 'good'], maxRetries: 2 }, {}, [userMsg]))
+    assert.equal(res.text, 'ok')
+    assert.equal(srv.requests[0].headers.authorization, 'Bearer bad')
+    assert.equal(srv.requests[1].headers.authorization, 'Bearer good')
+  })
+})
+
+describe('anthropic messages', () => {
+  it('sets cache breakpoints, adaptive thinking and parses usage', async () => {
+    const srv = await mockServer(() => [
+      200,
+      {
+        content: [
+          { type: 'thinking', thinking: '', signature: 'sig' },
+          { type: 'text', text: '我查一下' },
+          { type: 'tool_use', id: 'tu1', name: 'get_weather', input: { city: '北京' } },
+        ],
+        stop_reason: 'tool_use',
+        usage: {
+          input_tokens: 10,
+          output_tokens: 20,
+          cache_read_input_tokens: 3000,
+          cache_creation_input_tokens: 500,
+          cache_creation: { ephemeral_5m_input_tokens: 500, ephemeral_1h_input_tokens: 0 },
+          server_tool_use: { web_search_requests: 1 },
+        },
+      },
+    ])
+    after(srv.close)
+    const res = await chat(params({ type: 'anthropic', baseUrl: srv.url, apiKey: 'ak' }, { model: 'claude-sonnet-5-5' }, [userMsg], { nativeSearch: true }))
+    const req = srv.requests[0]
+    assert.equal(req.url, '/v1/messages')
+    assert.equal(req.headers['x-api-key'], 'ak')
+    assert.equal(req.headers['anthropic-version'], '2023-06-01')
+    assert.deepEqual(req.body.system[0].cache_control, { type: 'ephemeral' })
+    const lastBlock = req.body.messages.at(-1).content.at(-1)
+    assert.deepEqual(lastBlock.cache_control, { type: 'ephemeral' }, 'breakpoint on last user block')
+    assert.equal(req.body.messages[0].content[1].source.type, 'base64')
+    assert.deepEqual(req.body.thinking, { type: 'adaptive' })
+    assert.deepEqual(req.body.output_config, { effort: 'low' })
+    assert.equal(req.body.temperature, undefined)
+    assert.equal(req.body.tools.at(-1).type, 'web_search_20260209')
+    assert.equal(req.body.tools[0].input_schema.type, 'object')
+    assert.equal(res.text, '我查一下')
+    assert.deepEqual(res.toolCalls, [{ id: 'tu1', name: 'get_weather', args: { city: '北京' } }])
+    assert.deepEqual(
+      { input: res.usage.input, cacheRead: res.usage.cacheRead, cacheWrite: res.usage.cacheWrite, search: res.usage.webSearches },
+      { input: 10, cacheRead: 3000, cacheWrite: 500, search: 1 },
+    )
+  })
+
+  it('replays native blocks (with signatures) and merges tool results into a user turn', async () => {
+    const srv = await mockServer(() => [200, { content: [{ type: 'text', text: '北京晴' }], stop_reason: 'end_turn', usage: {} }])
+    after(srv.close)
+    const native = { provider: 'anthropic' as const, model: 'claude-x', data: [{ type: 'thinking', thinking: '', signature: 'sig' }, { type: 'tool_use', id: 'tu1', name: 'get_weather', input: {} }] }
+    const msgs: Msg[] = [
+      userMsg,
+      { role: 'assistant', content: '', toolCalls: [{ id: 'tu1', name: 'get_weather', args: {} }], native },
+      { role: 'tool', results: [{ id: 'tu1', name: 'get_weather', content: '晴' }] },
+    ]
+    await chat(params({ type: 'anthropic', baseUrl: `${srv.url}/v1`, apiKey: 'ak', authStyle: 'bearer', cacheTtl: '1h' }, { model: 'claude-x' }, msgs, { thinking: 'off' }))
+    const req = srv.requests[0]
+    assert.equal(req.url, '/v1/messages')
+    assert.equal(req.headers.authorization, 'Bearer ak')
+    assert.equal(req.body.messages[1].content[0].signature, 'sig')
+    assert.equal(req.body.messages[2].content[0].type, 'tool_result')
+    assert.deepEqual(req.body.messages[2].content[0].cache_control, { type: 'ephemeral', ttl: '1h' })
+    assert.equal(req.body.thinking, undefined)
+  })
+})
+
+describe('openai responses', () => {
+  it('maps input items and output items', async () => {
+    const srv = await mockServer(() => [
+      200,
+      {
+        id: 'resp_1',
+        status: 'completed',
+        output: [
+          { type: 'reasoning', id: 'rs_1', summary: [] },
+          { type: 'web_search_call', id: 'ws_1', status: 'completed' },
+          { type: 'function_call', call_id: 'fc1', name: 'get_weather', arguments: '{"city":"杭州"}' },
+          { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: '好的' }] },
+        ],
+        usage: { input_tokens: 2000, input_tokens_details: { cached_tokens: 1500 }, output_tokens: 80, output_tokens_details: { reasoning_tokens: 40 } },
+      },
+    ])
+    after(srv.close)
+    const res = await chat(params({ type: 'openai-responses', baseUrl: srv.url, apiKey: 'k' }, {}, [userMsg], { nativeSearch: true, cacheKey: 'ck' }))
+    const b = srv.requests[0].body
+    assert.equal(srv.requests[0].url, '/responses')
+    assert.equal(b.instructions, 'SYS')
+    assert.equal(b.input[0].content[0].type, 'input_text')
+    assert.equal(b.input[0].content[1].type, 'input_image')
+    assert.equal(b.store, false)
+    assert.deepEqual(b.include, ['reasoning.encrypted_content'])
+    assert.deepEqual(b.reasoning, { effort: 'low' })
+    assert.ok(b.tools.some((t: any) => t.type === 'web_search'))
+    assert.equal(b.tools[0].name, 'get_weather')
+    assert.equal(res.text, '好的')
+    assert.deepEqual(res.toolCalls[0], { id: 'fc1', name: 'get_weather', args: { city: '杭州' } })
+    assert.equal(res.usage.webSearches, 1)
+    assert.equal(res.usage.input, 500)
+    assert.equal(res.responseId, undefined, 'no server state when store=false')
+  })
+})
+
+describe('gemini interactions', () => {
+  it('sends steps, parses function_call and usage', async () => {
+    const srv = await mockServer(() => [
+      200,
+      {
+        id: 'int_1',
+        status: 'requires_action',
+        steps: [
+          { type: 'thought', signature: 'c2ln' },
+          { type: 'function_call', id: 'g1', name: 'get_weather', arguments: { city: '广州' } },
+        ],
+        usage: { total_input_tokens: 1200, total_cached_tokens: 1000, total_output_tokens: 30, total_thought_tokens: 70, total_tool_use_tokens: 0 },
+      },
+    ])
+    after(srv.close)
+    const res = await chat(params({ type: 'gemini', baseUrl: srv.url, apiKey: 'gk' }, {}, [userMsg]))
+    const req = srv.requests[0]
+    assert.equal(req.url, '/v1beta/interactions')
+    assert.equal(req.headers['x-goog-api-key'], 'gk')
+    assert.equal(req.body.system_instruction, 'SYS')
+    assert.equal(req.body.input[0].type, 'user_input')
+    assert.deepEqual(req.body.input[0].content[1], { type: 'image', data: 'AAAA', mime_type: 'image/png' })
+    assert.equal(req.body.generation_config.thinking_level, 'low')
+    assert.equal(req.body.tools[0].type, 'function')
+    assert.equal(req.body.store, true)
+    assert.deepEqual(res.toolCalls, [{ id: 'g1', name: 'get_weather', args: { city: '广州' } }])
+    assert.equal(res.usage.input, 200)
+    assert.equal(res.usage.cacheRead, 1000)
+    assert.equal(res.usage.output, 100)
+    assert.equal(res.responseId, 'int_1')
+  })
+
+  it('with server state only sends new steps + previous_interaction_id', async () => {
+    const srv = await mockServer(() => [200, { id: 'int_2', status: 'completed', steps: [{ type: 'model_output', content: [{ type: 'text', text: '广州多云' }] }], usage: {} }])
+    after(srv.close)
+    const msgs: Msg[] = [
+      userMsg,
+      { role: 'assistant', content: '', toolCalls: [{ id: 'g1', name: 'get_weather', args: {} }] },
+      { role: 'tool', results: [{ id: 'g1', name: 'get_weather', content: '多云' }] },
+    ]
+    const res = await chat(params({ type: 'gemini', baseUrl: srv.url, apiKey: 'gk' }, {}, msgs, { state: { previousId: 'int_1', skip: 2 } }))
+    const b = srv.requests[0].body
+    assert.equal(b.previous_interaction_id, 'int_1')
+    assert.deepEqual(b.input, [{ type: 'function_result', call_id: 'g1', name: 'get_weather', result: '多云' }])
+    assert.equal(res.text, '广州多云')
+  })
+
+  it('throws on failed interactions', async () => {
+    const srv = await mockServer(() => [200, { id: 'x', status: 'failed', errors: [{ code: 'safety', message: 'blocked' }] }])
+    after(srv.close)
+    await assert.rejects(chat(params({ type: 'gemini', baseUrl: srv.url, apiKey: 'gk' }, {}, [userMsg])), /blocked/)
+  })
+})

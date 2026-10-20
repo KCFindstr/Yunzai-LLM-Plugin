@@ -1,0 +1,12 @@
+# 复制为 sandbox/config.yaml（git 忽略）后，`node sandbox/run.mjs` 会用真实模型。
+# 格式与插件 config.yaml 相同，只需写要覆盖的部分。
+providers:
+  anthropic:
+    apiKey: sk-ant-xxxx
+defaultModel: haiku
+fallbackModels: []
+
+# 沙盒里消息发得快，放宽频率限制方便测试
+reply:
+  groupRate: { count: 30, perSeconds: 60 }
+trigger: { userCooldown: 0 }

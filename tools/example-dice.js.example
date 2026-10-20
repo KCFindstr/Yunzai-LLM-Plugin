@@ -1,0 +1,13 @@
+// 示例自定义工具：去掉 .example 后缀后发送 #llm重载 启用
+export default {
+  name: 'roll_dice',
+  description: '掷骰子，返回 1~N 的随机整数。用户要求掷骰子、抽签、随机数时使用。',
+  parameters: {
+    type: 'object',
+    properties: { sides: { type: 'integer', description: '骰子面数，默认 6' } },
+  },
+  async run(args) {
+    const n = Math.max(2, Math.min(1000, Number(args.sides) || 6))
+    return `掷出了 ${1 + Math.floor(Math.random() * n)}（${n} 面骰）`
+  },
+}

@@ -1,123 +1,77 @@
-# Yunzai-LLM-Plugin (TypeScript)
+# Yunzai-LLM-Plugin
 
-适用于 **Yunzai-Bot** (支持 Miao-Yunzai 与 TRSS-Yunzai) 的 **LLM (Large Language Model) 智能对话插件**，采用 **TypeScript + tsup** 构建。
+TRSS-Yunzai / Miao-Yunzai 的大模型对话插件。只在被 **@** 时说话，不抢占任何已有指令。
 
-支持接入任何兼容 **OpenAI 格式** 的大模型 API（如 **OpenAI / DeepSeek / 通义千问 / 月之暗面 Kimi / Claude / Ollama 本地模型** 等），支持多轮上下文会话记忆、人设提示词配置与群聊/私聊隔离。
+## 功能
 
----
+- **多协议**：OpenAI Chat Completions 兼容接口（DeepSeek、通义、Kimi、智谱、OpenRouter、Ollama…）、OpenAI Responses API、Anthropic Messages API（及兼容接口）、Gemini Interactions API。
+- **按实际花费的额度控制**：每个模型可设置「5 小时滚动额度」和「每周额度」（美元），按人 / 按群 / 全局三种范围；用量按接口返回的真实 token（含缓存命中、缓存写入、思考、联网搜索）× 价格计算。价格自动从 LiteLLM / OpenRouter 价格表获取（Claude 内置官方价），也可手动设置；OpenRouter 直接使用返回的实际费用。额度用完自动切换备用模型。
+- **自然语言转指令**：`@机器人 帮我查查深渊数据` 等同于发送 `#深渊`。插件在运行时扫描已安装插件的指令规则和帮助菜单，并用内置的原神 / 星铁 / 绝区零常用指令表交叉验证，只把真实存在的指令提供给模型。指令以原用户身份重新分发，权限、群开关全部照旧。
+- **表情包**：管理员发图片即可添加，视觉模型自动识别命名；聊天时模型偶尔（有概率和冷却控制）发一个合适的表情，以 QQ 表情形式发送。支持商城表情（mface）和导入机器人收藏表情（NapCat）。
+- **工具 / 技能**：联网搜索（模型自带搜索或 Tavily / Brave / SearXNG / Jina）、网页读取（防内网访问）、自定义 JS 工具、HTTP 工具、`skills/*/SKILL.md` 技能（按需加载，省 token）。
+- **降低风控**：只在被呼叫时回复；模拟打字延迟；一次最多 N 条消息；群/全局发送频率上限；有人插话才引用；长文合并转发；去除 Markdown；错误和额度提示有冷却。
+- **省 token**：稳定的系统提示（时间等动态信息放在用户消息里）以命中缓存；Anthropic 显式缓存断点、OpenAI `prompt_cache_key`、Gemini 服务端会话；历史按块截断（而不是每轮滑动）以保持缓存前缀；旧历史压缩成摘要；工具调用过程不写入长期记忆；执行指令后不再额外调用模型。
+- **私聊管理**：主人/插件管理员私聊发送 `#llm帮助` 查看全部管理指令，模型、Key、额度、人设、表情、工具都能用指令配置。
 
-## 🌟 功能特性
-
-- 🔷 **TypeScript 全栈开发**：具备完整的静态类型声明与 IDE 智能补全，开箱即用。
-- ⚡ **极致构建体验**：基于 `tsup` (esbuild) 构建，秒级增量编译，配合 `pnpm dev` 监听热更。
-- 🚀 **极简大模型接入**：支持标准 OpenAI 接口规范，兼容市场上绝大部分主流商业模型与本地开源模型。
-- 🧠 **多轮上下文记忆**：自动维持与用户的多轮对话上下文，支持超时自动过期与群内独立记忆隔离。
-- 🎭 **人设与提示词自定义**：支持设置个性化 System Prompt，随时切换 Bot 性格与角色设定。
-- 🔧 **丰富的管理命令**：支持在线切换模型、清空上下文记忆、查看当前配置状态等。
-
----
-
-## 📁 源码目录结构
-
-```text
-Yunzai-LLM-Plugin/
-├── src/                      # TypeScript 源代码
-│   ├── apps/
-│   │   ├── chat.ts           # 核心对话逻辑 (#chat, #ai, @机器人)
-│   │   └── manage.ts         # 插件管理指令 (#llm状态, #llm切换模型, #清除记忆)
-│   ├── lib/
-│   │   ├── config.ts         # 配置加载与热重载
-│   │   ├── memory.ts         # 会话上下文记忆池
-│   │   └── llm.ts            # 大模型 API 请求客户端
-│   ├── types/
-│   │   ├── index.ts          # 插件与 Yunzai 事件类型定义
-│   │   └── plugin.ts         # 插件基类辅助声明
-│   └── index.ts              # 插件入口导出
-├── dist/                     # 编译生成产物 (由 tsup 构建)
-├── config/
-│   ├── default_config.yaml   # 默认配置模板
-│   └── config.yaml           # 本地生效配置 (git 忽略)
-├── index.js                  # Yunzai 框架加载入口 (指向 dist/index.js)
-├── tsconfig.json             # TypeScript 配置
-├── tsup.config.ts            # 构建配置
-└── package.json
-```
-
----
-
-## 💻 开发者命令
-
-在 `D:\Software\Yunzai-LLM-Plugin` 目录下执行：
+## 安装
 
 ```bash
-# 启动实时监听构建 (代码保存后瞬间自动编译，Yunzai 自动热载入)
-pnpm dev
-
-# 执行生产打包
-pnpm build
-
-# 执行严格 TypeScript 类型检查
-pnpm type-check
+cd plugins
+git clone <本仓库地址> Yunzai-LLM-Plugin
+cd ..
+pnpm install
 ```
 
----
+仓库内已包含构建好的 `dist/`，无需额外构建。重启 Yunzai 后私聊机器人：
 
-## ⚙️ 配置文件说明
+```
+#llm设置密钥 anthropic sk-ant-xxxx
+#llm切换模型 sonnet     （默认提供的模型：sonnet / haiku / gpt / luna / flash / flash-lite / deepseek）
+#llm测试模型
+```
 
-编辑 `plugins/Yunzai-LLM-Plugin/config/config.yaml`：
+也可以在服务器上用命令行配置工具：方向键选择，枚举项单选、多值项勾选；只能填写有效的配置项（包括文件里还没有的），每次修改都会校验；修改后机器人自动热重载：
+
+```bash
+node plugins/Yunzai-LLM-Plugin/cli/config.mjs                          # 交互式：浏览全部配置项、搜索、添加提供商/模型
+node plugins/Yunzai-LLM-Plugin/cli/config.mjs list reply               # 列出某一节
+node plugins/Yunzai-LLM-Plugin/cli/config.mjs describe chat.groupContext
+node plugins/Yunzai-LLM-Plugin/cli/config.mjs set providers.deepseek.apiKey sk-xxxx
+node plugins/Yunzai-LLM-Plugin/cli/config.mjs unset reply.maxBubbles   # 恢复默认
+node plugins/Yunzai-LLM-Plugin/cli/config.mjs check
+```
+
+或者直接编辑 `config/config.yaml`（只写要覆盖的项，完整选项见 `config/default_config.yaml`，修改后自动热重载）：
 
 ```yaml
-# API 基础地址 (支持 OpenAI、DeepSeek、Ollama 等)
-apiUrl: "https://api.deepseek.com/v1"
-
-# API 密钥 (Bearer Token)
-apiKey: "sk-your-actual-api-key"
-
-# 默认模型名称
-model: "deepseek-chat"
-
-# 系统提示词 (人设)
-systemPrompt: "你是一个友好、幽默且富有智慧的 QQ 聊天助手..."
-
-# 上下文记忆保留轮数
-historyLimit: 10
-
-# 上下文记忆有效时间 (单位：分钟)
-historyTimeout: 30
-
-# 是否在群聊中单独隔离每位群员的记忆
-isolateUserInGroup: true
+providers:
+  deepseek:
+    type: openai
+    baseUrl: https://api.deepseek.com
+    apiKey: sk-xxxx
+defaultModel: deepseek
 ```
 
----
-
-## 📖 常用指令
+## 常用指令
 
 | 指令 | 说明 | 权限 |
-| :--- | :--- | :--- |
-| `#chat <问题>` 或 `#ai <问题>` | 与 AI 进行对话 | 全部用户 |
-| `@机器人 <问题>` | 在群聊中艾特机器人直接提问 | 全部用户 |
-| `#清除记忆` 或 `#chat reset` | 清除当前会话的上下文记忆 | 全部用户 |
-| `#llm状态` 或 `#llm help` | 查看插件状态与帮助指南 | 全部用户 |
-| `#llm切换模型 <模型名>` | 在线切换模型 (如 `deepseek-chat`) | 主人权限 |
-| `#llm设置提示词 <人设内容>` | 在线更新系统提示词 | 主人权限 |
+| --- | --- | --- |
+| `@机器人 内容` / 引用机器人消息 | 对话 | 所有人 |
+| `#llm帮助` | 帮助菜单（管理员可见全部管理指令） | 所有人 |
+| `#llm状态` / `#llm额度` / `#llm清除记忆` | 状态、个人用量、清空记忆 | 所有人 |
+| `#llm模型列表` / `#llm切换模型 <id>` | 模型管理 | 管理员 |
+| `#llm额度设置 sonnet user 5h=1 week=2` | 每人每 5 小时 $1、每周 $2 | 管理员 |
+| `#llm设置 <路径> <值>` | 修改任意配置 | 管理员 |
+| `#llm添加表情`（附图，或引用一条图片消息） | 添加表情包；只添加这条/被引用消息里的图片 | 管理员 |
+| `#llm指令列表` / `#llm测试指令 #深渊` | 查看可被自然语言调用的指令 | 管理员 |
 
----
+## 开发
 
-## 🔌 WebSocket 连接方式（对接朋友的云崽或 OneBot 协议端）
-
-### 模式 A：正向 WebSocket 连接（主动连接朋友暴露的 WS 服务）
-编辑 `plugins/ws-plugin/config/config/ws-config.yaml`：
-```yaml
-servers:
-  - name: frenqy_bot
-    address: ws://frenqy.rabimimi.com:8082
-    type: 2
-    reconnectInterval: 5
-    maxReconnectAttempts: 0
-    accessToken: "iIj7<GK%_4}Nspkt"
+```bash
+pnpm build        # tsup -> dist/index.js（提交前务必构建）
+pnpm type-check
+pnpm test         # node:test，全部使用本地模拟服务器，不会调用真实 API
+pnpm sandbox      # 本地沙盒：真实 Yunzai + 模拟 NapCat，见 sandbox/README.md
 ```
 
-### 模式 B：反向 WebSocket 连接（朋友的协议端主动连接你的机器）
-- 本地监听地址：`ws://localhost:2536/OneBotv11`
-- 将此端口通过内网穿透（FRP / Tailscale / cpolar 等）暴露给朋友配置为反向客户端。
+实现细节与交接说明见 [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md)。

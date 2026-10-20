@@ -1,22 +1,27 @@
 {
   "name": "yunzai-llm-plugin",
-  "version": "1.0.0",
-  "description": "Yunzai-Bot LLM (Large Language Model) 智能对话插件 (TypeScript 版)",
+  "version": "2.0.0",
+  "description": "Yunzai-Bot LLM 智能对话插件：多协议(OpenAI/Anthropic/Gemini)、额度控制、表情包、工具调用、自然语言转指令",
   "main": "index.js",
   "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
-    "type-check": "tsc --noEmit"
+    "type-check": "tsc --noEmit",
+    "test": "node --test --test-concurrency=1 test/",
+    "sandbox": "node sandbox/run.mjs",
+    "config": "node cli/config.mjs"
   },
   "keywords": [
     "yunzai",
     "yunzai-bot",
     "llm",
-    "typescript",
     "openai",
-    "deepseek",
-    "chatgpt",
+    "anthropic",
+    "gemini",
     "plugin"
   ],
   "author": "",
@@ -27,6 +32,7 @@
     "typescript": "^5.9.3"
   },
   "dependencies": {
+    "@inquirer/prompts": "^8.7.3",
     "yaml": "^2.7.0"
   }
 }

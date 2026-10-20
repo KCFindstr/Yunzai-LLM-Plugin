@@ -1,56 +1,323 @@
-# Yunzai-LLM-Plugin 配置文件
+# ==========================================================================
+#  Yunzai-LLM-Plugin 默认配置（请勿直接修改本文件）
+#  需要修改的项写到同目录的 config.yaml 里（只写要覆盖的部分即可），
+#  或者私聊机器人用指令修改：#llm帮助 查看全部指令。
+#  config.yaml 修改后自动热重载。
+# ==========================================================================
 
-# ----------------- LLM API 服务配置 -----------------
-# API 基础地址 (支持任何兼容 OpenAI 格式的接口，如 OpenAI、DeepSeek、OneAPI、Ollama、Moonshot 等)
-# 常用地址示例:
-#   OpenAI:       https://api.openai.com/v1
-#   DeepSeek:     https://api.deepseek.com/v1
-#   Ollama(本地):  http://127.0.0.1:11434/v1
-#   Moonshot(Kimi): https://api.moonshot.cn/v1
-#   通义千问:     https://dashscope.aliyuncs.com/compatible-mode/v1
-apiUrl: "https://api.deepseek.com/v1"
+# 总开关
+enable: true
 
-# API 密钥 (Bearer Token)
-apiKey: "sk-your-api-key-here"
+# 插件管理员 QQ（Yunzai 主人默认就是管理员，这里可以额外添加）
+admins: []
 
-# 默认使用的模型名称
-# 例如: deepseek-chat, gpt-4o-mini, gpt-4o, claude-3-5-sonnet, qwen-plus, llama3
-model: "deepseek-chat"
+# --------------------------------------------------------------------------
+# 提供商：type 可选
+#   openai            OpenAI Chat Completions 兼容接口（DeepSeek/通义/Kimi/智谱/OpenRouter/Ollama 等绝大多数）
+#   openai-responses  OpenAI Responses API（/v1/responses）
+#   anthropic         Anthropic Messages API 及兼容接口（/v1/messages）
+#   gemini            Gemini Interactions API（/v1beta/interactions）
+# apiKey 可以是字符串或列表（多个 Key 自动轮换）；写成 env:变量名 则从环境变量读取。
+# 建议私聊机器人发送 #llm设置密钥 <提供商> <Key> 设置，不要在群里发 Key。
+# --------------------------------------------------------------------------
+providers:
+  anthropic:
+    type: anthropic
+    baseUrl: https://api.anthropic.com
+    apiKey: ''
+    # 缓存时长 5m / 1h（1h 写入价格为 2 倍，适合聊天间隔较长的群）
+    cacheTtl: 5m
+  openai:
+    type: openai-responses
+    baseUrl: https://api.openai.com/v1
+    apiKey: ''
+  gemini:
+    type: gemini
+    baseUrl: https://generativelanguage.googleapis.com
+    apiKey: ''
+    # 使用服务端会话状态(previous_interaction_id)，减少重复上传历史
+    serverState: true
+  deepseek:
+    type: openai
+    baseUrl: https://api.deepseek.com
+    apiKey: ''
+    balance: deepseek
 
-# 系统预设提示词 (System Prompt / 人设设定)
-systemPrompt: "你是一个友好、幽默且富有智慧的 QQ 聊天助手。请用自然、亲切的中文与用户交流，回答要精炼准确，排版清晰。"
+# --------------------------------------------------------------------------
+# 模型列表。id 是在指令里使用的别名。
+#   thinking:  off / minimal / low / medium / high / xhigh / max（不写则用 chat.thinking）
+#   vision:    是否支持图片输入（默认 true）
+#   nativeSearch: 联网搜索设为 native 时，是否使用该模型自带的搜索（默认 true）
+#   pricing:   auto（自动从价格表获取）或 {input, output, cacheRead, cacheWrite} 单位：美元/百万token
+#   pricingId: 价格表里的模型名（与 model 不同时填写）
+#   quota:     额度（美元，滚动窗口）。简写 {window5h, weekly} 作用于 quota.defaultScope；
+#              也可分别设置 {user: {...}, group: {...}, global: {...}}，0 或不写表示不限
+#   extraBody: 原样合并进请求体的额外参数（用于各家特有参数）
+# --------------------------------------------------------------------------
+# 模型名均为各家官方 API 的模型 ID（2026-10 核对）；价格自动从价格表获取。
+models:
+  # Anthropic：claude-sonnet-5-5（$2/$10）、claude-haiku-5-5（$0.1/$0.5），另有 claude-opus-5-5
+  - id: sonnet
+    provider: anthropic
+    model: claude-sonnet-5-5
+    thinking: low
+    quota:
+      user: { window5h: 1, weekly: 2 }
+  - id: haiku
+    provider: anthropic
+    model: claude-haiku-5-5
+    thinking: low
+  # OpenAI：gpt-6.1-sol（$2/$10）、gpt-6-luna（$0.1/$0.5），另有 gpt-6-astra
+  - id: gpt
+    provider: openai
+    model: gpt-6.1-sol
+    thinking: low
+    quota:
+      user: { window5h: 1, weekly: 2 }
+  - id: luna
+    provider: openai
+    model: gpt-6-luna
+    thinking: low
+  # Gemini：gemini-3.8-flash（$0.75/$3.75）、gemini-3.5-flash-lite（$0.3/$2.5）
+  - id: flash
+    provider: gemini
+    model: gemini-3.8-flash
+    thinking: low
+  - id: flash-lite
+    provider: gemini
+    model: gemini-3.5-flash-lite
+    thinking: minimal
+  # DeepSeek：deepseek-flash（便宜，分峰谷计价，按高峰价统计）、deepseek-v4-pro
+  - id: deepseek
+    provider: deepseek
+    model: deepseek-flash
+    thinking: 'off'
+    vision: false
 
-# 生成温度 (0.0 ~ 2.0，数值越高越富有创造力，数值越低回答越严谨)
-temperature: 0.7
+# 默认模型 id。留空 = 自动选择第一个配置了 Key 的模型
+defaultModel: ''
+# 默认模型额度用完/不可用时依次尝试的模型
+fallbackModels: [haiku, flash, deepseek]
+# 后台任务（对话摘要、表情识别）使用的便宜模型；留空 = 默认模型
+utilityModel: ''
+# 默认模型不支持图片时用于识图的模型（表情识别也会优先用它）
+visionModel: ''
 
-# 最大输出 Token 数
-maxTokens: 2048
+# --------------------------------------------------------------------------
+# 人设。{botName} 会被替换为机器人昵称（persona.botName 留空则用 QQ 昵称）
+# --------------------------------------------------------------------------
+persona:
+  botName: ''
+  active: default
+  presets:
+    default: |
+      你是「{botName}」，平时混在QQ群里的一个普通群友。性格开朗随和，有点小幽默，懂游戏（尤其是原神、崩坏：星穹铁道、绝区零）和动漫，也乐意帮大家查资料、解答问题。
+      说话像真人：口语化、简洁，偶尔用点网络用语，但不刻意卖萌；不会每句话都加表情或语气词。
+      别人请你帮忙时认真靠谱；开玩笑时也能接梗。被问到身份时可以坦然说自己是群里的AI助手。
 
-# 请求超时时间 (单位：秒)
-timeout: 60
+# --------------------------------------------------------------------------
+# 分群设置：键为群号，可覆盖 enable / model / persona / thinking / chat / reply / sticker / tools
+# 例：
+# groups:
+#   '123456789':
+#     enable: false
+#   '987654321':
+#     model: haiku
+#     persona: default
+#     sticker: { probability: 0.3 }
+# --------------------------------------------------------------------------
+groups: {}
 
-# ----------------- 触发与交互设置 -----------------
-# 触发前缀列表 (发送这些前缀 + 内容即可触发 AI 回答)
-prefix:
-  - "#chat"
-  - "#ai"
-  - "chat"
-  - "ai"
+# --------------------------------------------------------------------------
+# 触发方式：只有被明确呼叫时才会回复，永不主动发言
+# --------------------------------------------------------------------------
+trigger:
+  # 群里 @机器人
+  at: true
+  # 引用(回复)机器人的消息
+  replyToBot: true
+  # Yunzai 的 botAlias 前缀（group.yaml 里配置的机器人别名）也算呼叫
+  alias: false
+  # 额外的触发前缀，例如 ['#ai']（注意不要和其它插件指令冲突）
+  prefixes: []
+  # 私聊：off 关闭 / master 仅主人和插件管理员 / all 所有人
+  private: master
+  # 只@不说话时随机回一句“在呢”之类（不消耗 token）
+  emptyAtReply: true
+  groupWhitelist: []
+  groupBlacklist: []
+  userBlacklist: []
+  # 插件优先级，务必保持最低（数字最大），这样不会抢其它插件的指令
+  priority: 99999
+  # 同一用户两次触发的最小间隔（秒），管理员不受限
+  userCooldown: 3
 
-# 是否在群聊中 @机器人 时自动触发
-atReply: true
+# --------------------------------------------------------------------------
+# 对话与上下文
+# --------------------------------------------------------------------------
+chat:
+  # user = 群里每个人独立记忆；group = 全群共享一段记忆
+  sessionScope: user
+  # 多久没聊天后清空记忆（分钟）
+  sessionTimeout: 180
+  # 记忆上限（超过后一次性丢弃较早的一半，比逐条滑动更省 token：缓存前缀保持不变）
+  historyMaxTurns: 20
+  historyMaxTokens: 6000
+  # 丢弃的历史用便宜模型压缩成摘要保留
+  summarize: true
+  # 附带的最近群聊条数（帮助理解语境；不会写入长期记忆）
+  groupContext: 6
+  groupContextMaxChars: 80
+  # 单次回复最多调用几轮工具
+  maxToolRounds: 4
+  # 单次最大输出 token（含思考）
+  maxOutputTokens: 2048
+  # 温度，null = 不发送该参数（推荐，部分新模型不支持自定义温度）
+  temperature: null
+  # 默认思考强度（模型可单独设置）
+  thinking: low
+  # 是否把用户发的图片给模型看
+  includeImages: true
+  maxImages: 2
+  # 是否读取用户引用的那条消息
+  includeQuoted: true
 
-# 是否引用回复用户的原消息
-replyQuote: true
+# --------------------------------------------------------------------------
+# 额度（按实际计费换算的美元金额，5小时 / 7天滚动窗口；具体数额在每个模型的 quota 里设置）
+# --------------------------------------------------------------------------
+quota:
+  # 模型 quota 简写 {window5h, weekly} 的作用范围：user / group / global
+  defaultScope: user
+  # 管理员不受 user/group 额度限制（global 仍然生效）
+  exemptAdmins: true
+  # 额度用完的提示，同一个人多久最多提示一次（秒）
+  notifyCooldown: 1800
 
-# ----------------- 上下文多轮对话记忆 -----------------
-# 上下文记忆的最大轮数 (每轮包含用户问题和 AI 回复各一条，设置为 0 则关闭记忆)
-historyLimit: 10
+# --------------------------------------------------------------------------
+# 回复行为（降低风控：像真人一样发消息）
+# --------------------------------------------------------------------------
+reply:
+  # 引用回复：auto = 群里有人插话或回复较慢时才引用 / always / never
+  quote: auto
+  # 不引用时是否 @ 对方
+  atUser: false
+  # 一次回复最多分几条消息发送
+  maxBubbles: 2
+  # 超过这个字数：forward = 合并转发一条发送 / truncate = 截断
+  maxChars: 500
+  longText: forward
+  # 去掉 Markdown 符号（QQ 不渲染 Markdown）
+  stripMarkdown: true
+  # 模拟打字的延迟（毫秒），已经花在思考上的时间会被扣除
+  typing:
+    charsPerSecond: 12
+    minDelay: 600
+    maxDelay: 5000
+  # 发送频率上限（条/秒数）。超出时合并或放弃，绝不刷屏
+  groupRate: { count: 6, perSeconds: 60 }
+  globalRate: { count: 30, perSeconds: 60 }
+  # 同时进行的 LLM 请求数
+  concurrency: 3
+  # 出错时是否提示（有冷却）
+  errorNotice: true
+  errorCooldown: 600
+  # 私聊时显示“对方正在输入…”（NapCat）
+  privateTyping: true
 
-# 上下文记忆有效时间 (单位：分钟，超时后自动重置记忆)
-historyTimeout: 30
+# --------------------------------------------------------------------------
+# 表情包
+# --------------------------------------------------------------------------
+sticker:
+  enable: true
+  # 模型想发表情时实际发送的概率（模型本身也被要求“偶尔才发”）
+  probability: 0.6
+  # 同一会话两次表情的最小间隔（秒）
+  cooldown: 180
+  # 提示词里最多列出多少个表情
+  maxInPrompt: 60
+  # 识别表情用的视觉模型 id（留空 = visionModel / utilityModel / 默认模型）
+  indexModel: ''
+  # sticker = 以表情形式发送（QQ 显示为动画表情）/ image = 普通图片
+  sendAs: sticker
 
-# 群聊记忆隔离模式:
-# true  = 每位群成员拥有独立的对话记忆
-# false = 同一个群内所有成员共享该群的公共对话记忆
-isolateUserInGroup: true
+# --------------------------------------------------------------------------
+# 工具
+# --------------------------------------------------------------------------
+tools:
+  enable: true
+  webSearch:
+    enable: true
+    # native = 使用模型自带搜索（anthropic / openai-responses / gemini 类型支持）
+    # tavily / brave / jina 需要 apiKey；searxng 需要 baseUrl；none = 关闭
+    provider: native
+    apiKey: ''
+    baseUrl: ''
+    maxResults: 5
+  webFetch:
+    enable: true
+    # 返回给模型的最大字符数
+    maxChars: 6000
+    timeout: 15
+    # direct = 直接抓取 / jina = 通过 r.jina.ai 读取（可选 jinaKey）
+    reader: direct
+    jinaKey: ''
+    # 允许访问内网地址（危险，默认禁止）
+    allowPrivateNetwork: false
+  botCommand:
+    # 允许把自然语言转成机器人已有指令执行（如「帮我查深渊」→ #深渊）
+    enable: true
+    # 系统提示里列出的常用指令数量（按游戏轮流选取；其余可通过 search_bot_commands 搜到）
+    inPrompt: 50
+    # 执行指令后是否再发送模型的附带文字
+    ack: false
+    # 是否允许通过对话执行主人权限指令
+    allowMasterCommands: false
+    # 禁止通过对话执行的指令（正则）
+    blacklist:
+      - '^#?(重启|关机|停机|开机|上线|下线)'
+      - '^#?(强制|全部)?更新'
+      - '^#?(安装|卸载|删除)插件'
+      - '^#?退群'
+      - '^#?(设置|添加|删除)主人'
+    # 手动补充的指令说明（会提示给模型），如：
+    # - { cmd: '#今日运势', desc: '抽一张今日运势签' }
+    hints: []
+  # HTTP 工具：让模型调用一个 HTTP 接口，{参数名} 会替换到 url，{{参数名}} 会替换到 body
+  # - name: weather
+  #   description: 查询城市天气
+  #   parameters: { type: object, properties: { city: { type: string } }, required: [city] }
+  #   url: https://wttr.in/{city}?format=3&lang=zh
+  http: []
+  # 禁用的工具名（#llm工具列表 查看）
+  disabled: []
+
+# --------------------------------------------------------------------------
+# 长期记忆：模型可以用 memory 工具记住「关于某人」和「关于本群」的事实，跨会话保留。
+# 有硬上限，写满后模型必须合并/删除旧条目才能再记；接近上限时自动用便宜模型整理，不会无限增长。
+# 用户可发送 #llm记忆 查看、#llm忘记我 清空自己的长期记忆。
+# --------------------------------------------------------------------------
+memory:
+  enable: true
+  # 每个人最多几条 / 总字数
+  userMaxEntries: 15
+  userMaxChars: 800
+  # 每个群最多几条 / 总字数
+  groupMaxEntries: 25
+  groupMaxChars: 1500
+  # 每条最多字数
+  entryMaxChars: 100
+  # 群记忆写入：all = 任何人的对话都可让模型记录 / admin = 仅管理员的对话 / off = 不记群记忆
+  groupWrite: all
+  # 达到上限 80% 时自动整理合并（使用 utilityModel）
+  autoCompact: true
+  # 每次回复最多修改几次记忆
+  maxWritesPerTurn: 3
+
+# 技能：plugins/Yunzai-LLM-Plugin/skills/<名称>/SKILL.md
+skills:
+  enable: true
+
+# 价格表来源（自动获取模型价格，按天刷新）
+pricing:
+  sources: [litellm, openrouter]
+  refreshHours: 24

@@ -1,6 +1,10 @@
 node_modules/
 config/config.yaml
+data/
+sandbox/.runtime*/
 *.log
 .DS_Store
 .vscode/
 .idea/
+sandbox/config.yaml
+config/*.bak

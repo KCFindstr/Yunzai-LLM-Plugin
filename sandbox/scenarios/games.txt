@@ -1,0 +1,28 @@
+// 需要先 node sandbox/install-plugins.mjs 安装游戏插件
+// node sandbox/run.mjs --mock --script sandbox/scenarios/games.txt
+
+p #llm扫描指令
+expect 扫描完成
+p #llm测试指令 #深渊
+expect 插件
+p #llm测试指令 *忘却之庭
+expect 插件
+p #llm测试指令 %式舆防卫战
+expect 插件
+p #llm指令列表
+expect 可被自然语言调用
+
+// 自然语言 -> 游戏指令（未绑定 uid 时插件会提示绑定，这正说明指令被真实插件处理了）
+ga 帮我查查深渊数据
+expect uid|UID|绑定|Cookie|cookie|ck|深渊|米游社
+sleep 3000
+ga 看看我星铁忘却之庭打得怎么样
+expect uid|UID|绑定|Cookie|cookie|ck|忘却|米游社
+sleep 3000
+ga 绝区零深渊帮我看看
+expect uid|UID|绑定|Cookie|cookie|ck|式舆|防卫|米游社
+sleep 3000
+
+// 已有指令照常工作，不经过 LLM
+ga #深渊
+expect uid|UID|绑定|Cookie|cookie|ck|深渊|米游社
