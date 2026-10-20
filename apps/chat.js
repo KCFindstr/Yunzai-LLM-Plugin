@@ -1,4 +1,4 @@
-import plugin from '../../lib/plugins/plugin.js'
+import plugin from '../../../lib/plugins/plugin.js'
 import configManager from '../lib/config.js'
 import { askLLM } from '../lib/llm.js'
 
