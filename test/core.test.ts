@@ -83,6 +83,22 @@ describe('pricing', () => {
     assert.ok(Math.abs(cost - 14.72) < 1e-9, String(cost))
     assert.equal(computeCost({ input: 5, cacheRead: 0, cacheWrite: 0, cacheWrite1h: 0, output: 5, reasoning: 0, webSearches: 0, cost: 0.5 }, price), 0.5)
   })
+
+  it('resolves builtin pricing for DeepSeek and Gemini models', () => {
+    const ds = resolvePrice({ id: 'ds', provider: 'deepseek', model: 'deepseek-chat', pricing: 'auto' })!
+    assert.equal(ds.source, 'builtin')
+    assert.equal(ds.input, 0.28)
+    assert.equal(ds.output, 0.42)
+
+    const dsFlash = resolvePrice({ id: 'dsf', provider: 'deepseek', model: 'deepseek-flash', pricing: 'auto' })!
+    assert.equal(dsFlash.source, 'builtin')
+    assert.equal(dsFlash.input, 0.3)
+
+    const argon = resolvePrice({ id: 'arg', provider: 'gemini', model: 'gemini-4-argon', pricing: 'auto' })!
+    assert.equal(argon.source, 'builtin')
+    assert.equal(argon.input, 2)
+    assert.equal(argon.output, 10)
+  })
 })
 
 describe('quota ledger', () => {

@@ -16,7 +16,7 @@ export const THINKING = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'ma
 export const KNOWN_MODELS = {
   anthropic: ['claude-sonnet-5-5', 'claude-haiku-5-5', 'claude-opus-5-5', 'claude-fable-5-1'],
   openai: ['gpt-6.1-sol', 'gpt-6-luna', 'gpt-6-astra'],
-  gemini: ['gemini-3.8-flash', 'gemini-3.5-flash-lite', 'gemini-3.1-pro-preview', 'gemini-3.1-flash-lite'],
+  gemini: ['gemini-4-argon', 'gemini-3.8-flash', 'gemini-3.5-flash-lite', 'gemini-3.1-pro-preview', 'gemini-3.1-flash-lite'],
   deepseek: ['deepseek-flash', 'deepseek-v4-pro'],
 }
 
@@ -49,7 +49,7 @@ const providerNames = c => Object.keys(c.providers ?? {})
 const modelIds = c => (c.models ?? []).map(m => m.id).filter(Boolean)
 const presetNames = c => Object.keys(c.persona?.presets ?? {})
 const toolNames = c => [
-  ...new Set(['web_search', 'web_fetch', 'run_bot_command', 'search_bot_commands', 'load_skill', 'memory', ...(c.tools?.http ?? []).map(h => h.name).filter(Boolean), ...(c.tools?.disabled ?? [])]),
+  ...new Set(['web_search', 'web_fetch', 'run_bot_command', 'search_bot_commands', 'list_bot_commands', 'load_skill', 'memory', ...(c.tools?.http ?? []).map(h => h.name).filter(Boolean), ...(c.tools?.disabled ?? [])]),
 ]
 
 const limits = label => obj({ window5h: num('5小时额度（美元）', { min: 0, nullable: true }), weekly: num('每周额度（美元）', { min: 0, nullable: true }) }, label)

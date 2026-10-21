@@ -169,8 +169,10 @@ export function scrapeHelpText(file: string, text: string): { cmd: string; desc:
       scrapeObject(YAML.parse(text), out)
     } catch {}
   } else {
-    const re = /title\s*:\s*(['"`])((?:(?!\1)[^\n])+)\1\s*,\s*(?:\/\/[^\n]*)?\s*(?:desc|dsc)\s*:\s*(['"`])((?:(?!\3)[^\n])+)\3/g
-    for (let m = re.exec(text); m; m = re.exec(text)) pushPair(out, m[2], m[4])
+    const re1 = /['"`]?(?:title|name|cmd|command)['"`]?\s*:\s*(['"`])((?:(?!\1)[^\n])+)\1\s*,\s*(?:\/\/[^\n]*)?\s*['"`]?(?:desc|dsc|description)['"`]?\s*:\s*(['"`])((?:(?!\3)[^\n])+)\3/g
+    for (let m = re1.exec(text); m; m = re1.exec(text)) pushPair(out, m[2], m[4])
+    const re2 = /['"`]?(?:desc|dsc|description)['"`]?\s*:\s*(['"`])((?:(?!\1)[^\n])+)\1\s*,\s*(?:\/\/[^\n]*)?\s*['"`]?(?:title|name|cmd|command)['"`]?\s*:\s*(['"`])((?:(?!\3)[^\n])+)\3/g
+    for (let m = re2.exec(text); m; m = re2.exec(text)) pushPair(out, m[4], m[2])
   }
   return out
 }
@@ -263,6 +265,69 @@ export function displayCmd(c: CommandEntry): string {
   return c.cmd.includes(PLACEHOLDER) ? `${c.cmd.replace(PLACEHOLDER, '角色名')}（如 ${c.example}）` : c.cmd
 }
 
+export function resolveGame(e: CommandEntry): string {
+  if (e.game) return e.game
+  const cmd = e.cmd
+  if (cmd.startsWith('*') || /starrail/i.test(e.plugin ?? '')) return 'sr'
+  if (cmd.startsWith('%') || /zzz/i.test(e.plugin ?? '')) return 'zzz'
+  if (/genshin|原神/i.test(e.desc) || /genshin/i.test(e.plugin ?? '')) return 'gs'
+  if (/星铁|崩铁/i.test(e.desc)) return 'sr'
+  if (/绝区零/i.test(e.desc)) return 'zzz'
+  if (cmd.startsWith('#')) return 'gs'
+  return 'common'
+}
+
+export interface CatalogFilter {
+  game?: string
+  plugin?: string
+}
+
+export function formatCommandCatalog(opts: CatalogFilter = {}): string {
+  const ok = entries.filter(e => e.verified && !e.hidden)
+  const targetGame = opts.game?.toLowerCase()?.trim()
+  const targetPlugin = opts.plugin?.toLowerCase()?.trim()
+
+  let filtered = ok
+  if (targetPlugin) {
+    filtered = filtered.filter(e => e.plugin?.toLowerCase().includes(targetPlugin))
+  }
+  if (targetGame && targetGame !== 'all') {
+    filtered = filtered.filter(e => resolveGame(e) === targetGame)
+  }
+
+  if (!filtered.length) {
+    return `未找到匹配的指令（已扫描验证 ${ok.length} 条可用指令）。可尝试不传参数获取全部指令列表。`
+  }
+
+  const groups = new Map<string, CommandEntry[]>()
+  for (const e of filtered) {
+    const g = resolveGame(e)
+    if (!groups.has(g)) groups.set(g, [])
+    groups.get(g)!.push(e)
+  }
+
+  const GAME_NAMES: Record<string, string> = {
+    sr: '星穹铁道 (* 或 #星铁 开头)',
+    gs: '原神 (# 开头)',
+    zzz: '绝区零 (% 或 #绝区零 开头)',
+    common: '通用/系统指令 (# 开头)',
+  }
+
+  const sections: string[] = []
+  for (const [g, list] of groups) {
+    const title = GAME_NAMES[g] ?? `分类 [${g}]`
+    const lines = list.map(c => `- ${displayCmd(c)} — ${c.desc}${c.plugin ? ` [${c.plugin}]` : ''}`)
+    sections.push(`【${title}】（${list.length} 条）：\n${lines.join('\n')}`)
+  }
+
+  const note =
+    '\n【角色与别名使用说明】\n' +
+    '1. 凡带有「角色名」的指令（如 *{角色}面板、#{角色}面板、*{角色}伤害、*{角色}攻略 等），插件已内嵌海量官方全名、二创别称及SP角色（如星铁的火花、狼尊、老泉、卡芙卡；原神的雷神、帝君等）。\n' +
+    '2. 用户询问角色时，直接使用用户提到的角色名代入指令即可（例如用户说“火花面板”执行「*火花面板」，用户说“狼尊面板”执行「*狼尊面板」），严禁自行纠正或替换角色名！'
+
+  return `=== 机器人已安装指令列表（共 ${filtered.length} 条可用） ===\n\n${sections.join('\n\n')}\n${note}`
+}
+
 /**
  * Entries for the system prompt: verified hints first, then presets round-robin across games (so a small limit
  * still covers 原神/星铁/绝区零), then scraped help entries. Deterministic for a given catalog.
@@ -287,11 +352,49 @@ export function promptEntries(limit: number): CommandEntry[] {
 export function searchCommands(query: string, n = 8): string[] {
   const q = query.trim()
   if (!q) return []
+  if (['all', '全部', '所有', 'list', 'help'].includes(q.toLowerCase())) {
+    return [formatCommandCatalog()]
+  }
+
   const scored: [number, string][] = []
+
+  // Check direct live rule match for query and candidate prefixes (e.g. *火花面板, #火花面板)
+  const seenMatches = new Set<string>()
+  const candidates = [
+    q,
+    q.startsWith('#') || q.startsWith('*') || q.startsWith('%') ? q : `*${q}`,
+    q.startsWith('#') || q.startsWith('*') || q.startsWith('%') ? q : `#${q}`,
+  ]
+  for (const cand of candidates) {
+    if (seenMatches.has(cand)) continue
+    for (const r of rules) {
+      if (r.own || r.catchAll) continue
+      if (r.reg.test(cand)) {
+        seenMatches.add(cand)
+        scored.push([
+          1.5,
+          `${cand} — 可直接执行（匹配插件「${r.plugin}」：${r.dsc || r.fnc}）`,
+        ])
+        break
+      }
+    }
+  }
+
   for (const c of entries) {
-    const s = Math.max(similarity(q, c.desc), similarity(q, c.cmd) * 0.9) + (c.verified ? 0.05 : -0.2)
+    let s = Math.max(similarity(q, c.desc), similarity(q, c.cmd) * 0.9)
+    if (c.cmd.includes(PLACEHOLDER)) {
+      const concretized = c.cmd.replace(PLACEHOLDER, q)
+      s = Math.max(s, similarity(q, concretized) * 0.95)
+      const m = /(.*?)(?:面板|伤害|攻略|材料|天赋|命座|图鉴|圣遗物|遗器)$/.exec(q)
+      if (m && m[1]) {
+        const withRole = c.cmd.replace(PLACEHOLDER, m[1].replace(/^[#*%]/, ''))
+        s = Math.max(s, similarity(q, withRole) * 0.95)
+      }
+    }
+    s += (c.verified ? 0.05 : -0.2)
     if (s > 0.15) scored.push([s, `${displayCmd(c)} — ${c.desc}${c.verified ? '' : '（未验证）'}`])
   }
+
   const seenSrc = new Set<string>()
   for (const r of rules) {
     if (r.own || r.catchAll || seenSrc.has(r.reg.source)) continue

@@ -50,7 +50,7 @@ tools:
 const { setLoaderForTest, ownClasses } = await import('../src/core/yunzai.ts')
 const { LLMChat } = await import('../src/apps/chat.ts')
 const { registerCommandTools } = await import('../src/commands/tools.ts')
-const { scanCatalog, catalogEntries, matchRule, concretize, scrapeHelpText, promptEntries } = await import('../src/commands/catalog.ts')
+const { scanCatalog, catalogEntries, matchRule, concretize, scrapeHelpText, promptEntries, formatCommandCatalog, searchCommands } = await import('../src/commands/catalog.ts')
 const { recordGroupMessage } = await import('../src/chat/groupLog.ts')
 const { config } = await import('../src/core/config.ts')
 
@@ -139,6 +139,25 @@ describe('command catalog', () => {
     assert.ok(cmds.includes('#深渊') || cmds.some(c => c.startsWith('#')), String(cmds))
     assert.ok(cmds.some(c => c.startsWith('*')), `星铁 entry expected in ${cmds}`)
     assert.ok(!promptEntries(100).some(c => c.cmd === '*混沌回忆'), 'hidden synonym not listed')
+  })
+
+  it('formatCommandCatalog returns full categorized list and supports filtering', () => {
+    const full = formatCommandCatalog()
+    assert.ok(full.includes('机器人已安装指令列表'))
+    assert.ok(full.includes('星穹铁道'))
+    assert.ok(full.includes('原神'))
+
+    const srOnly = formatCommandCatalog({ game: 'sr' })
+    assert.ok(srOnly.includes('星穹铁道'))
+  })
+
+  it('searchCommands matches role queries and rule candidates', () => {
+    const hits1 = searchCommands('火花面板')
+    assert.ok(hits1.length > 0)
+    assert.ok(hits1.some(h => h.includes('面板') || h.includes('火花')))
+
+    const all = searchCommands('all')
+    assert.ok(all[0].includes('机器人已安装指令列表'))
   })
 })
 

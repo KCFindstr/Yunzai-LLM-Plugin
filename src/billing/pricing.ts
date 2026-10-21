@@ -11,8 +11,18 @@ export interface Price extends PriceConfig {
   source: string
 }
 
-/** First-party Anthropic list prices (Oct 2026). Others come from remote price lists or config. */
+/** First-party Anthropic, DeepSeek, and Google Gemini list prices. Others come from remote price lists or config. */
 const BUILTIN: Record<string, Omit<Price, 'source'>> = {
+  // DeepSeek
+  'deepseek-chat': { input: 0.28, output: 0.42, cacheRead: 0.028 },
+  'deepseek-reasoner': { input: 0.55, output: 2.19, cacheRead: 0.14 },
+  'deepseek-flash': { input: 0.3, output: 1.2, cacheRead: 0.006 },
+  'deepseek-v4-flash': { input: 0.3, output: 1.2, cacheRead: 0.006 },
+  'deepseek-v4-pro': { input: 1.32, output: 3.96, cacheRead: 0.044 },
+  'deepseek-v3': { input: 0.28, output: 0.42, cacheRead: 0.028 },
+  'deepseek-r1': { input: 0.55, output: 2.19, cacheRead: 0.14 },
+  // Gemini
+  'gemini-4-argon': { input: 2, output: 10, cacheRead: 0.1 },
   'claude-fable-5-1': { input: 10, output: 50, cacheRead: 0.25, cacheWrite: 12.5, cacheWrite1h: 20 },
   'claude-fable-5': { input: 10, output: 50, cacheRead: 1, cacheWrite: 12.5, cacheWrite1h: 20 },
   'claude-opus-5-5': { input: 4, output: 20, cacheRead: 0.2, cacheWrite: 5, cacheWrite1h: 8 },

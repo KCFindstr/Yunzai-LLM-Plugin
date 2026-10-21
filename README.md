@@ -30,15 +30,17 @@ pnpm install
 #llm测试模型
 ```
 
-也可以在服务器上用命令行配置工具：方向键选择，枚举项单选、多值项勾选；只能填写有效的配置项（包括文件里还没有的），每次修改都会校验；修改后机器人自动热重载：
+也可以在服务器上用命令行配置工具（进入 `plugins/Yunzai-LLM-Plugin` 目录直接运行 `npm run config`）：方向键选择，枚举项单选、多值项勾选；只能填写有效的配置项（包括文件里还没有的），每次修改都会校验；修改后机器人自动热重载：
 
 ```bash
-node plugins/Yunzai-LLM-Plugin/cli/config.mjs                          # 交互式：浏览全部配置项、搜索、添加提供商/模型
-node plugins/Yunzai-LLM-Plugin/cli/config.mjs list reply               # 列出某一节
-node plugins/Yunzai-LLM-Plugin/cli/config.mjs describe chat.groupContext
-node plugins/Yunzai-LLM-Plugin/cli/config.mjs set providers.deepseek.apiKey sk-xxxx
-node plugins/Yunzai-LLM-Plugin/cli/config.mjs unset reply.maxBubbles   # 恢复默认
-node plugins/Yunzai-LLM-Plugin/cli/config.mjs check
+cd plugins/Yunzai-LLM-Plugin
+
+npm run config                                            # 交互式：浏览全部配置项、搜索、添加提供商/模型
+npm run config -- list reply                              # 列出某一节
+npm run config -- describe chat.groupContext
+npm run config -- set providers.deepseek.apiKey sk-xxxx
+npm run config -- unset reply.maxBubbles                  # 恢复默认
+npm run config -- check
 ```
 
 或者直接编辑 `config/config.yaml`（只写要覆盖的项，完整选项见 `config/default_config.yaml`，修改后自动热重载）：

@@ -2,7 +2,7 @@ import YAML from 'yaml'
 import { queryBalance } from '../billing/balance.ts'
 import { daily, limitsFor, resetUsage, summarize, topUsers, totals, WINDOW_WEEK } from '../billing/ledger.ts'
 import { priceCacheInfo, refreshPrices, resolvePrice } from '../billing/pricing.ts'
-import { catalogEntries, catalogInfo, displayCmd, matchRule, scanCatalog, searchCommands } from '../commands/catalog.ts'
+import { catalogEntries, catalogInfo, displayCmd, formatCommandCatalog, matchRule, scanCatalog, searchCommands } from '../commands/catalog.ts'
 import { config, resolveKeys } from '../core/config.ts'
 import type { ModelConfig, ProviderType, QuotaScope, ThinkingLevel } from '../core/configTypes.ts'
 import { log } from '../core/log.ts'
@@ -1001,11 +1001,7 @@ const COMMANDS: Cmd[] = [
     level: 'admin',
     async run({ e, args }) {
       if (args) return say(e, searchCommands(args, 15).join('\n') || '没有找到')
-      const all = catalogEntries()
-      const ok = all.filter(c => c.verified)
-      const lines = ok.map(c => `${displayCmd(c)} — ${c.desc}（${c.source}）`)
-      const info = catalogInfo()
-      return say(e, `可被自然语言调用的指令 ${ok.length} 条（共扫描 ${info.rules} 条规则）：\n${lines.join('\n')}`)
+      return say(e, formatCommandCatalog())
     },
   },
   {

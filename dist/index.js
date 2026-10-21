@@ -801,6 +801,16 @@ function resetUsage(target) {
 
 // src/billing/pricing.ts
 var BUILTIN = {
+  // DeepSeek
+  "deepseek-chat": { input: 0.28, output: 0.42, cacheRead: 0.028 },
+  "deepseek-reasoner": { input: 0.55, output: 2.19, cacheRead: 0.14 },
+  "deepseek-flash": { input: 0.3, output: 1.2, cacheRead: 6e-3 },
+  "deepseek-v4-flash": { input: 0.3, output: 1.2, cacheRead: 6e-3 },
+  "deepseek-v4-pro": { input: 1.32, output: 3.96, cacheRead: 0.044 },
+  "deepseek-v3": { input: 0.28, output: 0.42, cacheRead: 0.028 },
+  "deepseek-r1": { input: 0.55, output: 2.19, cacheRead: 0.14 },
+  // Gemini
+  "gemini-4-argon": { input: 2, output: 10, cacheRead: 0.1 },
   "claude-fable-5-1": { input: 10, output: 50, cacheRead: 0.25, cacheWrite: 12.5, cacheWrite1h: 20 },
   "claude-fable-5": { input: 10, output: 50, cacheRead: 1, cacheWrite: 12.5, cacheWrite1h: 20 },
   "claude-opus-5-5": { input: 4, output: 20, cacheRead: 0.2, cacheWrite: 5, cacheWrite1h: 8 },
@@ -1072,7 +1082,13 @@ var PRESETS = [
   { cmd: "*\u89D2\u8272", desc: "\u661F\u94C1\u89D2\u8272\u5217\u8868\u4E0E\u7EC3\u5EA6", game: "sr" },
   { cmd: "*\u9762\u677F", desc: "\u661F\u94C1\u5DF2\u7F13\u5B58\u9762\u677F\u89D2\u8272\u5217\u8868", game: "sr" },
   { cmd: "*\u66F4\u65B0\u9762\u677F", desc: "\u661F\u94C1\u66F4\u65B0\u89D2\u8272\u9762\u677F", game: "sr" },
-  { cmd: "*{\u89D2\u8272}\u9762\u677F", desc: "\u661F\u94C1\u67E5\u770B\u67D0\u89D2\u8272\u9762\u677F", game: "sr", example: SR },
+  { cmd: "*{\u89D2\u8272}\u9762\u677F", desc: "\u661F\u94C1\u67E5\u770B\u67D0\u89D2\u8272\u9762\u677F\uFF08\u652F\u6301\u522B\u540D\uFF0C\u5982 *\u706B\u82B1\u9762\u677F\u3001*\u72FC\u5C0A\u9762\u677F\uFF09", game: "sr", example: SR },
+  { cmd: "*{\u89D2\u8272}\u4F24\u5BB3", desc: "\u661F\u94C1\u8BA1\u7B97\u67D0\u89D2\u8272\u4F24\u5BB3", game: "sr", example: SR },
+  { cmd: "*{\u89D2\u8272}\u653B\u7565", desc: "\u661F\u94C1\u89D2\u8272\u653B\u7565\u56FE", game: "sr", example: SR },
+  { cmd: "*{\u89D2\u8272}\u6750\u6599", desc: "\u661F\u94C1\u89D2\u8272\u7A81\u7834/\u884C\u8FF9\u6750\u6599", game: "sr", example: SR },
+  { cmd: "*{\u89D2\u8272}\u9057\u5668", desc: "\u661F\u94C1\u67E5\u770B\u67D0\u89D2\u8272\u9057\u5668/\u5723\u9057\u7269\u8BC4\u5206", game: "sr", example: SR },
+  { cmd: "*\u706B\u82B1\u9762\u677F", desc: "\u661F\u94C1\u67E5\u770B\u706B\u82B1\u89D2\u8272\u9762\u677F", game: "sr", hidden: true },
+  { cmd: "*\u72FC\u5C0A\u9762\u677F", desc: "\u661F\u94C1\u67E5\u770B\u72FC\u5C0A\uFF08\u94F6\u72FCLV.999\uFF09\u9762\u677F", game: "sr", hidden: true },
   { cmd: "*\u8DC3\u8FC1\u8BB0\u5F55", desc: "\u661F\u94C1\u8DC3\u8FC1\uFF08\u62BD\u5361\uFF09\u8BB0\u5F55", game: "sr" },
   { cmd: "*\u62BD\u5361\u8BB0\u5F55", desc: "\u661F\u94C1\u62BD\u5361\u8BB0\u5F55", game: "sr", hidden: true },
   { cmd: "*\u62BD\u5361\u5206\u6790", desc: "\u661F\u94C1\u62BD\u5361\u5206\u6790", game: "sr" },
@@ -1224,8 +1240,10 @@ function scrapeHelpText(file, text) {
     } catch {
     }
   } else {
-    const re = /title\s*:\s*(['"`])((?:(?!\1)[^\n])+)\1\s*,\s*(?:\/\/[^\n]*)?\s*(?:desc|dsc)\s*:\s*(['"`])((?:(?!\3)[^\n])+)\3/g;
-    for (let m = re.exec(text); m; m = re.exec(text)) pushPair(out, m[2], m[4]);
+    const re1 = /['"`]?(?:title|name|cmd|command)['"`]?\s*:\s*(['"`])((?:(?!\1)[^\n])+)\1\s*,\s*(?:\/\/[^\n]*)?\s*['"`]?(?:desc|dsc|description)['"`]?\s*:\s*(['"`])((?:(?!\3)[^\n])+)\3/g;
+    for (let m = re1.exec(text); m; m = re1.exec(text)) pushPair(out, m[2], m[4]);
+    const re2 = /['"`]?(?:desc|dsc|description)['"`]?\s*:\s*(['"`])((?:(?!\1)[^\n])+)\1\s*,\s*(?:\/\/[^\n]*)?\s*['"`]?(?:title|name|cmd|command)['"`]?\s*:\s*(['"`])((?:(?!\3)[^\n])+)\3/g;
+    for (let m = re2.exec(text); m; m = re2.exec(text)) pushPair(out, m[4], m[2]);
   }
   return out;
 }
@@ -1288,14 +1306,61 @@ async function scanCatalog() {
   log.info(`\u6307\u4EE4\u76EE\u5F55: ${rules.length} \u6761\u89C4\u5219\uFF0C${list.length} \u6761\u8BF4\u660E\uFF08${verified} \u6761\u5DF2\u9A8C\u8BC1\uFF09`);
   return { rules: rules.length, entries: list.length, verified };
 }
-function catalogEntries() {
-  return entries;
-}
 function catalogInfo() {
   return { rules: rules.length, entries: entries.length, verified: entries.filter((e) => e.verified).length, scannedAt };
 }
 function displayCmd(c) {
   return c.cmd.includes(PLACEHOLDER) ? `${c.cmd.replace(PLACEHOLDER, "\u89D2\u8272\u540D")}\uFF08\u5982 ${c.example}\uFF09` : c.cmd;
+}
+function resolveGame(e) {
+  if (e.game) return e.game;
+  const cmd = e.cmd;
+  if (cmd.startsWith("*") || /starrail/i.test(e.plugin ?? "")) return "sr";
+  if (cmd.startsWith("%") || /zzz/i.test(e.plugin ?? "")) return "zzz";
+  if (/genshin|原神/i.test(e.desc) || /genshin/i.test(e.plugin ?? "")) return "gs";
+  if (/星铁|崩铁/i.test(e.desc)) return "sr";
+  if (/绝区零/i.test(e.desc)) return "zzz";
+  if (cmd.startsWith("#")) return "gs";
+  return "common";
+}
+function formatCommandCatalog(opts = {}) {
+  const ok = entries.filter((e) => e.verified && !e.hidden);
+  const targetGame = opts.game?.toLowerCase()?.trim();
+  const targetPlugin = opts.plugin?.toLowerCase()?.trim();
+  let filtered = ok;
+  if (targetPlugin) {
+    filtered = filtered.filter((e) => e.plugin?.toLowerCase().includes(targetPlugin));
+  }
+  if (targetGame && targetGame !== "all") {
+    filtered = filtered.filter((e) => resolveGame(e) === targetGame);
+  }
+  if (!filtered.length) {
+    return `\u672A\u627E\u5230\u5339\u914D\u7684\u6307\u4EE4\uFF08\u5DF2\u626B\u63CF\u9A8C\u8BC1 ${ok.length} \u6761\u53EF\u7528\u6307\u4EE4\uFF09\u3002\u53EF\u5C1D\u8BD5\u4E0D\u4F20\u53C2\u6570\u83B7\u53D6\u5168\u90E8\u6307\u4EE4\u5217\u8868\u3002`;
+  }
+  const groups = /* @__PURE__ */ new Map();
+  for (const e of filtered) {
+    const g = resolveGame(e);
+    if (!groups.has(g)) groups.set(g, []);
+    groups.get(g).push(e);
+  }
+  const GAME_NAMES = {
+    sr: "\u661F\u7A79\u94C1\u9053 (* \u6216 #\u661F\u94C1 \u5F00\u5934)",
+    gs: "\u539F\u795E (# \u5F00\u5934)",
+    zzz: "\u7EDD\u533A\u96F6 (% \u6216 #\u7EDD\u533A\u96F6 \u5F00\u5934)",
+    common: "\u901A\u7528/\u7CFB\u7EDF\u6307\u4EE4 (# \u5F00\u5934)"
+  };
+  const sections = [];
+  for (const [g, list] of groups) {
+    const title = GAME_NAMES[g] ?? `\u5206\u7C7B [${g}]`;
+    const lines = list.map((c) => `- ${displayCmd(c)} \u2014 ${c.desc}${c.plugin ? ` [${c.plugin}]` : ""}`);
+    sections.push(`\u3010${title}\u3011\uFF08${list.length} \u6761\uFF09\uFF1A
+${lines.join("\n")}`);
+  }
+  const note = "\n\u3010\u89D2\u8272\u4E0E\u522B\u540D\u4F7F\u7528\u8BF4\u660E\u3011\n1. \u51E1\u5E26\u6709\u300C\u89D2\u8272\u540D\u300D\u7684\u6307\u4EE4\uFF08\u5982 *{\u89D2\u8272}\u9762\u677F\u3001#{\u89D2\u8272}\u9762\u677F\u3001*{\u89D2\u8272}\u4F24\u5BB3\u3001*{\u89D2\u8272}\u653B\u7565 \u7B49\uFF09\uFF0C\u63D2\u4EF6\u5DF2\u5185\u5D4C\u6D77\u91CF\u5B98\u65B9\u5168\u540D\u3001\u4E8C\u521B\u522B\u79F0\u53CASP\u89D2\u8272\uFF08\u5982\u661F\u94C1\u7684\u706B\u82B1\u3001\u72FC\u5C0A\u3001\u8001\u6CC9\u3001\u5361\u8299\u5361\uFF1B\u539F\u795E\u7684\u96F7\u795E\u3001\u5E1D\u541B\u7B49\uFF09\u3002\n2. \u7528\u6237\u8BE2\u95EE\u89D2\u8272\u65F6\uFF0C\u76F4\u63A5\u4F7F\u7528\u7528\u6237\u63D0\u5230\u7684\u89D2\u8272\u540D\u4EE3\u5165\u6307\u4EE4\u5373\u53EF\uFF08\u4F8B\u5982\u7528\u6237\u8BF4\u201C\u706B\u82B1\u9762\u677F\u201D\u6267\u884C\u300C*\u706B\u82B1\u9762\u677F\u300D\uFF0C\u7528\u6237\u8BF4\u201C\u72FC\u5C0A\u9762\u677F\u201D\u6267\u884C\u300C*\u72FC\u5C0A\u9762\u677F\u300D\uFF09\uFF0C\u4E25\u7981\u81EA\u884C\u7EA0\u6B63\u6216\u66FF\u6362\u89D2\u8272\u540D\uFF01";
+  return `=== \u673A\u5668\u4EBA\u5DF2\u5B89\u88C5\u6307\u4EE4\u5217\u8868\uFF08\u5171 ${filtered.length} \u6761\u53EF\u7528\uFF09 ===
+
+${sections.join("\n\n")}
+${note}`;
 }
 function promptEntries(limit) {
   const ok = entries.filter((e) => e.verified && !e.hidden);
@@ -1315,9 +1380,42 @@ function promptEntries(limit) {
 function searchCommands(query, n = 8) {
   const q = query.trim();
   if (!q) return [];
+  if (["all", "\u5168\u90E8", "\u6240\u6709", "list", "help"].includes(q.toLowerCase())) {
+    return [formatCommandCatalog()];
+  }
   const scored = [];
+  const seenMatches = /* @__PURE__ */ new Set();
+  const candidates = [
+    q,
+    q.startsWith("#") || q.startsWith("*") || q.startsWith("%") ? q : `*${q}`,
+    q.startsWith("#") || q.startsWith("*") || q.startsWith("%") ? q : `#${q}`
+  ];
+  for (const cand of candidates) {
+    if (seenMatches.has(cand)) continue;
+    for (const r of rules) {
+      if (r.own || r.catchAll) continue;
+      if (r.reg.test(cand)) {
+        seenMatches.add(cand);
+        scored.push([
+          1.5,
+          `${cand} \u2014 \u53EF\u76F4\u63A5\u6267\u884C\uFF08\u5339\u914D\u63D2\u4EF6\u300C${r.plugin}\u300D\uFF1A${r.dsc || r.fnc}\uFF09`
+        ]);
+        break;
+      }
+    }
+  }
   for (const c of entries) {
-    const s = Math.max(similarity(q, c.desc), similarity(q, c.cmd) * 0.9) + (c.verified ? 0.05 : -0.2);
+    let s = Math.max(similarity(q, c.desc), similarity(q, c.cmd) * 0.9);
+    if (c.cmd.includes(PLACEHOLDER)) {
+      const concretized = c.cmd.replace(PLACEHOLDER, q);
+      s = Math.max(s, similarity(q, concretized) * 0.95);
+      const m = /(.*?)(?:面板|伤害|攻略|材料|天赋|命座|图鉴|圣遗物|遗器)$/.exec(q);
+      if (m && m[1]) {
+        const withRole = c.cmd.replace(PLACEHOLDER, m[1].replace(/^[#*%]/, ""));
+        s = Math.max(s, similarity(q, withRole) * 0.95);
+      }
+    }
+    s += c.verified ? 0.05 : -0.2;
     if (s > 0.15) scored.push([s, `${displayCmd(c)} \u2014 ${c.desc}${c.verified ? "" : "\uFF08\u672A\u9A8C\u8BC1\uFF09"}`]);
   }
   const seenSrc = /* @__PURE__ */ new Set();
@@ -3729,12 +3827,7 @@ ${md}
     level: "admin",
     async run({ e, args }) {
       if (args) return say(e, searchCommands(args, 15).join("\n") || "\u6CA1\u6709\u627E\u5230");
-      const all = catalogEntries();
-      const ok = all.filter((c) => c.verified);
-      const lines = ok.map((c) => `${displayCmd(c)} \u2014 ${c.desc}\uFF08${c.source}\uFF09`);
-      const info = catalogInfo();
-      return say(e, `\u53EF\u88AB\u81EA\u7136\u8BED\u8A00\u8C03\u7528\u7684\u6307\u4EE4 ${ok.length} \u6761\uFF08\u5171\u626B\u63CF ${info.rules} \u6761\u89C4\u5219\uFF09\uFF1A
-${lines.join("\n")}`);
+      return say(e, formatCommandCatalog());
     }
   },
   {
@@ -3981,12 +4074,13 @@ function buildSystemPrompt(p) {
     const lines = [
       "# \u673A\u5668\u4EBA\u6307\u4EE4",
       "\u673A\u5668\u4EBA\u88C5\u6709\u5176\u4ED6\u63D2\u4EF6\u3002\u5F53\u5BF9\u65B9\u60F3\u67E5\u8BE2\u6E38\u620F\u6570\u636E\u6216\u4F7F\u7528\u673A\u5668\u4EBA\u5DF2\u6709\u529F\u80FD\u65F6\uFF0C\u8C03\u7528 run_bot_command \u6267\u884C\u5BF9\u5E94\u6307\u4EE4\uFF0C\u63D2\u4EF6\u4F1A\u76F4\u63A5\u628A\u7ED3\u679C\uFF08\u901A\u5E38\u662F\u56FE\u7247\uFF09\u53D1\u7ED9\u5BF9\u65B9\u3002",
-      "\u4F8B\uFF1A\u300C\u5E2E\u6211\u67E5\u67E5\u6DF1\u6E0A\u6570\u636E\u300D\u2192 \u6267\u884C #\u6DF1\u6E0A\uFF1B\u300C\u770B\u770B\u6211\u7684\u4F53\u529B\u300D\u2192 \u6267\u884C #\u4F53\u529B\uFF1B\u300C\u661F\u94C1\u5FD8\u5374\u4E4B\u5EAD\u6253\u5F97\u600E\u4E48\u6837\u300D\u2192 \u6267\u884C *\u5FD8\u5374\u4E4B\u5EAD\u3002",
+      "\u4F8B\uFF1A\u300C\u5E2E\u6211\u67E5\u67E5\u6DF1\u6E0A\u6570\u636E\u300D\u2192 \u6267\u884C #\u6DF1\u6E0A\uFF1B\u300C\u770B\u770B\u6211\u7684\u4F53\u529B\u300D\u2192 \u6267\u884C #\u4F53\u529B\uFF1B\u300C\u661F\u94C1\u5FD8\u5374\u4E4B\u5EAD\u6253\u5F97\u600E\u4E48\u6837\u300D\u2192 \u6267\u884C *\u5FD8\u5374\u4E4B\u5EAD\uFF1B\u300C\u67E5\u4E0B\u706B\u82B1\u9762\u677F\u300D\u2192 \u6267\u884C *\u706B\u82B1\u9762\u677F\u3002",
       "- \u6267\u884C\u6210\u529F\u540E\u4E0D\u8981\u518D\u590D\u8FF0\u7ED3\u679C\uFF0C\u4E5F\u4E0D\u7528\u89E3\u91CA\uFF0C\u6700\u591A\u8BF4\u4E00\u53E5\u5F88\u77ED\u7684\u8BDD\u3002",
-      "- \u53EA\u662F\u95F2\u804A\u6E38\u620F\u3001\u95EE\u653B\u7565\u89C2\u70B9\u65F6\u4E0D\u8981\u6267\u884C\u6307\u4EE4\uFF1B\u4E0D\u786E\u5B9A\u683C\u5F0F\u65F6\u5148\u7528 search_bot_commands \u641C\u7D22\u3002"
+      "- \u53EA\u662F\u95F2\u804A\u6E38\u620F\u3001\u95EE\u653B\u7565\u89C2\u70B9\u65F6\u4E0D\u8981\u6267\u884C\u6307\u4EE4\uFF1B\u4E0D\u786E\u5B9A\u683C\u5F0F\u65F6\u5148\u7528 search_bot_commands \u641C\u7D22\uFF0C\u6216\u8C03\u7528 list_bot_commands \u83B7\u53D6\u5B8C\u6574\u6307\u4EE4\u5217\u8868\u3002",
+      "- \u89D2\u8272\u76F8\u5173\u6307\u4EE4\uFF08\u5982 *{\u89D2\u8272}\u9762\u677F\u3001#{\u89D2\u8272}\u9762\u677F\u3001%{\u89D2\u8272}\u9762\u677F\u3001*{\u89D2\u8272}\u4F24\u5BB3 \u7B49\uFF09\uFF1A\u63D2\u4EF6\u5185\u90E8\u7EF4\u62A4\u4E86\u5B8C\u6574\u7684\u89D2\u8272\u540D\u4E0E\u522B\u540D\u5E93\uFF08\u5305\u62EC\u5404\u79CD\u4E8C\u521B\u522B\u79F0\u3001SP\u89D2\u8272\uFF0C\u5982\u300C\u706B\u82B1\u300D\u3001\u300C\u72FC\u5C0A\u300D\u3001\u300C\u8001\u6CC9\u300D\u7B49\u5747\u4E3A\u6709\u6548\u652F\u6301\u7684\u89D2\u8272\u540D\uFF09\u3002\u9047\u5230\u7528\u6237\u67E5\u8BE2\u89D2\u8272\u65F6\uFF0C\u5FC5\u987B\u76F4\u63A5\u539F\u6837\u4F7F\u7528\u7528\u6237\u63D0\u5230\u7684\u89D2\u8272\u540D/\u522B\u540D\uFF08\u5982\u7528\u6237\u8BF4\u706B\u82B1\u5C31\u6267\u884C *\u706B\u82B1\u9762\u677F\uFF0C\u4E0D\u8981\u64C5\u81EA\u6539\u6210\u82B1\u706B\uFF1B\u7528\u6237\u8BF4\u72FC\u5C0A\u5C31\u6267\u884C *\u72FC\u5C0A\u9762\u677F\uFF0C\u4E0D\u8981\u64C5\u81EA\u6539\u6210\u94F6\u72FC\uFF09\u3002\u4E25\u7981\u4E3B\u89C2\u63A8\u6D4B\u6216\u7EA0\u6B63\u7528\u6237\u7684\u89D2\u8272\u540D\u79F0\uFF01"
     ];
     if (cmds.length) {
-      lines.push("\u5E38\u7528\u6307\u4EE4\uFF08* \u5F00\u5934\u662F\u661F\u7A79\u94C1\u9053\uFF0C% \u5F00\u5934\u662F\u7EDD\u533A\u96F6\uFF09\uFF1A");
+      lines.push("\u5E38\u7528\u6307\u4EE4\uFF08* \u5F00\u5934\u662F\u661F\u7A79\u94C1\u9053\uFF0C% \u5F00\u5934\u662F\u7EDD\u533A\u96F6\uFF1B\u5B8C\u6574\u5217\u8868\u53EF\u7528 list_bot_commands \u67E5\u8BE2\uFF09\uFF1A");
       for (const c of cmds) lines.push(`${displayCmd(c)} \u2014 ${c.desc}`);
     }
     parts.push(lines.join("\n"));
@@ -4497,10 +4591,10 @@ function registerCommandTools() {
   registry.register({
     name: "run_bot_command",
     source: "builtin",
-    description: "\u6267\u884C\u673A\u5668\u4EBA\u5DF2\u5B89\u88C5\u63D2\u4EF6\u7684\u6307\u4EE4\uFF08\u5982 #\u6DF1\u6E0A\u3001*\u4F53\u529B\u3001%\u9762\u677F\uFF09\uFF0C\u7ED3\u679C\u7531\u63D2\u4EF6\u76F4\u63A5\u53D1\u9001\u7ED9\u7528\u6237\u3002\u5F53\u7528\u6237\u60F3\u67E5\u8BE2\u6E38\u620F\u6570\u636E\u6216\u4F7F\u7528\u673A\u5668\u4EBA\u5DF2\u6709\u529F\u80FD\u65F6\u4F18\u5148\u7528\u5B83\uFF0C\u4E0D\u8981\u81EA\u5DF1\u7F16\u9020\u6570\u636E\u3002\u6BCF\u8F6E\u53EA\u80FD\u6267\u884C\u4E00\u6761\uFF1B\u6267\u884C\u540E\u4E0D\u8981\u518D\u590D\u8FF0\u7ED3\u679C\u3002\u6307\u4EE4\u5FC5\u987B\u662F\u7CFB\u7EDF\u63D0\u793A\u300C\u673A\u5668\u4EBA\u6307\u4EE4\u300D\u91CC\u5217\u51FA\u7684\u683C\u5F0F\uFF0C\u4E0D\u786E\u5B9A\u65F6\u5148\u7528 search_bot_commands \u641C\u7D22\u3002",
+    description: "\u6267\u884C\u673A\u5668\u4EBA\u5DF2\u5B89\u88C5\u63D2\u4EF6\u7684\u6307\u4EE4\uFF08\u5982 #\u6DF1\u6E0A\u3001*\u4F53\u529B\u3001*\u706B\u82B1\u9762\u677F\u3001%\u9762\u677F\uFF09\uFF0C\u7ED3\u679C\u7531\u63D2\u4EF6\u76F4\u63A5\u53D1\u9001\u7ED9\u7528\u6237\u3002\u5F53\u7528\u6237\u60F3\u67E5\u8BE2\u6E38\u620F\u6570\u636E\u6216\u4F7F\u7528\u673A\u5668\u4EBA\u5DF2\u6709\u529F\u80FD\u65F6\u4F18\u5148\u7528\u5B83\uFF0C\u4E0D\u8981\u81EA\u5DF1\u7F16\u9020\u6570\u636E\u3002\u6BCF\u8F6E\u53EA\u80FD\u6267\u884C\u4E00\u6761\uFF1B\u6267\u884C\u540E\u4E0D\u8981\u518D\u590D\u8FF0\u7ED3\u679C\u3002\u6307\u4EE4\u683C\u5F0F\u4F18\u5148\u4F7F\u7528\u7CFB\u7EDF\u63D0\u793A\u5217\u51FA\u7684\u683C\u5F0F\uFF0C\u82E5\u4E0D\u786E\u5B9A\u6216\u9700\u8981\u67E5\u770B\u6240\u6709\u53EF\u7528\u6307\u4EE4\uFF0C\u4F7F\u7528 search_bot_commands \u6216 list_bot_commands\u3002\u6CE8\u610F\uFF1A\u89D2\u8272\u76F8\u5173\u6307\u4EE4\uFF08\u5982 *{\u89D2\u8272}\u9762\u677F \u7B49\uFF09\uFF0C\u76F4\u63A5\u4EE3\u5165\u7528\u6237\u539F\u8BCD\u6267\u884C\uFF08\u5982 *\u706B\u82B1\u9762\u677F\u3001*\u72FC\u5C0A\u9762\u677F\uFF09\uFF0C\u4E0D\u8981\u64C5\u81EA\u66F4\u6539\u89D2\u8272\u540D\uFF01",
     parameters: {
       type: "object",
-      properties: { command: { type: "string", description: '\u5B8C\u6574\u6307\u4EE4\u6587\u672C\uFF0C\u5982 "#\u6DF1\u6E0A"\u3001"#\u523B\u6674\u9762\u677F"\u3001"*\u5FD8\u5374\u4E4B\u5EAD"' } },
+      properties: { command: { type: "string", description: '\u5B8C\u6574\u6307\u4EE4\u6587\u672C\uFF0C\u5982 "#\u6DF1\u6E0A"\u3001"#\u523B\u6674\u9762\u677F"\u3001"*\u706B\u82B1\u9762\u677F"\u3001"*\u5FD8\u5374\u4E4B\u5EAD"' } },
       required: ["command"]
     },
     available: (ctx) => ctx.eff.tools.botCommand.enable,
@@ -4513,7 +4607,7 @@ function registerCommandTools() {
       const rule = await matchRule(cmd, ctx.e);
       if (!rule)
         return {
-          content: `\u6CA1\u6709\u63D2\u4EF6\u80FD\u5904\u7406\u300C${cmd}\u300D\u3002\u8BF7\u68C0\u67E5\u683C\u5F0F\uFF0C\u6216\u7528 search_bot_commands \u641C\u7D22\u6B63\u786E\u6307\u4EE4\uFF1B\u5982\u679C\u786E\u5B9E\u6CA1\u6709\u5BF9\u5E94\u529F\u80FD\u5C31\u76F4\u63A5\u544A\u8BC9\u7528\u6237\u3002`,
+          content: `\u6CA1\u6709\u63D2\u4EF6\u80FD\u5904\u7406\u300C${cmd}\u300D\u3002\u8BF7\u68C0\u67E5\u683C\u5F0F\uFF0C\u6216\u7528 search_bot_commands \u641C\u7D22\u3001list_bot_commands \u83B7\u53D6\u5B8C\u6574\u5217\u8868\uFF1B\u5982\u679C\u786E\u5B9E\u6CA1\u6709\u5BF9\u5E94\u529F\u80FD\u5C31\u76F4\u63A5\u544A\u8BC9\u7528\u6237\u3002`,
           isError: true
         };
       if (rule.permission === "master" && !bc.allowMasterCommands)
@@ -4530,16 +4624,39 @@ function registerCommandTools() {
   registry.register({
     name: "search_bot_commands",
     source: "builtin",
-    description: "\u6309\u5173\u952E\u8BCD\u641C\u7D22\u673A\u5668\u4EBA\u5DF2\u5B89\u88C5\u63D2\u4EF6\u7684\u6307\u4EE4\uFF08\u8FD4\u56DE\u6307\u4EE4\u683C\u5F0F\u548C\u8BF4\u660E\uFF0C\u6216\u63D2\u4EF6\u7684\u5339\u914D\u6B63\u5219\uFF09\u3002\u5728\u7CFB\u7EDF\u63D0\u793A\u5217\u51FA\u7684\u5E38\u7528\u6307\u4EE4\u91CC\u627E\u4E0D\u5230\u5408\u9002\u7684\u65F6\u4F7F\u7528\u3002",
+    description: '\u6309\u5173\u952E\u8BCD\u641C\u7D22\u673A\u5668\u4EBA\u5DF2\u5B89\u88C5\u63D2\u4EF6\u7684\u6307\u4EE4\uFF08\u652F\u6301\u89D2\u8272\u540D\u3001\u529F\u80FD\u8BCD\u3001\u6307\u4EE4\u7247\u6BB5\uFF0C\u5982 "\u706B\u82B1"\u3001"\u62BD\u5361\u8BB0\u5F55"\u3001"\u661F\u94C1 \u9762\u677F"\uFF09\u3002\u5728\u5E38\u7528\u6307\u4EE4\u5217\u8868\u91CC\u627E\u4E0D\u5230\u5408\u9002\u6307\u4EE4\uFF0C\u6216\u60F3\u786E\u8BA4\u67D0\u4E2A\u89D2\u8272/\u529F\u80FD\u662F\u5426\u6709\u5BF9\u5E94\u6307\u4EE4\u65F6\u4F7F\u7528\u3002\u82E5\u8981\u67E5\u770B\u5168\u90E8\u5B8C\u6574\u5217\u8868\uFF0C\u8BF7\u7528 list_bot_commands\u3002',
     parameters: {
       type: "object",
-      properties: { query: { type: "string", description: '\u529F\u80FD\u5173\u952E\u8BCD\uFF0C\u5982 "\u62BD\u5361\u8BB0\u5F55"\u3001"\u661F\u94C1 \u6DF1\u6E0A"' } },
+      properties: { query: { type: "string", description: '\u529F\u80FD\u6216\u89D2\u8272\u5173\u952E\u8BCD\uFF0C\u5982 "\u706B\u82B1"\u3001"\u62BD\u5361\u8BB0\u5F55"\u3001"\u661F\u94C1 \u6DF1\u6E0A"' } },
       required: ["query"]
     },
     available: (ctx) => ctx.eff.tools.botCommand.enable,
     async run(args) {
-      const hits = searchCommands(String(args.query ?? ""), 8);
-      return hits.length ? hits.join("\n") : "\u6CA1\u6709\u627E\u5230\u76F8\u5173\u6307\u4EE4";
+      const hits = searchCommands(String(args.query ?? ""), 12);
+      return hits.length ? hits.join("\n") : "\u6CA1\u6709\u627E\u5230\u76F8\u5173\u6307\u4EE4\u3002\u53EF\u8C03\u7528 list_bot_commands \u67E5\u770B\u5B8C\u6574\u6307\u4EE4\u5217\u8868\u3002";
+    }
+  });
+  registry.register({
+    name: "list_bot_commands",
+    source: "builtin",
+    description: "\u83B7\u53D6\u673A\u5668\u4EBA\u5F53\u524D\u5DF2\u5B89\u88C5\u6240\u6709\u63D2\u4EF6\u652F\u6301\u7684\u5B8C\u6574\u6307\u4EE4\u5217\u8868\uFF08\u53EF\u6309\u6E38\u620F/\u5206\u7C7B\u8FC7\u6EE4\uFF09\u3002\u5F53\u7CFB\u7EDF\u63D0\u793A\u4E2D\u7684\u5E38\u7528\u6307\u4EE4\u4E0D\u591F\u5168\u9762\u3001\u9700\u8981\u67E5\u627E\u5168\u90E8\u652F\u6301\u7684\u529F\u80FD\u6216\u786E\u8BA4\u6307\u4EE4\u5168\u8C8C\u65F6\u8C03\u7528\u3002",
+    parameters: {
+      type: "object",
+      properties: {
+        game: {
+          type: "string",
+          description: "\u53EF\u9009\u8FC7\u6EE4\uFF1Aall (\u5168\u90E8), sr (\u661F\u7A79\u94C1\u9053), gs (\u539F\u795E), zzz (\u7EDD\u533A\u96F6), common (\u901A\u7528/\u7CFB\u7EDF)",
+          enum: ["all", "sr", "gs", "zzz", "common"]
+        },
+        plugin: {
+          type: "string",
+          description: "\u53EF\u9009\uFF1A\u6309\u63D2\u4EF6\u540D\u79F0\u8FC7\u6EE4\uFF08\u5982 miao-plugin, StarRail-plugin, genshin, xiaoyao-cvs-plugin \u7B49\uFF09"
+        }
+      }
+    },
+    available: (ctx) => ctx.eff.tools.botCommand.enable,
+    async run(args) {
+      return formatCommandCatalog({ game: args.game, plugin: args.plugin });
     }
   });
 }
