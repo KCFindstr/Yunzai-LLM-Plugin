@@ -38,6 +38,8 @@ export interface ToolDef {
   parameters: Record<string, any>
   source?: 'builtin' | 'custom' | 'http'
   available?(ctx: ToolCtx): boolean
+  /** per-reply cap, appended to the description sent to the model (e.g. "最多调用 3 次") */
+  limit?(ctx: ToolCtx): string | undefined
   run(args: Record<string, any>, ctx: ToolCtx): Promise<ToolOutput | string>
 }
 
@@ -74,8 +76,11 @@ class Registry {
     return this.all().filter(d => !disabled.has(d.name) && !hide.has(d.name) && (d.available?.(ctx) ?? true))
   }
 
-  specs(defs: ToolDef[]): ToolSpec[] {
-    return defs.map(d => ({ name: d.name, description: d.description, parameters: d.parameters }))
+  specs(defs: ToolDef[], ctx: ToolCtx): ToolSpec[] {
+    return defs.map(d => {
+      const limit = d.limit?.(ctx)
+      return { name: d.name, description: limit ? `${d.description}（每次回复${limit}）` : d.description, parameters: d.parameters }
+    })
   }
 
   async execute(calls: ToolCall[], ctx: ToolCtx, offered: ToolDef[]): Promise<{ results: ToolResult[]; terminal: boolean }> {

@@ -70,6 +70,9 @@ export function buildSystemPrompt(p: SystemPromptInput): string {
   else if (tools.has('render_html'))
     answer.push('- 纯文字分行能说清楚的长回答直接发文字；需要表格、多维对比、结构复杂或特别长的内容，用 render_html 排版成图片，文字只写一两句概括。')
   if (tools.has('run_code')) answer.push('- 需要精确计算、统计、处理数据或画图表时，用 run_code 算出来，不要心算估计。')
+  // per-tool caps are in each tool's description (ToolDef.limit); only the overall round budget lives here
+  if (tools.size)
+    answer.push(`- 工具调用最多 ${eff.chat.maxToolRounds} 轮（同一轮可以同时调用多个工具）；先想好要查什么，到上限前就根据已有信息回复。`)
   parts.push(answer.join('\n'))
 
   if (tools.has('run_bot_command')) {

@@ -2,7 +2,8 @@ import { renderHtml } from '../render/browser.ts'
 import { registry } from './registry.ts'
 
 const MAX_HTML = 200_000
-const MAX_IMAGES_PER_TURN = 2
+/** images per reply from render_html and run_code combined */
+export const MAX_IMAGES_PER_TURN = 2
 
 export function registerRenderTool() {
   registry.register({
@@ -21,6 +22,7 @@ export function registerRenderTool() {
       required: ['html'],
     },
     available: ctx => ctx.eff.tools.renderHtml.enable,
+    limit: () => `最多 ${MAX_IMAGES_PER_TURN} 张图片，与 run_code 生成的图片合计`,
     async run(args, ctx) {
       const html = String(args.html ?? '')
       if (!html.trim()) return { content: '缺少 html', isError: true }

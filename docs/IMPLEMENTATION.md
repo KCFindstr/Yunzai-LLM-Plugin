@@ -147,6 +147,11 @@ Only erasable TS syntax (no enums/parameter properties/namespaces) — `erasable
 - Prompt trim (2026-10-21): PERSONA.md keeps only character/voice; research and format rules live in prompt.ts
   (merged duplicate chit-chat / don't-invent lines, condensed command + sticker sections). Prompt 5034 → 3956 chars.
 - Model ids may contain Chinese (`MODEL_ID` in cli/schema.mjs); the runtime never restricted them, only the CLI.
+- Per-reply tool caps are stated in each tool's description: `ToolDef.limit(ctx)` → `registry.specs(defs, ctx)` appends
+  `（每次回复…）` (from config, so stable per config = still cacheable). The system prompt only states the round budget
+  (`chat.maxToolRounds`). Shared constants: `MAX_IMAGES_PER_TURN` (render.ts, shared with run_code),
+  `MAX_COMMANDS_PER_TURN` (commands/tools.ts). Note: scripts that import src/ must run with cwd = bot root
+  (`paths.ts` resolves `plugins/Yunzai-LLM-Plugin` from cwd), or they read/create a stray empty config.
 - Sandbox repro of prod: `--runtime <name>` uses a separate `sandbox/.runtime-<name>/` (e.g. without game plugins,
   like prod), `--overlay <file>` merges YAML over the generated plugin config (copy prod's settings minus
   providers/models/keys, remap the group whitelist to 30001). Used 2026-10-20 to debug "#深渊 fails in prod":

@@ -3,6 +3,7 @@ import { formatCommandCatalog, matchRule, searchCommands } from './catalog.ts'
 import { dispatchCommand } from './dispatch.ts'
 
 const ALWAYS_BLOCKED = [/^#?llm/i]
+export const MAX_COMMANDS_PER_TURN = 1
 
 function blocked(cmd: string, patterns: string[]): boolean {
   if (ALWAYS_BLOCKED.some(r => r.test(cmd))) return true
@@ -29,12 +30,13 @@ export function registerCommandTools() {
       required: ['command'],
     },
     available: ctx => ctx.eff.tools.botCommand.enable,
+    limit: () => `最多调用 ${MAX_COMMANDS_PER_TURN} 次`,
     async run(args, ctx) {
       const cmd = String(args.command ?? '')
         .replace(/[\r\n]+/g, ' ')
         .trim()
       if (!cmd) return { content: '缺少 command', isError: true }
-      if (ctx.turn.commands >= 1) return { content: '每轮只能执行一条指令', isError: true }
+      if (ctx.turn.commands >= MAX_COMMANDS_PER_TURN) return { content: '每轮只能执行一条指令', isError: true }
       const bc = ctx.eff.tools.botCommand
       if (blocked(cmd, bc.blacklist)) return { content: `指令「${cmd}」不允许通过对话执行`, isError: true }
       const rule = await matchRule(cmd, ctx.e)

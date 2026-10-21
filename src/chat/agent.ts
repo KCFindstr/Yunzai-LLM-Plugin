@@ -102,7 +102,7 @@ async function runTurnInner(req: TurnRequest): Promise<TurnOutcome> {
     NATIVE_SEARCH_TYPES.has(provider.type) &&
     model.nativeSearch !== false
   let offered = model.toolUse === false || dropped.has('tools') ? [] : registry.forTurn(ctx)
-  let specs = registry.specs(offered)
+  let specs = registry.specs(offered, ctx)
 
   const botName = config.get().persona.botName || botNickname(e)
   const markdown = markdownEnabled(e, eff.reply)

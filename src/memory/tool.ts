@@ -30,6 +30,7 @@ export function registerMemoryTool() {
       required: ['action', 'scope'],
     },
     available: ctx => config.get().memory.enable,
+    limit: () => `最多修改 ${config.get().memory.maxWritesPerTurn} 次`,
     async run(args, ctx) {
       const scope: MemScope = args.scope === 'group' ? 'group' : 'user'
       if (scope === 'group' && !groupWritable(ctx)) return { content: '当前不能修改群记忆', isError: true }

@@ -3,9 +3,9 @@ import type { ExecToolConfig } from '../core/configTypes.ts'
 import { log } from '../core/log.ts'
 import { truncate } from '../core/util.ts'
 import { registry } from './registry.ts'
+import { MAX_IMAGES_PER_TURN } from './render.ts'
 
 const MAX_CODE = 50_000
-const MAX_IMAGES_PER_TURN = 2
 /** concurrent runs across all chats; each one is a cgroup with its own memory cap */
 const MAX_CONCURRENT = 2
 
@@ -138,6 +138,7 @@ export function registerExecTool() {
       const c = ctx.eff.tools.exec
       return c.enable && process.platform === 'win32' && (c.access === 'all' || ctx.isAdmin)
     },
+    limit: ctx => `最多运行 ${ctx.eff.tools.exec.maxRunsPerTurn} 次，生成的图片与 render_html 合计最多 ${MAX_IMAGES_PER_TURN} 张`,
     async run(args, ctx) {
       const cfg = ctx.eff.tools.exec
       const lang = String(args.language ?? '')

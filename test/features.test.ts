@@ -47,6 +47,24 @@ describe('markdown output', () => {
     assert.match(buildSystemPrompt({ ...base, markdown: true }), /按 Markdown 显示/)
   })
 
+  it('tool descriptions carry their per-reply caps (from config); the prompt only states the round budget', async () => {
+    const { registry } = await import('../src/tools/registry.ts')
+    const { registerWebTools } = await import('../src/tools/web.ts')
+    const { registerRenderTool } = await import('../src/tools/render.ts')
+    registerWebTools()
+    registerRenderTool()
+    const base = config.effective()
+    const eff = { ...base, tools: { ...base.tools, webFetch: { ...base.tools.webFetch, maxPerTurn: 5 } }, chat: { ...base.chat, maxToolRounds: 4 } }
+    const ctx: any = { eff, turn: { images: [] } }
+    const specs = Object.fromEntries(registry.specs([registry.get('web_fetch')!, registry.get('render_html')!], ctx).map(s => [s.name, s.description]))
+    assert.match(specs.web_fetch, /（每次回复最多调用 5 次）$/)
+    assert.match(specs.render_html, /（每次回复最多 2 张图片，与 run_code 生成的图片合计）$/)
+    assert.doesNotMatch(registry.get('web_fetch')!.description, /每次回复/, 'registered description stays static')
+    const s = buildSystemPrompt({ isGroup: true, botName: 'B', eff, tools: ['web_fetch'], nativeSearch: false, markdown: false })
+    assert.match(s, /工具调用最多 4 轮/)
+    assert.doesNotMatch(buildSystemPrompt({ isGroup: true, botName: 'B', eff, tools: [], nativeSearch: false, markdown: false }), /工具调用最多/)
+  })
+
   it('markdown mode prefers Markdown for long answers and only renders HTML when needed', () => {
     const eff = { ...config.effective(), reply: { ...config.effective().reply, maxBubbles: 2 } }
     const base = { isGroup: true, botName: 'B', eff, tools: ['render_html'], nativeSearch: false }

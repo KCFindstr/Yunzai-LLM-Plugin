@@ -2881,8 +2881,11 @@ var Registry = class {
     const disabled = new Set(ctx.eff.tools.disabled ?? []);
     return this.all().filter((d) => !disabled.has(d.name) && !hide.has(d.name) && (d.available?.(ctx) ?? true));
   }
-  specs(defs) {
-    return defs.map((d) => ({ name: d.name, description: d.description, parameters: d.parameters }));
+  specs(defs, ctx) {
+    return defs.map((d) => {
+      const limit = d.limit?.(ctx);
+      return { name: d.name, description: limit ? `${d.description}\uFF08\u6BCF\u6B21\u56DE\u590D${limit}\uFF09` : d.description, parameters: d.parameters };
+    });
   }
   async execute(calls, ctx, offered) {
     const allowed = new Map(offered.map((d) => [d.name, d]));
@@ -4489,6 +4492,8 @@ function buildSystemPrompt(p) {
   else if (tools.has("render_html"))
     answer.push("- \u7EAF\u6587\u5B57\u5206\u884C\u80FD\u8BF4\u6E05\u695A\u7684\u957F\u56DE\u7B54\u76F4\u63A5\u53D1\u6587\u5B57\uFF1B\u9700\u8981\u8868\u683C\u3001\u591A\u7EF4\u5BF9\u6BD4\u3001\u7ED3\u6784\u590D\u6742\u6216\u7279\u522B\u957F\u7684\u5185\u5BB9\uFF0C\u7528 render_html \u6392\u7248\u6210\u56FE\u7247\uFF0C\u6587\u5B57\u53EA\u5199\u4E00\u4E24\u53E5\u6982\u62EC\u3002");
   if (tools.has("run_code")) answer.push("- \u9700\u8981\u7CBE\u786E\u8BA1\u7B97\u3001\u7EDF\u8BA1\u3001\u5904\u7406\u6570\u636E\u6216\u753B\u56FE\u8868\u65F6\uFF0C\u7528 run_code \u7B97\u51FA\u6765\uFF0C\u4E0D\u8981\u5FC3\u7B97\u4F30\u8BA1\u3002");
+  if (tools.size)
+    answer.push(`- \u5DE5\u5177\u8C03\u7528\u6700\u591A ${eff.chat.maxToolRounds} \u8F6E\uFF08\u540C\u4E00\u8F6E\u53EF\u4EE5\u540C\u65F6\u8C03\u7528\u591A\u4E2A\u5DE5\u5177\uFF09\uFF1B\u5148\u60F3\u597D\u8981\u67E5\u4EC0\u4E48\uFF0C\u5230\u4E0A\u9650\u524D\u5C31\u6839\u636E\u5DF2\u6709\u4FE1\u606F\u56DE\u590D\u3002`);
   parts.push(answer.join("\n"));
   if (tools.has("run_bot_command")) {
     const cmds = promptEntries(eff.tools.botCommand.inPrompt);
@@ -4662,7 +4667,7 @@ async function runTurnInner(req) {
   const ctx = { e, eff, isAdmin, model, turn };
   let nativeSearch = !dropped.has("nativeSearch") && eff.tools.enable && eff.tools.webSearch.enable && eff.tools.webSearch.provider === "native" && NATIVE_SEARCH_TYPES.has(provider.type) && model.nativeSearch !== false;
   let offered = model.toolUse === false || dropped.has("tools") ? [] : registry.forTurn(ctx);
-  let specs = registry.specs(offered);
+  let specs = registry.specs(offered, ctx);
   const botName = config.get().persona.botName || botNickname(e);
   const markdown = markdownEnabled(e, eff.reply);
   const makeSystem = () => buildSystemPrompt({ isGroup: Boolean(e.group_id), botName, eff, tools: offered.map((t) => t.name), nativeSearch, markdown });
@@ -5022,6 +5027,7 @@ var LLMChat = class extends BasePlugin {
 
 // src/commands/tools.ts
 var ALWAYS_BLOCKED = [/^#?llm/i];
+var MAX_COMMANDS_PER_TURN = 1;
 function blocked(cmd, patterns) {
   if (ALWAYS_BLOCKED.some((r) => r.test(cmd))) return true;
   return patterns.some((p) => {
@@ -5043,10 +5049,11 @@ function registerCommandTools() {
       required: ["command"]
     },
     available: (ctx) => ctx.eff.tools.botCommand.enable,
+    limit: () => `\u6700\u591A\u8C03\u7528 ${MAX_COMMANDS_PER_TURN} \u6B21`,
     async run(args, ctx) {
       const cmd = String(args.command ?? "").replace(/[\r\n]+/g, " ").trim();
       if (!cmd) return { content: "\u7F3A\u5C11 command", isError: true };
-      if (ctx.turn.commands >= 1) return { content: "\u6BCF\u8F6E\u53EA\u80FD\u6267\u884C\u4E00\u6761\u6307\u4EE4", isError: true };
+      if (ctx.turn.commands >= MAX_COMMANDS_PER_TURN) return { content: "\u6BCF\u8F6E\u53EA\u80FD\u6267\u884C\u4E00\u6761\u6307\u4EE4", isError: true };
       const bc = ctx.eff.tools.botCommand;
       if (blocked(cmd, bc.blacklist)) return { content: `\u6307\u4EE4\u300C${cmd}\u300D\u4E0D\u5141\u8BB8\u901A\u8FC7\u5BF9\u8BDD\u6267\u884C`, isError: true };
       const rule = await matchRule(cmd, ctx.e);
@@ -5276,6 +5283,7 @@ function registerWebTools() {
       if (ws.provider === "searxng") return Boolean(ws.baseUrl);
       return ws.provider === "jina" || ws.provider === "anysearch" || Boolean(ws.apiKey);
     },
+    limit: (ctx) => `\u6700\u591A\u8C03\u7528 ${ctx.eff.tools.webSearch.maxPerTurn ?? 3} \u6B21`,
     async run(args, ctx) {
       const q = String(args.query ?? "").trim();
       if (!q) return { content: "\u7F3A\u5C11 query", isError: true };
@@ -5299,6 +5307,7 @@ ${truncate((h.snippet ?? "").replace(/\s+/g, " "), 300)}`).join("\n\n");
       required: ["url"]
     },
     available: (ctx) => ctx.eff.tools.webFetch.enable,
+    limit: (ctx) => `\u6700\u591A\u8C03\u7528 ${ctx.eff.tools.webFetch.maxPerTurn ?? 3} \u6B21`,
     async run(args, ctx) {
       const url = String(args.url ?? "").trim();
       if (!/^https?:\/\//i.test(url)) return { content: "\u8BF7\u63D0\u4F9B\u5B8C\u6574\u7684 http(s) \u94FE\u63A5", isError: true };
@@ -5335,6 +5344,7 @@ function registerMemoryTool() {
       required: ["action", "scope"]
     },
     available: (ctx) => config.get().memory.enable,
+    limit: () => `\u6700\u591A\u4FEE\u6539 ${config.get().memory.maxWritesPerTurn} \u6B21`,
     async run(args, ctx) {
       const scope = args.scope === "group" ? "group" : "user";
       if (scope === "group" && !groupWritable(ctx)) return { content: "\u5F53\u524D\u4E0D\u80FD\u4FEE\u6539\u7FA4\u8BB0\u5FC6", isError: true };
@@ -5456,6 +5466,7 @@ function registerRenderTool() {
       required: ["html"]
     },
     available: (ctx) => ctx.eff.tools.renderHtml.enable,
+    limit: () => `\u6700\u591A ${MAX_IMAGES_PER_TURN} \u5F20\u56FE\u7247\uFF0C\u4E0E run_code \u751F\u6210\u7684\u56FE\u7247\u5408\u8BA1`,
     async run(args, ctx) {
       const html = String(args.html ?? "");
       if (!html.trim()) return { content: "\u7F3A\u5C11 html", isError: true };
@@ -5476,7 +5487,6 @@ function registerRenderTool() {
 // src/tools/exec.ts
 import { spawn } from "child_process";
 var MAX_CODE = 5e4;
-var MAX_IMAGES_PER_TURN2 = 2;
 var MAX_CONCURRENT = 2;
 var running2 = 0;
 var waiters = [];
@@ -5529,7 +5539,7 @@ async function runInSandbox(lang, code, cfg, opts = {}) {
           memoryMB: cfg.memoryMB,
           diskMB: cfg.diskMB,
           maxOutput: cfg.maxOutput,
-          maxImages: opts.maxImages ?? MAX_IMAGES_PER_TURN2
+          maxImages: opts.maxImages ?? MAX_IMAGES_PER_TURN
         })
       );
     });
@@ -5572,6 +5582,7 @@ function registerExecTool() {
       const c = ctx.eff.tools.exec;
       return c.enable && process.platform === "win32" && (c.access === "all" || ctx.isAdmin);
     },
+    limit: (ctx) => `\u6700\u591A\u8FD0\u884C ${ctx.eff.tools.exec.maxRunsPerTurn} \u6B21\uFF0C\u751F\u6210\u7684\u56FE\u7247\u4E0E render_html \u5408\u8BA1\u6700\u591A ${MAX_IMAGES_PER_TURN} \u5F20`,
     async run(args, ctx) {
       const cfg = ctx.eff.tools.exec;
       const lang = String(args.language ?? "");
@@ -5581,7 +5592,7 @@ function registerExecTool() {
       if (code.length > MAX_CODE) return { content: `\u4EE3\u7801\u592A\u957F\uFF08${code.length} \u5B57\u7B26\uFF09`, isError: true };
       ctx.turn.execRuns = (ctx.turn.execRuns ?? 0) + 1;
       if (ctx.turn.execRuns > cfg.maxRunsPerTurn) return { content: `\u6BCF\u8F6E\u6700\u591A\u8FD0\u884C ${cfg.maxRunsPerTurn} \u6B21\u4EE3\u7801`, isError: true };
-      const maxImages = Math.max(0, MAX_IMAGES_PER_TURN2 - ctx.turn.images.length);
+      const maxImages = Math.max(0, MAX_IMAGES_PER_TURN - ctx.turn.images.length);
       const res = await runInSandbox(lang, code, cfg, { maxImages, signal: ctx.signal });
       for (const img of res.images) ctx.turn.images.push(Buffer.from(img.b64, "base64"));
       log.info(`run_code ${lang} exit=${res.exitCode}${res.timedOut ? " timeout" : ""}${res.killed ? " killed" : ""} ${res.durationMs}ms`);

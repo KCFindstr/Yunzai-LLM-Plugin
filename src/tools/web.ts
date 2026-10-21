@@ -195,6 +195,7 @@ export function registerWebTools() {
       if (ws.provider === 'searxng') return Boolean(ws.baseUrl)
       return ws.provider === 'jina' || ws.provider === 'anysearch' || Boolean(ws.apiKey)
     },
+    limit: ctx => `最多调用 ${ctx.eff.tools.webSearch.maxPerTurn ?? 3} 次`,
     async run(args, ctx) {
       const q = String(args.query ?? '').trim()
       if (!q) return { content: '缺少 query', isError: true }
@@ -217,6 +218,7 @@ export function registerWebTools() {
       required: ['url'],
     },
     available: ctx => ctx.eff.tools.webFetch.enable,
+    limit: ctx => `最多调用 ${ctx.eff.tools.webFetch.maxPerTurn ?? 3} 次`,
     async run(args, ctx) {
       const url = String(args.url ?? '').trim()
       if (!/^https?:\/\//i.test(url)) return { content: '请提供完整的 http(s) 链接', isError: true }
