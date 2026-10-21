@@ -1,4 +1,4 @@
-﻿import YAML from 'yaml'
+import YAML from 'yaml'
 import { queryBalance } from '../billing/balance.ts'
 import { daily, limitsFor, resetUsage, summarize, topUsers, totals, WINDOW_WEEK } from '../billing/ledger.ts'
 import { priceCacheInfo, refreshPrices, resolvePrice } from '../billing/pricing.ts'
@@ -763,8 +763,8 @@ const COMMANDS: Cmd[] = [
     async run({ e, args }) {
       const [name, ...rest] = args.split(/\s+/).filter(Boolean)
       const hint = name ? { name, desc: rest.join(' ') || undefined } : undefined
-      const n = await addStickersFrom(e, hint)
-      if (n) return true
+      const res = await addStickersFrom(e, hint)
+      if (res.total) return true
       return e.reply('没有找到图片。请在这条指令里附带图片/表情，或者引用（回复）一条图片消息再发送 #llm添加表情')
     },
   },

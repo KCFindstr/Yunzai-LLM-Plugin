@@ -2404,25 +2404,44 @@ async function indexSticker(s, opts = {}) {
 // src/stickers/add.ts
 async function collectImages(e) {
   const segs = [...e.message ?? []];
-  if (e.reply_id && typeof e.getReply === "function") {
-    try {
-      const r = await e.getReply();
-      segs.push(...r?.message ?? []);
-    } catch {
+  const urls = /* @__PURE__ */ new Set();
+  if (Array.isArray(e.img)) {
+    for (const u of e.img) if (typeof u === "string" && u) urls.add(u);
+  }
+  if (e.reply_id) {
+    if (typeof e.getReply === "function") {
+      try {
+        const r = await e.getReply();
+        if (r) {
+          segs.push(...r.message ?? []);
+          if (Array.isArray(r.img)) {
+            for (const u of r.img) if (typeof u === "string" && u) urls.add(u);
+          }
+        }
+      } catch {
+      }
+    }
+    if (e._llmQuoted?.imageUrls) {
+      for (const u of e._llmQuoted.imageUrls) if (typeof u === "string" && u) urls.add(u);
     }
   }
   const images = [];
   const mfaces = [];
   for (const s of segs) {
-    if (s?.type === "mface" && s.emoji_id) mfaces.push(s);
-    else if (s?.type === "image" && s.url) {
-      const buf = await fetchBuffer(s.url, { maxBytes: 10 * 1024 * 1024 });
-      if (buf) images.push({ buf });
+    if (s?.type === "mface" && s.emoji_id) {
+      mfaces.push(s);
+    } else if (s?.type === "image") {
+      const u = s.url || (typeof s.file === "string" && /^https?:\/\//.test(s.file) ? s.file : void 0);
+      if (u) urls.add(u);
     }
+  }
+  for (const url of urls) {
+    const buf = await fetchBuffer(url, { maxBytes: 10 * 1024 * 1024 });
+    if (buf) images.push({ buf });
   }
   return { images, mfaces };
 }
-async function addStickersFrom(e, hint) {
+async function addStickersFrom(e, hint, opts = { reply: true }) {
   const { images, mfaces } = await collectImages(e);
   const added = [];
   const dup = [];
@@ -2439,7 +2458,8 @@ async function addStickersFrom(e, hint) {
     );
     (isNew ? added : dup).push(s);
   }
-  if (!added.length && !dup.length) return 0;
+  const total = added.length + dup.length;
+  if (!total) return { total: 0, added: [], dup: [], lines: [] };
   const lines = [];
   for (const s of added) {
     if (hint?.name && hint?.desc) {
@@ -2454,28 +2474,35 @@ async function addStickersFrom(e, hint) {
     }
   }
   for (const s of dup) lines.push(`\u21A9\uFE0F ${s.id}\u300C${s.name}\u300D\u5DF2\u5B58\u5728`);
-  await e.reply(lines.join("\n"));
-  return added.length + dup.length;
+  if (opts.reply && lines.length) {
+    await e.reply(lines.join("\n"));
+  }
+  return { total, added, dup, lines };
 }
 function matchStickerAddIntent(text) {
-  const t = text.trim();
+  const t = text.replace(/\[(?:图片|表情包|表情)\]/g, " ").replace(/\s+/g, " ").trim();
   if (!t) return null;
   const ACTION_VERBS = "(?:\u52A0\u4E00\u4E0B|\u6DFB\u52A0|\u4FDD\u5B58\u4E00\u4E0B|\u4FDD\u5B58\u4E0B|\u4FDD\u5B58|\u5B58\u4E00\u4E0B|\u5B58\u4E0B|\u5B58\u4E2A|\u5B58|\u6536\u85CF\u4E00\u4E0B|\u6536\u85CF|\u8BB0\u4F4F|\u6536\u4E00\u4E0B|\u6536\u4E0B|\u6536\u5F55|\u52A0)";
   const STICKER_NOUNS = "(?:\u8FD9\u4E2A|\u8FD9\u5F20|\u8FD9\u53EA|\u672C)?(?:\u8868\u60C5\u5305|\u8868\u60C5|\u52A8\u56FE|\u56FE|mface)";
   const NAME_TAG = "(?:(?:\u53EB|\u540D\u4E3A|\u540D\u5B57\u53EB|\u79F0\u4F5C|\u5907\u6CE8\u4E3A)\\s*([\\S]+))";
+  const cleanName = (n) => {
+    const trimmed = n?.trim();
+    if (!trimmed || /^\[(?:图片|表情包|表情)\]$/.test(trimmed)) return void 0;
+    return trimmed;
+  };
   const regexA = new RegExp("^(?:\u5E2E\u6211|\u8BF7)?(?:\u628A)?\\s*" + ACTION_VERBS + "\\s*(?:\u4E00\u4E0B)?\\s*" + STICKER_NOUNS + "?(?:\\s+" + NAME_TAG + "|\\s+([\\S]+))?$", "i");
   const regexB = new RegExp("^(?:\u5E2E\u6211|\u8BF7)?(?:\u628A)?\\s*" + STICKER_NOUNS + "\\s*(?:\u7ED9(?:\u6211|\u4F60))?\\s*" + ACTION_VERBS + "(?:\u4E00\u4E0B)?(?:\\s*(?:\u4E3A|\u6210)?(?:\u8868\u60C5\u5305|\u8868\u60C5))?(?:\\s+" + NAME_TAG + "|\\s+([\\S]+))?$", "i");
   let m = regexA.exec(t);
-  if (m) return { matched: true, name: (m[1] || m[2])?.trim() };
+  if (m) return { matched: true, name: cleanName(m[1] || m[2]) };
   m = regexB.exec(t);
-  if (m) return { matched: true, name: (m[1] || m[2])?.trim() };
+  if (m) return { matched: true, name: cleanName(m[1] || m[2]) };
   if (t.length <= 25) {
     const hasAction = /(?:加一下|添加|保存|存一下|存个|收藏|记住|收录|加)/.test(t);
     const hasNoun = /(?:表情包|表情|动图)/.test(t);
     const notSend = !/(?:发|送|来一个|来只|给我)/.test(t);
     if (hasAction && hasNoun && notSend) {
       const nameMatch = /(?:叫|名为|名字叫|备注为)\s*([\S]+)/.exec(t);
-      return { matched: true, name: nameMatch ? nameMatch[1].trim() : void 0 };
+      return { matched: true, name: cleanName(nameMatch ? nameMatch[1] : void 0) };
     }
   }
   return null;
@@ -3678,8 +3705,8 @@ ${eff.personaPrompt}`);
     async run({ e, args }) {
       const [name, ...rest] = args.split(/\s+/).filter(Boolean);
       const hint = name ? { name, desc: rest.join(" ") || void 0 } : void 0;
-      const n = await addStickersFrom(e, hint);
-      if (n) return true;
+      const res = await addStickersFrom(e, hint);
+      if (res.total) return true;
       return e.reply("\u6CA1\u6709\u627E\u5230\u56FE\u7247\u3002\u8BF7\u5728\u8FD9\u6761\u6307\u4EE4\u91CC\u9644\u5E26\u56FE\u7247/\u8868\u60C5\uFF0C\u6216\u8005\u5F15\u7528\uFF08\u56DE\u590D\uFF09\u4E00\u6761\u56FE\u7247\u6D88\u606F\u518D\u53D1\u9001 #llm\u6DFB\u52A0\u8868\u60C5");
     }
   },
@@ -4157,6 +4184,17 @@ function buildSystemPrompt(p) {
           ...lines
         ].join("\n")
       );
+    if (tools.has("add_sticker")) {
+      parts.push(
+        [
+          "# \u4FDD\u5B58\u8868\u60C5\u5305",
+          "\u4F60\u6709\u7BA1\u7406\u8868\u60C5\u5E93\u7684\u80FD\u529B\u3002\u5F53\u5BF9\u65B9\u60F3\u8981\u4FDD\u5B58\u3001\u6536\u85CF\u3001\u6DFB\u52A0\u8868\u60C5\u5305\u6216\u56FE\u7247\u65F6\uFF0C\u8C03\u7528 add_sticker \u5DE5\u5177\u3002",
+          "- \u652F\u6301\u5BF9\u65B9\u672C\u6761\u6D88\u606F\u53D1\u9001\u7684\u56FE\u7247\uFF0C\u4E5F\u652F\u6301\u5BF9\u65B9\u56DE\u590D/\u5F15\u7528\u5176\u4ED6\u4EBA\u7684\u56FE\u7247\u6D88\u606F\u3002",
+          "- \u5982\u679C\u5BF9\u65B9\u6307\u5B9A\u4E86\u540D\u79F0\u6216\u4F7F\u7528\u573A\u666F\uFF0C\u4F20\u7ED9 name/desc\uFF1B\u82E5\u672A\u6307\u5B9A\u5219\u7559\u7A7A\uFF0C\u7CFB\u7EDF\u4F1A\u81EA\u52A8\u5206\u6790\u56FE\u7247\u547D\u540D\u3002",
+          "- \u5DE5\u5177\u8FD4\u56DE\u6210\u529F\u540E\uFF0C\u7528\u81EA\u7136\u7B80\u77ED\u7684\u8BDD\u544A\u77E5\u5BF9\u65B9\u5DF2\u4FDD\u5B58\u597D\u5373\u53EF\u3002"
+        ].join("\n")
+      );
+    }
   }
   return parts.join("\n\n");
 }
@@ -4576,8 +4614,8 @@ var LLMChat = class extends BasePlugin {
         return true;
       }
       const hint = stickerIntent.name ? { name: stickerIntent.name } : void 0;
-      const count = await addStickersFrom(e, hint);
-      if (!count) {
+      const res = await addStickersFrom(e, hint);
+      if (!res.total) {
         await e.reply("\u6CA1\u6709\u627E\u5230\u56FE\u7247\u3002\u8BF7\u5728\u8FD9\u6761\u6D88\u606F\u91CC\u9644\u5E26\u56FE\u7247/\u8868\u60C5\uFF0C\u6216\u8005\u5F15\u7528\uFF08\u56DE\u590D\uFF09\u4E00\u6761\u56FE\u7247\u6D88\u606F\u518D\u5BF9\u6211\u8BF4\u201C\u52A0\u4E00\u4E0B\u8FD9\u4E2A\u8868\u60C5\u201D");
       }
       return true;
@@ -5025,6 +5063,81 @@ ${renderMemory(scope, key).join("\n")}` : "";
   });
 }
 
+// src/stickers/tool.ts
+function registerStickerTools() {
+  registry.register({
+    name: "add_sticker",
+    source: "builtin",
+    description: "\u6DFB\u52A0\u5E76\u4FDD\u5B58\u8868\u60C5\u5305\u5230\u673A\u5668\u4EBA\u7684\u8868\u60C5\u5E93\u3002\u5F53\u7528\u6237\u8981\u6C42\u6DFB\u52A0\u3001\u4FDD\u5B58\u3001\u6536\u85CF\u8868\u60C5\u5305\u6216\u56FE\u7247\u65F6\u8C03\u7528\uFF08\u652F\u6301\u672C\u6D88\u606F\u9644\u5E26\u7684\u56FE\u7247/\u8868\u60C5\uFF0C\u6216\u56DE\u590D/\u5F15\u7528\u7684\u56FE\u7247\u6D88\u606F\uFF09\u3002\u7528\u6237\u5982\u679C\u6307\u5B9A\u4E86\u540D\u79F0\u6216\u4F7F\u7528\u573A\u666F\u53EF\u586B\u5165 name/desc\uFF0C\u672A\u6307\u5B9A\u5219\u7559\u7A7A\uFF0C\u7CFB\u7EDF\u4F1A\u81EA\u52A8\u8FDB\u884C\u89C6\u89C9\u8BC6\u522B\u547D\u540D\u3002",
+    parameters: {
+      type: "object",
+      properties: {
+        name: {
+          type: "string",
+          description: "\u53EF\u9009\uFF0C\u8868\u60C5\u5305\u540D\u79F0/\u5173\u952E\u8BCD\uFF08\u5982\u201C\u5F00\u5FC3\u732B\u732B\u201D\u3001\u201C\u6D41\u6CEA\u9EC4\u8C46\u201D\uFF09\u3002\u82E5\u7528\u6237\u672A\u6307\u5B9A\u5219\u7559\u7A7A\u3002"
+        },
+        desc: {
+          type: "string",
+          description: "\u53EF\u9009\uFF0C\u8868\u60C5\u5305\u542B\u4E49\u6216\u4F7F\u7528\u573A\u666F\u8BF4\u660E\u3002"
+        }
+      }
+    },
+    available: (ctx) => ctx.eff.sticker.enable,
+    async run(args, ctx) {
+      if (!ctx.isAdmin) {
+        return {
+          content: "\u6743\u9650\u4E0D\u8DB3\uFF1A\u5F53\u524D\u53EA\u6709\u673A\u5668\u4EBA\u7BA1\u7406\u5458\u6709\u6743\u9650\u5411\u8868\u60C5\u5305\u5E93\u6DFB\u52A0\u6216\u4FDD\u5B58\u8868\u60C5\u5305\u3002\u8BF7\u793C\u8C8C\u544A\u77E5\u5BF9\u65B9\u9700\u8981\u7BA1\u7406\u5458\u6743\u9650\u3002",
+          isError: true
+        };
+      }
+      const hint = args.name ? { name: String(args.name).trim(), desc: args.desc ? String(args.desc).trim() : void 0 } : void 0;
+      const res = await addStickersFrom(ctx.e, hint, { reply: false });
+      if (!res.total) {
+        return {
+          content: "\u672A\u5728\u5F53\u524D\u6D88\u606F\u6216\u5F15\u7528\u7684\u6D88\u606F\u4E2D\u627E\u5230\u4EFB\u4F55\u56FE\u7247\u6216\u8868\u60C5\u3002\u8BF7\u63D0\u793A\u7528\u6237\uFF1A\u9700\u8981\u9644\u5E26\u56FE\u7247\uFF0C\u6216\u5F15\u7528/\u56DE\u590D\u4E00\u5F20\u56FE\u7247\u6D88\u606F\u518D\u8FDB\u884C\u4FDD\u5B58\u3002",
+          isError: true
+        };
+      }
+      return `\u8868\u60C5\u5305\u5DF2\u5904\u7406\u5B8C\u6210\uFF1A
+${res.lines.join("\n")}
+\u8BF7\u5728\u6700\u7EC8\u56DE\u590D\u4E2D\u7B80\u77ED\u53E3\u8BED\u5316\u5730\u544A\u77E5\u7528\u6237\u5DF2\u4FDD\u5B58\u6210\u529F\uFF08\u53EF\u4EE5\u63D0\u53CA\u4FDD\u5B58\u7684\u8868\u60C5\u540D\u79F0\uFF09\u3002`;
+    }
+  });
+  registry.register({
+    name: "list_stickers",
+    source: "builtin",
+    description: "\u67E5\u770B\u6216\u641C\u7D22\u673A\u5668\u4EBA\u8868\u60C5\u5E93\u4E2D\u5DF2\u4FDD\u5B58\u7684\u8868\u60C5\u5305\u5217\u8868\u3002\u5F53\u7528\u6237\u8BE2\u95EE\u673A\u5668\u4EBA\u6709\u54EA\u4E9B\u8868\u60C5\u5305\u6216\u641C\u7D22\u7279\u5B9A\u8868\u60C5\u65F6\u8C03\u7528\u3002",
+    parameters: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description: "\u53EF\u9009\uFF0C\u641C\u7D22\u5173\u952E\u8BCD\uFF08\u6309\u540D\u79F0\u3001\u6807\u7B7E\u6216\u63CF\u8FF0\u641C\u7D22\uFF09\u3002\u7559\u7A7A\u5219\u5217\u51FA\u6700\u8FD1\u4FDD\u5B58\u7684\u8868\u60C5\u3002"
+        }
+      }
+    },
+    available: (ctx) => ctx.eff.sticker.enable,
+    async run(args) {
+      const items = listStickers();
+      if (!items.length) return "\u5F53\u524D\u8868\u60C5\u5E93\u4E3A\u7A7A\uFF0C\u8FD8\u6CA1\u6709\u4FDD\u5B58\u4EFB\u4F55\u8868\u60C5\u5305\u3002";
+      const q = typeof args.query === "string" ? args.query.trim() : "";
+      let matched = items;
+      if (q) {
+        matched = items.filter(
+          (s) => s.name.includes(q) || s.desc.includes(q) || s.tags.some((t) => t.includes(q))
+        );
+        if (!matched.length) return `\u672A\u627E\u5230\u4E0E\u201C${q}\u201D\u76F8\u5173\u7684\u8868\u60C5\u5305\u3002\u5F53\u524D\u8868\u60C5\u5E93\u5171\u6709 ${items.length} \u4E2A\u8868\u60C5\u3002`;
+      }
+      const top = matched.slice(-20).reverse();
+      const lines = top.map(
+        (s) => `- \u300C${s.name}\u300D${s.desc ? `\uFF1A${s.desc}` : ""}${s.tags.length ? ` [${s.tags.slice(0, 3).join("/")}]` : ""}`
+      );
+      return `\u8868\u60C5\u5E93\u4E2D\u627E\u5230 ${matched.length} \u4E2A\u8868\u60C5\uFF08\u663E\u793A\u6700\u8FD1 ${top.length} \u4E2A\uFF09\uFF1A
+${lines.join("\n")}`;
+    }
+  });
+}
+
 // src/index.ts
 ownClasses.add(LLMChat);
 ownClasses.add(LLMAdmin);
@@ -5037,6 +5150,7 @@ function startup() {
   registerCommandTools();
   registerSkillTool();
   registerMemoryTool();
+  registerStickerTools();
   loadSkills();
   loadCustomTools().catch((err) => log.warn("\u52A0\u8F7D\u81EA\u5B9A\u4E49\u5DE5\u5177\u5931\u8D25", err));
   startPriceRefresh();

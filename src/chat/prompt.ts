@@ -98,6 +98,17 @@ export function buildSystemPrompt(p: SystemPromptInput): string {
           ...lines,
         ].join('\n'),
       )
+    if (tools.has('add_sticker')) {
+      parts.push(
+        [
+          '# 保存表情包',
+          '你有管理表情库的能力。当对方想要保存、收藏、添加表情包或图片时，调用 add_sticker 工具。',
+          '- 支持对方本条消息发送的图片，也支持对方回复/引用其他人的图片消息。',
+          '- 如果对方指定了名称或使用场景，传给 name/desc；若未指定则留空，系统会自动分析图片命名。',
+          '- 工具返回成功后，用自然简短的话告知对方已保存好即可。',
+        ].join('\n'),
+      )
+    }
   }
 
   return parts.join('\n\n')

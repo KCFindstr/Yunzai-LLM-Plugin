@@ -1,4 +1,4 @@
-﻿import { DISPATCHED } from '../commands/dispatch.ts'
+import { DISPATCHED } from '../commands/dispatch.ts'
 import { config } from '../core/config.ts'
 import type { PluginConfig } from '../core/configTypes.ts'
 import { log } from '../core/log.ts'
@@ -105,8 +105,8 @@ export class LLMChat extends BasePlugin {
         return true
       }
       const hint = stickerIntent.name ? { name: stickerIntent.name } : undefined
-      const count = await addStickersFrom(e, hint)
-      if (!count) {
+      const res = await addStickersFrom(e, hint)
+      if (!res.total) {
         await e.reply('没有找到图片。请在这条消息里附带图片/表情，或者引用（回复）一条图片消息再对我说“加一下这个表情”')
       }
       return true

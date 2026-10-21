@@ -11,6 +11,7 @@ import { loadCustomTools } from './tools/custom.ts'
 import { loadSkills, registerSkillTool } from './tools/skills.ts'
 import { registerWebTools } from './tools/web.ts'
 import { registerMemoryTool } from './memory/tool.ts'
+import { registerStickerTools } from './stickers/tool.ts'
 
 ownClasses.add(LLMChat)
 ownClasses.add(LLMAdmin)
@@ -26,6 +27,7 @@ function startup() {
   registerCommandTools()
   registerSkillTool()
   registerMemoryTool()
+  registerStickerTools()
   loadSkills()
   loadCustomTools().catch(err => log.warn('加载自定义工具失败', err))
   startPriceRefresh()
