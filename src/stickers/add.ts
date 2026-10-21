@@ -61,7 +61,7 @@ export async function collectImages(e: any): Promise<{ images: { buf: Buffer }[]
 export async function addStickersFrom(
   e: any,
   hint?: { name?: string; desc?: string },
-  opts: { reply?: boolean } = { reply: true },
+  { reply = true }: { reply?: boolean } = {},
 ): Promise<AddStickersResult> {
   const { images, mfaces } = await collectImages(e)
   const added: Sticker[] = []
@@ -96,46 +96,8 @@ export async function addStickersFrom(
     }
   }
   for (const s of dup) lines.push(`↩️ ${s.id}「${s.name}」已存在`)
-  if (opts.reply && lines.length) {
+  if (reply && lines.length) {
     await e.reply(lines.join('\n'))
   }
   return { total, added, dup, lines }
-}
-
-/**
- * Match natural language intent to add/save a sticker:
- * e.g. "加一下这个表情", "保存这个表情包", "把这个表情存一下", "收藏这个表情 叫开心"
- */
-export function matchStickerAddIntent(text: string): { matched: boolean; name?: string } | null {
-  // Strip image/sticker segment placeholders before intent matching
-  const t = text.replace(/\[(?:图片|表情包|表情)\]/g, ' ').replace(/\s+/g, ' ').trim()
-  if (!t) return null
-  const ACTION_VERBS = '(?:加一下|添加|保存一下|保存下|保存|存一下|存下|存个|存|收藏一下|收藏|记住|收一下|收下|收录|加)'
-  const STICKER_NOUNS = '(?:这个|这张|这只|本)?(?:表情包|表情|动图|图|mface)'
-  const NAME_TAG = '(?:(?:叫|名为|名字叫|称作|备注为)\\s*([\\S]+))'
-
-  const cleanName = (n?: string) => {
-    const trimmed = n?.trim()
-    if (!trimmed || /^\[(?:图片|表情包|表情)\]$/.test(trimmed)) return undefined
-    return trimmed
-  }
-
-  const regexA = new RegExp('^(?:帮我|请)?(?:把)?\\s*' + ACTION_VERBS + '\\s*(?:一下)?\\s*' + STICKER_NOUNS + '?(?:\\s+' + NAME_TAG + '|\\s+([\\S]+))?$', 'i')
-  const regexB = new RegExp('^(?:帮我|请)?(?:把)?\\s*' + STICKER_NOUNS + '\\s*(?:给(?:我|你))?\\s*' + ACTION_VERBS + '(?:一下)?(?:\\s*(?:为|成)?(?:表情包|表情))?(?:\\s+' + NAME_TAG + '|\\s+([\\S]+))?$', 'i')
-
-  let m = regexA.exec(t)
-  if (m) return { matched: true, name: cleanName(m[1] || m[2]) }
-  m = regexB.exec(t)
-  if (m) return { matched: true, name: cleanName(m[1] || m[2]) }
-
-  if (t.length <= 25) {
-    const hasAction = /(?:加一下|添加|保存|存一下|存个|收藏|记住|收录|加)/.test(t)
-    const hasNoun = /(?:表情包|表情|动图)/.test(t)
-    const notSend = !/(?:发|送|来一个|来只|给我)/.test(t)
-    if (hasAction && hasNoun && notSend) {
-      const nameMatch = /(?:叫|名为|名字叫|备注为)\s*([\S]+)/.exec(t)
-      return { matched: true, name: cleanName(nameMatch ? nameMatch[1] : undefined) }
-    }
-  }
-  return null
 }

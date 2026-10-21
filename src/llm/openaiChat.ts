@@ -74,6 +74,8 @@ export const openaiChat: Adapter = {
     body[field] = p.maxTokens
     const effort = openaiEffort(p.thinking)
     if (effort) body.reasoning_effort = effort
+    // DeepSeek models think by default; 'off' has to be explicit there
+    else if (p.thinking === 'off' && (/deepseek/i.test(base) || /^deepseek/i.test(p.model.model))) body.thinking = { type: 'disabled' }
     if (p.temperature != null) body.temperature = p.temperature
     if (p.model.topP != null) body.top_p = p.model.topP
     if ((p.provider.promptCacheKey ?? official) && p.cacheKey) body.prompt_cache_key = p.cacheKey

@@ -12,7 +12,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import YAML from 'yaml'
-import { modelSuggestions, PRICING_FIELDS, PROVIDER_TYPES, schemaAt, SCHEMA, suggestKeys, THINKING, validate, validatePath, valuesOf } from './schema.mjs'
+import { MODEL_ID, modelSuggestions, PRICING_FIELDS, PROVIDER_TYPES, schemaAt, SCHEMA, suggestKeys, THINKING, validate, validatePath, valuesOf } from './schema.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const CONFIG_DIR = process.env.YZ_LLM_CONFIG_DIR || path.resolve(here, '..', 'config')
@@ -439,7 +439,7 @@ async function addModel(providerName) {
   const defId = model.replace(/^.*\//, '').replace(/[^\w.-]+/g, '-')
   const id = await input('别名 id（在指令里使用）', {
     default: ids.includes(defId) ? undefined : defId,
-    validate: x => (!/^[\w.-]+$/.test(x.trim()) ? '只能包含字母数字 . _ -' : ids.includes(x.trim()) ? '已存在' : true),
+    validate: x => (!MODEL_ID.test(x.trim()) ? '只能包含中英文、数字和 . _ -（不能有空格）' : ids.includes(x.trim()) ? '已存在' : true),
   })
   const thinking = await select('思考强度', THINKING.map(t => ({ name: t, value: t })), { back: false, defaultValue: 'low' })
   const vision = await confirm('支持图片输入？', !/deepseek/.test(model))
@@ -619,6 +619,9 @@ function parseCli(node, raw, keys) {
       if (!Number.isFinite(Number(t))) throw new Error('应为数字')
       return Number(t)
     case 'enum':
+      // enums may mix booleans with strings (reply.markdown: false / true / auto)
+      if ((t === 'true' || t === 'false') && valuesOf(node, eff(), undefined).includes(t === 'true')) return t === 'true'
+      return t
     case 'str':
     case 'text':
       return t

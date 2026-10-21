@@ -819,7 +819,7 @@ const COMMANDS: Cmd[] = [
       const s = findSticker(args)
       if (!s) return e.reply('没有这个表情')
       await e.reply(`${s.id}「${s.name}」\n描述：${s.desc}\n场景：${s.use}\n标签：${s.tags.join('、')}${s.text ? `\n文字：${s.text}` : ''}`)
-      return sendSticker(e, s, config.get().sticker.sendAs)
+      return sendSticker(e, s, config.get().sticker)
     },
   },
   {
@@ -892,7 +892,7 @@ const COMMANDS: Cmd[] = [
     level: 'admin',
     async run({ e, args }) {
       const [provider, extra] = args.split(/\s+/)
-      const ok = ['native', 'tavily', 'brave', 'searxng', 'jina', 'none']
+      const ok = ['native', 'anysearch', 'tavily', 'brave', 'searxng', 'jina', 'none']
       if (!ok.includes(provider)) return e.reply(`可选：${ok.join(' / ')}`)
       if (extra && provider !== 'searxng' && e.group_id) {
         await e.recall?.().catch?.(() => {})

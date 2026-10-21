@@ -1,7 +1,7 @@
 import { computeCost, resolvePrice } from '../billing/pricing.ts'
 import { checkQuota, record, type QuotaCtx } from '../billing/ledger.ts'
 import { config } from '../core/config.ts'
-import type { ModelConfig, ProviderConfig } from '../core/configTypes.ts'
+import type { ModelConfig, ProviderConfig, ThinkingLevel } from '../core/configTypes.ts'
 import { log } from '../core/log.ts'
 import { chat, type Part } from '../llm/index.ts'
 
@@ -39,39 +39,36 @@ export async function utilityChat(opts: {
   user: Part[]
   maxTokens?: number
   quotaCtx: QuotaCtx
+  /** override the model's own setting (e.g. 'off' for a latency-sensitive classifier call) */
+  thinking?: ThinkingLevel
+  temperature?: number
+  signal?: AbortSignal
 }): Promise<{ text: string; model: ModelConfig }> {
   const picked = pickModel(opts.candidates, opts.vision)
   if (!picked) throw new Error(opts.vision ? '没有可用的视觉模型（需配置 vision 模型及 API Key）' : '没有可用的模型')
   const block = checkQuota(picked.model, opts.quotaCtx)
   if (block) throw new Error(`模型 ${picked.model.id} 额度已用完`)
-  let thinking = picked.model.thinking ?? 'off'
-  let res: any
-  try {
-    res = await chat({
+  // background jobs (summaries, sticker naming) don't need per-message 'auto' selection
+  const thinking: ThinkingLevel = opts.thinking ?? (!picked.model.thinking || picked.model.thinking === 'auto' ? 'off' : picked.model.thinking)
+  const call = (t: ThinkingLevel) =>
+    chat({
       model: picked.model,
       provider: picked.provider,
       system: opts.system,
       messages: [{ role: 'user', content: opts.user }],
       tools: [],
-      thinking,
+      thinking: t,
       maxTokens: opts.maxTokens ?? 600,
-      temperature: picked.model.temperature ?? null,
+      temperature: opts.temperature ?? picked.model.temperature ?? null,
+      signal: opts.signal,
+      store: false,
     })
+  let res: any
+  try {
+    res = await call(thinking)
   } catch (err: any) {
-    if (thinking !== 'off' && /reason|thinking|effort|output_config/.test(`${err?.message ?? ''} ${err?.body ?? ''}`.toLowerCase())) {
-      res = await chat({
-        model: picked.model,
-        provider: picked.provider,
-        system: opts.system,
-        messages: [{ role: 'user', content: opts.user }],
-        tools: [],
-        thinking: 'off',
-        maxTokens: opts.maxTokens ?? 600,
-        temperature: picked.model.temperature ?? null,
-      })
-    } else {
-      throw err
-    }
+    if (thinking !== 'off' && /reason|thinking|effort|output_config/.test(`${err?.message ?? ''} ${err?.body ?? ''}`.toLowerCase())) res = await call('off')
+    else throw err
   }
   const cost = computeCost(res.usage, resolvePrice(picked.model))
   record(picked.model, opts.quotaCtx, cost, res.usage)

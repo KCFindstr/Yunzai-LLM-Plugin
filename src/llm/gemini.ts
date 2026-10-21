@@ -13,7 +13,7 @@ export const gemini: Adapter = {
   async chat(p: ChatParams): Promise<ChatResult> {
     const base = p.provider.baseUrl || 'https://generativelanguage.googleapis.com'
     const url = /\/v1beta\/?$/.test(base) ? joinUrl(base, 'interactions') : joinUrl(base, 'v1beta/interactions')
-    const store = p.provider.store ?? true
+    const store = p.store ?? p.provider.store ?? true
     const vision = p.model.vision !== false
     const msgs = p.state ? p.messages.slice(p.state.skip) : p.messages
     const input: any[] = []

@@ -146,6 +146,8 @@ function prepare() {
   if (fs.existsSync(path.join(PLUGIN, 'skills'))) copyDir(path.join(PLUGIN, 'skills'), path.join(dst, 'skills'))
   if (fs.existsSync(path.join(PLUGIN, 'tools'))) copyDir(path.join(PLUGIN, 'tools'), path.join(dst, 'tools'))
   fs.copyFileSync(path.join(PLUGIN, 'config', 'default_config.yaml'), path.join(dst, 'config', 'default_config.yaml'))
+  // persona files referenced as `file:xxx.md`
+  for (const f of fs.readdirSync(path.join(PLUGIN, 'config'))) if (/\.(md|txt)$/i.test(f)) fs.copyFileSync(path.join(PLUGIN, 'config', f), path.join(dst, 'config', f))
   let pluginConfig = useMock ? MOCK_PLUGIN_CONFIG : fs.readFileSync(userConfig, 'utf8')
   // --overlay <file>: YAML merged over the generated config (e.g. a copy of prod's settings without providers/keys)
   const overlayArg = argv.includes('--overlay') ? argv[argv.indexOf('--overlay') + 1] : undefined

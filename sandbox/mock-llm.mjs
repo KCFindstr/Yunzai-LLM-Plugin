@@ -2,6 +2,7 @@
  * Scripted OpenAI-compatible /chat/completions server for offline sandbox runs.
  * It "decides" based on keywords so the full pipeline (tools, command dispatch, stickers) can be exercised.
  */
+import fs from 'node:fs'
 import http from 'node:http'
 
 const COMMANDS = [
@@ -44,6 +45,11 @@ export function decide(body) {
   const tools = new Set((body.tools ?? []).map(t => t.function?.name))
   const last = messages.at(-1)
 
+  // thinking=auto judge (chat.thinkingJudge.mode: model)
+  if (/消息分类器/.test(system)) {
+    const msg = typeof last?.content === 'string' ? last.content : (last?.content ?? []).map(c => c.text ?? '').join('')
+    return reply(/配队|整理|攻略|规划|代码|分析/.test(msg) ? 'complex' : /[?？]|几|多少|什么/.test(msg) ? 'question' : 'casual')
+  }
   if (/整理表情包库/.test(system)) {
     stickerN++
     return reply(JSON.stringify({ name: `测试表情${stickerN}`, desc: '一个彩色条纹方块', use: '开心或者调侃的时候', tags: ['开心', '调侃'], text: '' }))
@@ -55,6 +61,9 @@ export function decide(body) {
     const content = String(last.content ?? '')
     if (/不允许|主人指令|没有插件/.test(content)) return reply('这个我帮不了你哦，直接发指令试试？')
     if (/已记住|已合并/.test(content)) return reply('好，我记住啦')
+    if (/已渲染为图片/.test(content)) return reply('整理好啦，看图喵！')
+    const exit = /^退出码 (\d+)[\s\S]*?\[stdout\]\n([^\n]*)/.exec(content)
+    if (exit) return reply(`算好了：${exit[2]}`)
     return reply(`（模拟）根据工具结果：${content.slice(0, 60)}`)
   }
 
@@ -66,6 +75,19 @@ export function decide(body) {
     }
   const remember = /^记住(.+)$/.exec(text)
   if (remember && tools.has('memory')) return reply(null, call('memory', { action: 'add', scope: 'user', text: remember[1].replace(/^[：:，,\s]+/, '') }))
+  if (/怎么配队/.test(text) && /回复会按 Markdown 显示/.test(system))
+    return reply(
+      '哼哼，算你问对猫了喵！\n\n## 胡桃 + 行秋 双水蒸发\n\n| 位置 | 角色 | 作用 |\n|---|---|---|\n| 主C | 胡桃 | E 后重击蒸发 |\n| 副C | 行秋 | 大招挂水、减伤 |\n| 辅助 | 夜兰 / 钟离 | 补伤害 / 护盾 |\n\n**手法**：行秋 EQ → 胡桃 E → 9 重击。\n\n学费记得交小鱼干喵～',
+    )
+  if (/表格|整理一下|对比一下/.test(text) && tools.has('render_html'))
+    return reply(null, call('render_html', { html: '<h2>对比</h2><table><tr><th>角色</th><th>定位</th></tr><tr><td>胡桃</td><td>主C</td></tr><tr><td>行秋</td><td>副C</td></tr></table>' }))
+  if (/算一下|画个图/.test(text) && tools.has('run_code'))
+    return reply(null, call('run_code', {
+      language: 'python',
+      code: /画个图/.test(text)
+        ? 'import matplotlib.pyplot as plt\nplt.bar(["胡桃","行秋"],[3,5]);plt.title("出场次数");plt.savefig("out/c.png");print("done")'
+        : 'import math\nprint(math.comb(90, 3))',
+    }))
   if (/搜索|新闻/.test(text) && tools.has('web_search')) return reply(null, call('web_search', { query: text }))
   const url = /https?:\/\/\S+/.exec(text)?.[0]
   if (url && tools.has('web_fetch')) return reply(null, call('web_fetch', { url }))
@@ -94,6 +116,8 @@ export function startMockLLM(port, log = () => {}) {
       try {
         body = JSON.parse(raw || '{}')
       } catch {}
+      if (process.env.MOCK_DUMP) fs.appendFileSync(process.env.MOCK_DUMP, `${JSON.stringify({ url: req.url, body })}
+`)
       const out = decide(body)
       log(`\x1b[90m[MockLLM] ${req.url} msgs=${body.messages?.length ?? 0} tools=${body.tools?.length ?? 0} -> ${out.choices[0].message.tool_calls?.[0]?.function?.name ?? 'text'}\x1b[0m`)
       res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(out))

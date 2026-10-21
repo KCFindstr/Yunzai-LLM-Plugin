@@ -62,6 +62,8 @@ export const TEST_IMAGES = {
   green: makePng(40, 200, 80),
   blue: makePng(40, 90, 220),
   yellow: makePng(240, 210, 30),
+  // photo-sized, to exercise sticker downscaling
+  big: makePng(200, 120, 40, 800),
 }
 
 /**

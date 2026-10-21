@@ -5,8 +5,7 @@ import { log } from '../core/log.ts'
 import { formatDuration, formatUsd, KeyedLock, pick, truncate } from '../core/util.ts'
 import { compactSession, runTurn, type TurnOutcome } from '../chat/agent.ts'
 import { recordGroupMessage } from '../chat/groupLog.ts'
-import { extractInput, getQuoted, segmentsToText } from '../chat/message.ts'
-import { addStickersFrom, matchStickerAddIntent } from '../stickers/add.ts'
+import { extractInput, getQuoted } from '../chat/message.ts'
 import { Cooldown } from '../chat/ratelimit.ts'
 import { deliver } from '../chat/reply.ts'
 import { sessionKey } from '../chat/session.ts'
@@ -96,22 +95,6 @@ export class LLMChat extends BasePlugin {
 
     const eff = config.effective(e.group_id)
     const isAdmin = config.isAdmin(e)
-    // 识别自然语言添加/保存表情包意图 (例如: @bot 加一下这个表情 [叫名称])
-    const rawText = segmentsToText(e.message ?? [], e.self_id)
-    const stickerIntent = matchStickerAddIntent(rawText)
-    if (stickerIntent) {
-      if (!isAdmin) {
-        await e.reply('只有管理员可以添加表情包哦~')
-        return true
-      }
-      const hint = stickerIntent.name ? { name: stickerIntent.name } : undefined
-      const res = await addStickersFrom(e, hint)
-      if (!res.total) {
-        await e.reply('没有找到图片。请在这条消息里附带图片/表情，或者引用（回复）一条图片消息再对我说“加一下这个表情”')
-      }
-      return true
-    }
-
     if (!hasContent(e) && !e.reply_id) {
       const usable = Boolean(pickModel([eff.model, ...cfg.fallbackModels]))
       if (usable && cfg.trigger.emptyAtReply && reason === 'at' && userCd.pass(`empty:${e.self_id}:${e.user_id}`, 30))
@@ -159,7 +142,7 @@ export class LLMChat extends BasePlugin {
           return
         }
         const suppressText = Boolean(out.dispatched) && !eff.tools.botCommand.ack
-        await deliver(e, out.text, eff, { startedAt, convKey, suppressText })
+        await deliver(e, out.text, eff, { startedAt, convKey, suppressText, images: out.images })
         compactSession(convKey, eff, { userId: e.user_id, groupId: e.group_id, isAdmin }).catch(() => {})
       } catch (err: any) {
         log.error('处理对话失败', err)

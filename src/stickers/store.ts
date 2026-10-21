@@ -140,7 +140,12 @@ export function removeSticker(key: string): Sticker | undefined {
   if (!s) return undefined
   store.data.items = store.data.items.filter(x => x !== s)
   const f = stickerFile(s)
-  if (f && !store.data.items.some(x => x.file === s.file)) fs.rmSync(f, { force: true })
+  if (f && !store.data.items.some(x => x.file === s.file)) {
+    fs.rmSync(f, { force: true })
+    // scaled copies made for sending (<name>.s240.png)
+    const base = path.parse(f).name
+    for (const x of fs.readdirSync(path.dirname(f))) if (x.startsWith(`${base}.s`)) fs.rmSync(path.join(path.dirname(f), x), { force: true })
+  }
   changed()
   return s
 }

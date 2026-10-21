@@ -15,6 +15,18 @@ async function searchExternal(query: string, ctx: ToolCtx): Promise<SearchHit[]>
   const n = Math.min(Math.max(ws.maxResults || 5, 1), 10)
   const timeout = AbortSignal.timeout(20000)
   switch (ws.provider) {
+    case 'anysearch': {
+      // https://github.com/anysearch-ai/anysearch-skill — key optional (anonymous = lower rate limit)
+      const res = await fetch('https://api.anysearch.com/v1/search', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...(ws.apiKey ? { authorization: `Bearer ${ws.apiKey}` } : {}) },
+        body: JSON.stringify({ query, max_results: n }),
+        signal: timeout,
+      })
+      const j: any = await res.json().catch(() => null)
+      if (!res.ok || !j || (j.code !== undefined && j.code !== 0)) throw new Error(`AnySearch ${j?.message || `HTTP ${res.status}`}`)
+      return (j.data?.results ?? []).map((r: any) => ({ title: r.title, url: r.url, snippet: r.content || r.snippet }))
+    }
     case 'tavily': {
       const res = await fetch('https://api.tavily.com/search', {
         method: 'POST',
@@ -180,7 +192,8 @@ export function registerWebTools() {
     available: ctx => {
       const ws = ctx.eff.tools.webSearch
       if (!ws.enable || ws.provider === 'none' || ws.provider === 'native') return false
-      return ws.provider === 'searxng' ? Boolean(ws.baseUrl) : ws.provider === 'jina' || Boolean(ws.apiKey)
+      if (ws.provider === 'searxng') return Boolean(ws.baseUrl)
+      return ws.provider === 'jina' || ws.provider === 'anysearch' || Boolean(ws.apiKey)
     },
     async run(args, ctx) {
       const q = String(args.query ?? '').trim()

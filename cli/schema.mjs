@@ -11,6 +11,9 @@
 
 export const PROVIDER_TYPES = ['openai', 'openai-responses', 'anthropic', 'gemini']
 export const THINKING = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']
+export const THINKING_SETTING = [...THINKING, 'auto']
+/** model alias ids: any letters (incl. Chinese), digits, . _ -; no spaces, since commands split on whitespace */
+export const MODEL_ID = /^[\p{L}\p{N}_.-]+$/u
 
 /** Official model ids per provider (checked 2026-10). Suggestions only; any id can be typed. */
 export const KNOWN_MODELS = {
@@ -49,7 +52,7 @@ const providerNames = c => Object.keys(c.providers ?? {})
 const modelIds = c => (c.models ?? []).map(m => m.id).filter(Boolean)
 const presetNames = c => Object.keys(c.persona?.presets ?? {})
 const toolNames = c => [
-  ...new Set(['web_search', 'web_fetch', 'run_bot_command', 'search_bot_commands', 'list_bot_commands', 'load_skill', 'memory', ...(c.tools?.http ?? []).map(h => h.name).filter(Boolean), ...(c.tools?.disabled ?? [])]),
+  ...new Set(['web_search', 'web_fetch', 'run_bot_command', 'search_bot_commands', 'list_bot_commands', 'load_skill', 'memory', 'add_sticker', 'list_stickers', 'render_html', 'run_code', ...(c.tools?.http ?? []).map(h => h.name).filter(Boolean), ...(c.tools?.disabled ?? [])]),
 ]
 
 const limits = label => obj({ window5h: num('5小时额度（美元）', { min: 0, nullable: true }), weekly: num('每周额度（美元）', { min: 0, nullable: true }) }, label)
@@ -75,10 +78,10 @@ const provider = obj(
 
 const model = obj(
   {
-    id: str('别名 id', { required: true, pattern: /^[\w.-]+$/ }),
+    id: str('别名 id（可用中文）', { required: true, pattern: MODEL_ID }),
     provider: oneOf(providerNames, '提供商', { required: true }),
     model: str('上游模型名', { required: true, suggest: (c, item) => modelSuggestions(c.providers?.[item?.provider]) }),
-    thinking: oneOf(THINKING, '思考强度', { allowEmpty: true }),
+    thinking: oneOf(THINKING_SETTING, '思考强度', { allowEmpty: true }),
     vision: bool('支持图片输入'),
     toolUse: bool('支持工具调用'),
     nativeSearch: bool('使用模型自带搜索'),
@@ -115,7 +118,22 @@ const chat = obj(
     maxToolRounds: int('工具调用轮数上限', { min: 0, max: 10 }),
     maxOutputTokens: int('最大输出 token', { min: 64 }),
     temperature: num('温度', { min: 0, max: 2, nullable: true }),
-    thinking: oneOf(THINKING, '默认思考强度'),
+    thinking: oneOf(THINKING_SETTING, '默认思考强度'),
+    autoThinking: obj(
+      { casual: oneOf(THINKING, '闲聊'), question: oneOf(THINKING, '普通提问'), complex: oneOf(THINKING, '复杂问题') },
+      'auto 模式的思考强度',
+    ),
+    thinkingJudge: obj(
+      {
+        mode: oneOf(['heuristic', 'model', 'systemone'], '判断方式（heuristic=关键词 / model=小模型 / systemone=Jev 或 Kev）'),
+        model: str('判断用的模型 id（空=utilityModel→默认模型）', { suggest: c => (c.models ?? []).map(m => m.id) }),
+        url: str('System One 接口地址', { pattern: /^https?:\/\/\S+$/ }),
+        apiKey: secret('System One API Key'),
+        systemoneModel: str('System One 模型名'),
+        timeoutMs: int('超时（毫秒，超时退回关键词规则）', { min: 200, max: 5000 }),
+      },
+      'auto 模式的消息判断',
+    ),
     includeImages: bool('识别图片'),
     maxImages: int('每次最多图片数', { min: 0, max: 5 }),
     includeQuoted: bool('读取引用的消息'),
@@ -133,6 +151,7 @@ const reply = obj(
     maxChars: int('长文字数阈值', { min: 50 }),
     longText: oneOf(['forward', 'truncate'], '长文处理'),
     stripMarkdown: bool('去除 Markdown'),
+    markdown: oneOf([false, true, 'auto'], '以 Markdown 输出'),
     typing: obj({ charsPerSecond: num('打字速度（字/秒）', { min: 1 }), minDelay: int('最小延迟 ms', { min: 0 }), maxDelay: int('最大延迟 ms', { min: 0 }) }, '模拟打字'),
     groupRate: rate('每群发送上限'),
     globalRate: rate('全局发送上限'),
@@ -152,6 +171,7 @@ const sticker = obj(
     maxInPrompt: int('提示词中最多列出', { min: 0 }),
     indexModel: oneOf(modelIds, '识别用视觉模型', { allowEmpty: true }),
     sendAs: oneOf(['sticker', 'image'], '发送形式'),
+    maxSendSize: int('发送时最大尺寸（像素，0=原图）', { min: 0, max: 2000 }),
   },
   '表情包',
 )
@@ -162,7 +182,7 @@ const tools = obj(
     webSearch: obj(
       {
         enable: bool('联网搜索'),
-        provider: oneOf(['native', 'tavily', 'brave', 'searxng', 'jina', 'none'], '搜索服务'),
+        provider: oneOf(['native', 'anysearch', 'tavily', 'brave', 'searxng', 'jina', 'none'], '搜索服务'),
         apiKey: secret('搜索 API Key'),
         baseUrl: str('SearXNG 地址', { pattern: /^https?:\/\/\S+$/ }),
         maxResults: int('结果数', { min: 1, max: 10 }),
@@ -211,6 +231,29 @@ const tools = obj(
       'HTTP 工具',
       { itemLabel: h => `${h.name}  ${h.url ?? ''}`, create: ['name', 'description', 'url'] },
     ),
+    renderHtml: obj(
+      {
+        enable: bool('HTML 渲染成图片'),
+        width: int('页面宽度（像素）', { min: 200, max: 1600 }),
+        maxHeight: int('最大高度（像素）', { min: 100, max: 16000 }),
+        allowNetwork: bool('允许加载公网图片/字体'),
+      },
+      'HTML 渲染',
+    ),
+    exec: obj(
+      {
+        enable: bool('运行代码（需先 npm run exec-setup）'),
+        distro: str('WSL 发行版名称', { pattern: /^[\w.-]+$/ }),
+        access: oneOf(['admin', 'all'], '谁可以触发（admin=仅管理员）'),
+        languages: multi(['python', 'node', 'bash'], '允许的语言'),
+        timeout: int('每次最多秒数', { min: 1, max: 50 }),
+        memoryMB: int('内存上限（MB）', { min: 64, max: 4096 }),
+        diskMB: int('磁盘上限（MB）', { min: 8, max: 2048 }),
+        maxOutput: int('返回给模型的输出字符数', { min: 256, max: 20000 }),
+        maxRunsPerTurn: int('每轮最多运行次数', { min: 1, max: 10 }),
+      },
+      '运行代码',
+    ),
     disabled: multi(toolNames, '禁用的工具'),
   },
   '工具',
@@ -236,7 +279,7 @@ const groupOverride = obj(
     enable: bool('在本群启用'),
     model: oneOf(modelIds, '本群模型', { allowEmpty: true }),
     persona: oneOf(presetNames, '本群人设', { allowEmpty: true }),
-    thinking: oneOf(THINKING, '本群思考强度', { allowEmpty: true }),
+    thinking: oneOf(THINKING_SETTING, '本群思考强度', { allowEmpty: true }),
     chat: { ...chat, label: '对话（覆盖）' },
     reply: { ...reply, label: '回复（覆盖）' },
     sticker: { ...sticker, label: '表情包（覆盖）' },

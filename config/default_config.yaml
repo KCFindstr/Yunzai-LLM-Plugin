@@ -174,8 +174,24 @@ chat:
   maxOutputTokens: 2048
   # 温度，null = 不发送该参数（推荐，部分新模型不支持自定义温度）
   temperature: null
-  # 默认思考强度（模型可单独设置）
+  # 默认思考强度（模型可单独设置）：off / minimal / low / medium / high / xhigh / max，
+  # 或 auto = 按消息自动选择（闲聊用 casual，提问用 question，需要分析/计算/写代码/查资料用 complex）
   thinking: low
+  autoThinking:
+    casual: low
+    question: medium
+    complex: high
+  # auto 模式怎样判断消息类型（出错或超时自动退回 heuristic）：
+  #   heuristic = 本地关键词规则（零延迟、零成本，较粗糙）
+  #   model     = 用一个便宜的模型判断（约 0.6~1s，每条约 200 token；推荐 gemini-3.5-flash-lite 或 deepseek-flash，关闭思考）
+  #   systemone = TypeSafe Jev（需申请 Key），或自建 Kev（url 填 http://127.0.0.1:8009/v1/systemone）
+  thinkingJudge:
+    mode: model
+    model: ''                  # 留空 = utilityModel → 默认模型
+    url: https://api.typesafe.ai/v1/systemone
+    apiKey: ''
+    systemoneModel: jev-latest
+    timeoutMs: 1500
   # 是否把用户发的图片给模型看
   includeImages: true
   maxImages: 2
@@ -208,6 +224,9 @@ reply:
   longText: forward
   # 去掉 Markdown 符号（QQ 不渲染 Markdown）
   stripMarkdown: true
+  # 以 Markdown 输出：false = 纯文本（OneBot/NapCat 不支持 Markdown）/ true = Markdown（如 QQ 官方机器人 QQBot）
+  # auto = 只有消息来自 QQBot 适配器时才用 Markdown。开启后不再拆分多条、不去除 Markdown 符号
+  markdown: false
   # 模拟打字的延迟（毫秒），已经花在思考上的时间会被扣除
   typing:
     charsPerSecond: 12
@@ -239,6 +258,8 @@ sticker:
   indexModel: ''
   # sticker = 以表情形式发送（QQ 显示为动画表情）/ image = 普通图片
   sendAs: sticker
+  # 发送时把大图缩小到这个尺寸以内（像素）。QQ 会把大尺寸图片显示成普通图片而不是表情；0 = 发送原图（GIF 动图始终发原图）
+  maxSendSize: 240
 
 # --------------------------------------------------------------------------
 # 工具
@@ -248,7 +269,8 @@ tools:
   webSearch:
     enable: true
     # native = 使用模型自带搜索（anthropic / openai-responses / gemini 类型支持）
-    # tavily / brave / jina 需要 apiKey；searxng 需要 baseUrl；none = 关闭
+    # anysearch = AnySearch（apiKey 可选，不填用匿名额度、限速更低）
+    # tavily / brave 需要 apiKey；jina 的 apiKey 可选；searxng 需要 baseUrl；none = 关闭
     provider: native
     apiKey: ''
     baseUrl: ''
@@ -288,6 +310,25 @@ tools:
   #   parameters: { type: object, properties: { city: { type: string } }, required: [city] }
   #   url: https://wttr.in/{city}?format=3&lang=zh
   http: []
+  # 把 HTML 渲染成图片发送（用于长回答、表格、对比、步骤、代码等）。页面脚本被禁用，只能加载公网资源
+  renderHtml:
+    enable: true
+    width: 720
+    maxHeight: 6000
+    allowNetwork: true
+  # 运行代码（Python / Node / Bash），在专用 WSL 发行版里用 bubblewrap 隔离执行：
+  # 看不到 Windows 磁盘和机器人文件，只能访问公网（内网/本机/路由器都被防火墙拦截），有内存/时间/磁盘上限。
+  # 先在服务器上运行 `npm run exec-setup -- --install` 创建并配置发行版，再开启。
+  exec:
+    enable: false
+    distro: yunzai-sandbox
+    access: admin              # admin=仅管理员可触发；all=所有人
+    languages: [python, node, bash]
+    timeout: 20                # 每次运行最多秒数（≤50）
+    memoryMB: 512
+    diskMB: 128
+    maxOutput: 4000            # 返回给模型的输出字符数
+    maxRunsPerTurn: 3
   # 禁用的工具名（#llm工具列表 查看）
   disabled: []
 

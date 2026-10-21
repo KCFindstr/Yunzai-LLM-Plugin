@@ -66,7 +66,8 @@ class ConfigManager {
     if (this.watcher) return
     try {
       this.watcher = fs.watch(CONFIG_DIR, (_evt, file) => {
-        if (file && path.basename(String(file)) !== 'config.yaml') return
+        // config.yaml, or a persona file referenced as `file:xxx.md`
+        if (file && path.basename(String(file)) !== 'config.yaml' && !/\.(md|txt)$/i.test(String(file))) return
         if (Date.now() - this.selfWriteAt < 1500) return
         clearTimeout(this.reloadTimer)
         this.reloadTimer = setTimeout(() => {
@@ -206,7 +207,7 @@ class ConfigManager {
     const eff: EffectiveConfig = {
       enable: c.enable && g.enable !== false,
       model: (g.model && this.getModel(g.model)?.id) || this.defaultModelId(),
-      personaPrompt,
+      personaPrompt: personaText(personaPrompt),
       chat,
       reply: deepMerge(c.reply, g.reply ?? {}),
       sticker: deepMerge(c.sticker, g.sticker ?? {}),
@@ -214,6 +215,24 @@ class ConfigManager {
     }
     this.effectiveCache.set(key, eff)
     return eff
+  }
+}
+
+/** A persona preset may be `file:PERSONA.md` (relative to the config dir) instead of inline text. */
+export function personaText(raw: string): string {
+  const m = /^file:\s*(.+)$/.exec(String(raw ?? '').trim())
+  if (!m) return raw ?? ''
+  const root = path.resolve(CONFIG_DIR)
+  const f = path.resolve(root, m[1].trim())
+  if (!f.startsWith(root + path.sep)) {
+    log.warn(`人设文件必须在配置目录内: ${m[1]}`)
+    return ''
+  }
+  try {
+    return fs.readFileSync(f, 'utf8')
+  } catch (err: any) {
+    log.warn(`读取人设文件失败 ${f}: ${err.message}`)
+    return ''
   }
 }
 
@@ -262,6 +281,17 @@ export function normalize(raw: any): PluginConfig {
   c.reply.typing ??= { charsPerSecond: 12, minDelay: 600, maxDelay: 5000 }
   c.reply.groupRate ??= { count: 6, perSeconds: 60 }
   c.reply.globalRate ??= { count: 30, perSeconds: 60 }
+  c.reply.markdown = c.reply.markdown === 'auto' ? 'auto' : c.reply.markdown === true
+  c.chat.autoThinking = { casual: 'low', question: 'medium', complex: 'high', ...(isPlainObject(c.chat.autoThinking) ? c.chat.autoThinking : {}) }
+  const tj = isPlainObject(c.chat.thinkingJudge) ? c.chat.thinkingJudge : {}
+  c.chat.thinkingJudge = {
+    mode: ['heuristic', 'model', 'systemone'].includes(tj.mode) ? tj.mode : 'model',
+    model: typeof tj.model === 'string' ? tj.model : '',
+    url: typeof tj.url === 'string' && tj.url ? tj.url : 'https://api.typesafe.ai/v1/systemone',
+    apiKey: typeof tj.apiKey === 'string' ? tj.apiKey : '',
+    systemoneModel: typeof tj.systemoneModel === 'string' && tj.systemoneModel ? tj.systemoneModel : 'jev-latest',
+    timeoutMs: Math.min(5000, Math.max(200, Number(tj.timeoutMs) || 1500)),
+  }
   c.sticker = isPlainObject(c.sticker) ? c.sticker : {}
   c.tools = isPlainObject(c.tools) ? c.tools : {}
   c.tools.webSearch ??= { enable: false, provider: 'none' }
@@ -270,6 +300,21 @@ export function normalize(raw: any): PluginConfig {
   c.tools.botCommand.blacklist = asArray(c.tools.botCommand.blacklist)
   c.tools.botCommand.hints = asArray(c.tools.botCommand.hints)
   c.tools.http = asArray(c.tools.http)
+  c.tools.renderHtml = { enable: false, width: 720, maxHeight: 6000, allowNetwork: true, ...(isPlainObject(c.tools.renderHtml) ? c.tools.renderHtml : {}) }
+  const ex = isPlainObject(c.tools.exec) ? c.tools.exec : {}
+  const langs = asArray(ex.languages).filter((l: any) => ['python', 'node', 'bash'].includes(l))
+  c.tools.exec = {
+    enable: ex.enable === true,
+    distro: typeof ex.distro === 'string' && /^[\w.-]+$/.test(ex.distro) ? ex.distro : 'yunzai-sandbox',
+    access: ex.access === 'all' ? 'all' : 'admin',
+    languages: langs.length ? langs : ['python', 'node', 'bash'],
+    timeout: Math.min(50, Math.max(1, Number(ex.timeout) || 20)),
+    memoryMB: Math.min(4096, Math.max(64, Number(ex.memoryMB) || 512)),
+    diskMB: Math.min(2048, Math.max(8, Number(ex.diskMB) || 128)),
+    maxOutput: Math.min(20000, Math.max(256, Number(ex.maxOutput) || 4000)),
+    maxRunsPerTurn: Math.min(10, Math.max(1, Number(ex.maxRunsPerTurn) || 3)),
+  }
+  c.sticker.maxSendSize = Number.isFinite(Number(c.sticker.maxSendSize)) ? Number(c.sticker.maxSendSize) : 240
   c.tools.disabled = asArray(c.tools.disabled)
   c.skills = isPlainObject(c.skills) ? c.skills : { enable: true }
   const m = isPlainObject(c.memory) ? c.memory : {}

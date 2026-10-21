@@ -1,13 +1,16 @@
 import { checkQuota, record, type QuotaBlock, type QuotaCtx } from '../billing/ledger.ts'
 import { computeCost, resolvePrice } from '../billing/pricing.ts'
 import { config } from '../core/config.ts'
-import type { EffectiveConfig } from '../core/configTypes.ts'
+import type { EffectiveConfig, ThinkingLevel } from '../core/configTypes.ts'
 import { log } from '../core/log.ts'
 import { Semaphore, sha1 } from '../core/util.ts'
 import { botNickname } from '../core/yunzai.ts'
 import { addUsage, chat, emptyUsage, LLMError, partsToText, usesServerState, type Msg, type ServerState, type UserMsg } from '../llm/index.ts'
 import { registry, type ToolCtx, type TurnState } from '../tools/registry.ts'
 import type { ExtractedInput } from './message.ts'
+import { resolveThinking } from './thinking.ts'
+import { markHandled } from './groupLog.ts'
+import { markdownEnabled } from './format.ts'
 import { buildHeader, buildMemoryBlock, buildSystemPrompt, SUMMARY_PROMPT } from './prompt.ts'
 import { maybeCompact } from '../memory/compact.ts'
 import { memoryHash } from '../memory/store.ts'
@@ -45,7 +48,7 @@ export interface TurnRequest {
 }
 
 export type TurnOutcome =
-  | { kind: 'reply'; text: string; modelId: string; cost: number; dispatched?: string }
+  | { kind: 'reply'; text: string; modelId: string; cost: number; dispatched?: string; images: Buffer[]; thinking: ThinkingLevel }
   | { kind: 'quota'; block: QuotaBlock; modelId: string }
   | { kind: 'error'; message: string; unconfigured?: boolean }
 
@@ -78,11 +81,18 @@ async function runTurnInner(req: TurnRequest): Promise<TurnOutcome> {
   const { model, provider } = picked
   const price = resolvePrice(model)
   const dropped = degraded.get(model.id) ?? new Set<Feature>()
-  let thinking = dropped.has('thinking') ? 'off' : (model.thinking ?? eff.chat.thinking)
+  let thinking: ThinkingLevel = dropped.has('thinking')
+    ? 'off'
+    : await resolveThinking(
+        model.thinking ?? eff.chat.thinking,
+        eff.chat,
+        { text: input.text, images: input.images.length, quoted: Boolean(input.quoted), quotedText: input.quoted?.text },
+        quotaCtx,
+      )
   const temperature = model.temperature ?? eff.chat.temperature
   const maxTokens = model.maxTokens ?? eff.chat.maxOutputTokens
 
-  const turn: TurnState = { commands: 0, searches: 0, fetches: 0 }
+  const turn: TurnState = { commands: 0, searches: 0, fetches: 0, images: [] }
   const ctx: ToolCtx = { e, eff, isAdmin, model, turn }
   let nativeSearch =
     !dropped.has('nativeSearch') &&
@@ -95,10 +105,11 @@ async function runTurnInner(req: TurnRequest): Promise<TurnOutcome> {
   let specs = registry.specs(offered)
 
   const botName = config.get().persona.botName || botNickname(e)
-  const makeSystem = () => buildSystemPrompt({ isGroup: Boolean(e.group_id), botName, eff, tools: offered.map(t => t.name), nativeSearch })
+  const markdown = markdownEnabled(e, eff.reply)
+  const makeSystem = () =>
+    buildSystemPrompt({ isGroup: Boolean(e.group_id), botName, eff, tools: offered.map(t => t.name), nativeSearch, markdown })
   let system = makeSystem()
   const session = getSession(convKey, eff.chat.sessionTimeout)
-  const header = buildHeader(e, eff, input, isAdmin)
   const text = input.text || (input.images.length ? '（发了图片）' : '（只@了你，没说话）')
 
   // Long-term memory: a stable prefix message (cache-friendly; only changes when memory changes). In a shared
@@ -107,11 +118,11 @@ async function runTurnInner(req: TurnRequest): Promise<TurnOutcome> {
   const shared = Boolean(e.group_id) && eff.chat.sessionScope === 'group'
   const memPrefix = memOn ? buildMemoryBlock(e, { user: !shared, group: true }) : ''
   const memTurn = memOn && shared ? buildMemoryBlock(e, { user: true, group: false }) : ''
+  const header = buildHeader(e, eff, input, isAdmin, { conv: convKey, memory: memTurn })
+  // from now on this message lives in the session history; keep it out of future ambient-chat windows
+  markHandled(e, convKey)
 
-  const userMsg: UserMsg = {
-    role: 'user',
-    content: [{ type: 'text', text: header.sent + (memTurn ? `${memTurn}\n` : '') + text }, ...input.images],
-  }
+  const userMsg: UserMsg = { role: 'user', content: [{ type: 'text', text: header.sent + text }, ...input.images] }
   const storedUser: UserMsg = {
     role: 'user',
     content: [{ type: 'text', text: header.stored + text + (input.images.length ? ' [图片]'.repeat(input.images.length) : '') }],
@@ -209,7 +220,11 @@ async function runTurnInner(req: TurnRequest): Promise<TurnOutcome> {
     if (e.group_id) maybeCompact('group', String(e.group_id), mctx).catch(() => {})
   }
 
-  const persisted = finalText || (turn.dispatched ? `（已为对方执行指令 ${turn.dispatched}）` : '…')
+  const notes = [
+    turn.dispatched && `（已为对方执行指令 ${turn.dispatched}）`,
+    turn.images.length && `（已发送 ${turn.images.length} 张渲染图片）`,
+  ].filter(Boolean)
+  const persisted = [finalText, ...notes].filter(Boolean).join('\n') || '…'
   appendTurn(convKey, storedUser, { role: 'assistant', content: persisted })
   const after = peekSession(convKey)
   // A chain that ended with unanswered tool calls can't be continued with a new user turn.
@@ -217,7 +232,7 @@ async function runTurnInner(req: TurnRequest): Promise<TurnOutcome> {
     convKey,
     serverState && cleanEnd && lastResponseId && after ? { key: stateKey, previousId: lastResponseId, len: after.messages.length } : undefined,
   )
-  return { kind: 'reply', text: finalText, modelId: model.id, cost, dispatched: turn.dispatched }
+  return { kind: 'reply', text: finalText, modelId: model.id, cost, dispatched: turn.dispatched, images: turn.images, thinking }
 }
 
 /** Post-turn housekeeping: chunked truncation, optional summary of the dropped part. Never blocks the reply. */

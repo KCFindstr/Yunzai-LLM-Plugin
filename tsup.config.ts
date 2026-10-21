@@ -10,5 +10,5 @@ export default defineConfig({
   clean: true,
   outDir: 'dist',
   splitting: false,
-  external: ['yaml'],
+  external: ['yaml', 'image-size', 'puppeteer'],
 })

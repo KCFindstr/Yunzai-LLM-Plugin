@@ -85,6 +85,68 @@ Only erasable TS syntax (no enums/parameter properties/namespaces) — `erasable
   Injected as a stable prefix message (`prompt.ts#buildMemoryBlock`), never in the system prompt; in shared group
   sessions the speaker's memory rides in the turn header instead. Server-state key includes a memory hash.
   Commands: `#llm记忆`, `#llm删除记忆`, `#llm忘记我`, admin `#llm清空长期记忆`. Tests: `test/memory.test.ts`.
+- 2026-10-21 review/feature round (see also docs/EXAMPLE_ROLLOUT.md — a real captured request sequence):
+  - Stickers (another agent added NL add + `add_sticker`/`list_stickers` tools): removed the pre-LLM regex
+    `matchStickerAddIntent` (false positives like 「记住 …」「加油…表情」 hijacked normal chat and told non-admins
+    "只有管理员…"); the `add_sticker` tool covers NL requests. `test/sticker.test.ts` didn't import helpers.ts and
+    ran against the real data dir — fixed. Named-but-unrecognised stickers are now listed in the prompt; markers
+    accept full-width brackets. Sending: NapCat honours `sub_type:1` (→ picSubType, checked in NapCat source), but
+    QQ shows photo-sized images (prod ones are 648/960px) like normal pictures, so `sticker.maxSendSize` (240)
+    sends a cached `<file>.s240.png` copy (GIF sent as-is). The OneBot bridge's own sub_type handling is being
+    checked by another agent.
+  - `reply.markdown: false|true|auto` (auto = QQBot adapter): no stripping/splitting/forward in Markdown mode;
+    system prompt says whether Markdown renders. Fixed a stripMarkdown bug (line-start `\s` ate blank lines).
+  - `render_html` tool (`src/tools/render.ts`, `src/render/browser.ts`): uses Yunzai's puppeteer renderer
+    (`lib/puppeteer/puppeteer.js#browserInit`, own Chromium only outside Yunzai); JS disabled + CSP, requests only
+    to public hosts (SSRF guard), height-capped; images go to `turn.images` and are sent after the text.
+  - `thinking: auto` (`src/chat/thinking.ts`): local heuristic → `chat.autoThinking.{casual,question,complex}`.
+    On Anthropic an effort change invalidates the cached message prefix; Gemini/OpenAI unaffected.
+  - Persona presets may be `file:PERSONA.md` (config dir only; .md/.txt changes hot-reload). PERSONA.md rewritten:
+    research-first for real questions, long answers allowed, render_html for structured content.
+  - Ambient group chat no longer repeats lines already in this conversation's history (`groupLog` `conv` tags);
+    shared-session memory block moved above 【消息】.
+  - Code execution: first deferred (no WSL); added the same day once the user installed WSL — see below.
+- `run_code` tool (2026-10-21, `src/tools/exec.ts`, `exec/runner.py`, `exec/setup.sh`, `cli/exec-setup.mjs`):
+  - Dedicated WSL2 distro `yunzai-sandbox` (Ubuntu 26.04, at `D:\WSL\yunzai-sandbox`), provisioned by
+    `npm run exec-setup [-- --install] [--distro X]` (idempotent; pipes setup.sh + runner.py into the distro as root).
+    wsl.conf disables automount (no C:/D:) and interop (no .exe), so even the distro's root can't reach Windows files.
+  - Per run (runner.py, invoked as `wsl -d <distro> -u root -e python3 /opt/llm-sandbox/runner.py`, JSON on
+    stdin/stdout): size-capped tmpfs `/work` → systemd scope (MemoryMax, no swap, TasksMax 128, CPUQuota 200%)
+    → setpriv to uid 2000 `sbx` + no_new_privs → bwrap (all namespaces except net; ro /usr and /etc; neutral
+    hostname/hosts; resolv.conf bound onto its real path because WSL symlinks it into /mnt/wsl) → `timeout -s KILL`.
+    stdout/stderr capped while draining; images in `/work/out` (≤2/turn, shared with render_html) returned base64.
+  - Network: iptables chain LLMSBX (owner match uid 2000, restored at boot by `llm-sandbox-firewall.service`):
+    DNS only to the WSL resolver, REJECT private/loopback/CGNAT/link-local/multicast ranges, SMTP ports, >20 new
+    conns/s; IPv6 rejected. Verified: host 172.20.64.1, router, 127.0.0.1, 10.255.255.254:80, 169.254.169.254 blocked.
+    Abstract unix sockets are shared with the distro netns; only udevd listens (credential-checked).
+  - Exit classification: `timeout` → 124; cgroup OOM → SIGKILL or SIGTERM to the scope (seen as -15) → "killed".
+  - Config `tools.exec` (enable false, access admin|all — default admin, timeout ≤50s since the registry's tool
+    timeout is 60s; max 2 concurrent runs process-wide). Tool is only offered on win32.
+  - Tests: `test/exec.test.ts` live-tests the distro (skipped if not provisioned). Sandbox mock: 「算一下」/「画个图」.
+  - matplotlib: /etc/matplotlibrc gets Noto Sans CJK; font cache prebuilt in /var/lib/llm-sandbox/mpl and copied
+    into each run's HOME (else every run rebuilds it).
+- 2026-10-21 (later): `tools.webSearch.provider: anysearch` — `POST https://api.anysearch.com/v1/search`
+  `{query, max_results}` → `{code:0, data:{results:[{title,url,snippet,content}]}}`; `Authorization: Bearer` optional
+  (anonymous works, lower rate limit). Contract taken from the official CLI (github.com/anysearch-ai/anysearch-skill).
+  Note: a test with curl from Git Bash sent mangled CJK and returned junk; from Node, Chinese results were good.
+- Output format guidance: with `reply.markdown` on, long answers are plain Markdown; `render_html` only when Markdown
+  can't express it (complex/very long/visual). Markdown mode also drops the "blank line = separate bubble" hint
+  (Markdown replies are one message). PERSONA.md is format-neutral; prompt.ts carries the mode-specific rules.
+  `docs/EXAMPLE_ROLLOUT.md` regenerated with markdown on (generator script lives outside the repo; it reads a
+  `MOCK_DUMP` jsonl from `sandbox/run.mjs --mock --script … --overlay …`).
+- Thinking judge (2026-10-21, `src/chat/thinking.ts`, `chat.thinkingJudge`): `thinking: auto` now asks a judge
+  (default mode `model`: utilityChat with `JUDGE_PROMPT`, thinking off, max_tokens 8, temperature 0, timeout 1.5s,
+  falls back to the keyword heuristic). Obvious cases skip the call (empty, ≤4 chars without ?, >300 chars).
+  `systemone` mode speaks TypeSafe's System One API (`POST https://api.typesafe.ai/v1/systemone`, a `choice`
+  question) — Jev (waitlist) or a self-hosted Kev. Eval set `test/fixtures/thinking-eval.json` (58 msgs, labels are
+  ours): heuristic 76%; gemini-3.5-flash-lite 100% (p50 ~600ms); deepseek-flash 98% (p50 ~850ms). Kev-0.8B (the
+  only CPU-sized Kev) reports 0.65 accuracy on unseen tasks and ~1s on CPU, so it was not adopted.
+  - Fixed along the way: `thinking: off` sent nothing, so DeepSeek still reasoned (now `thinking: {type: disabled}`);
+    Gemini one-shot calls (utilityChat) now use `store: false` (no server state; ~2x faster for the judge).
+    Gemini 3.8 flash rejects `thinking_level: minimal`.
+- Prompt trim (2026-10-21): PERSONA.md keeps only character/voice; research and format rules live in prompt.ts
+  (merged duplicate chit-chat / don't-invent lines, condensed command + sticker sections). Prompt 5034 → 3956 chars.
+- Model ids may contain Chinese (`MODEL_ID` in cli/schema.mjs); the runtime never restricted them, only the CLI.
 - Sandbox repro of prod: `--runtime <name>` uses a separate `sandbox/.runtime-<name>/` (e.g. without game plugins,
   like prod), `--overlay <file>` merges YAML over the generated plugin config (copy prod's settings minus
   providers/models/keys, remap the group whitelist to 30001). Used 2026-10-20 to debug "#深渊 fails in prod":

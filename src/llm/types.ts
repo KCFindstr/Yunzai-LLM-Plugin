@@ -113,6 +113,8 @@ export interface ChatParams {
   /** Stable key that groups requests sharing a prefix (OpenAI prompt_cache_key). */
   cacheKey?: string
   state?: ServerState
+  /** override provider.store (Gemini): one-shot calls never chain, so they shouldn't persist server state */
+  store?: boolean
   signal?: AbortSignal
 }
 

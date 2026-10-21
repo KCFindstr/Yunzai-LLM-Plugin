@@ -10,6 +10,9 @@ export interface TurnState {
   searches: number
   fetches: number
   memoryWrites?: number
+  execRuns?: number
+  /** images produced by tools (render_html, run_code), sent after the text reply */
+  images: Buffer[]
   memoryChanged?: boolean
 }
 

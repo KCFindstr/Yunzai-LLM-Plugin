@@ -43,6 +43,12 @@ async function importYunzai(rel: string): Promise<any | undefined> {
   return modCache.get(rel)
 }
 
+/** Yunzai's puppeteer renderer (shares the bot's Chromium). Undefined outside Yunzai. */
+export async function getYunzaiRenderer(): Promise<any | undefined> {
+  if (loaderOverride) return undefined
+  return importYunzai('lib/puppeteer/puppeteer.js')
+}
+
 /** Yunzai's config singleton (lib/config/config.js), used for group enable/disable lists. */
 export async function getYunzaiCfg(): Promise<any | undefined> {
   if (loaderOverride) return cfgOverride

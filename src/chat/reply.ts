@@ -1,25 +1,29 @@
 import type { EffectiveConfig, ReplySection } from '../core/configTypes.ts'
 import { log } from '../core/log.ts'
 import { randFloat, sleep, truncate } from '../core/util.ts'
-import { botNickname, sendApi, sendForward } from '../core/yunzai.ts'
+import { botNickname, sendApi, sendForward, seg } from '../core/yunzai.ts'
+import { markdownEnabled } from './format.ts'
 import { chooseSticker, extractStickerMarkers, sendSticker } from '../stickers/picker.ts'
 import { messagesSince, recordBotMessage } from './groupLog.ts'
 import { limiter } from './ratelimit.ts'
 
-/** QQ shows Markdown literally; turn the common constructs into plain chat text. */
+/**
+ * QQ shows Markdown literally; turn the common constructs into plain chat text.
+ * Line-start patterns use [ \t] rather than \s so they never swallow the blank lines that separate paragraphs.
+ */
 export function stripMarkdown(text: string): string {
   return text
     .replace(/```[\w-]*\n?([\s\S]*?)```/g, (_, code: string) => code.trimEnd())
-    .replace(/^\s{0,3}#{1,6}\s+/gm, '')
+    .replace(/^[ \t]{0,3}#{1,6}[ \t]+/gm, '')
     .replace(/\*\*([^*\n]+)\*\*/g, '$1')
     .replace(/__([^_\n]+)__/g, '$1')
     .replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, '$1$2')
     .replace(/`([^`\n]+)`/g, '$1')
     .replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, '$2')
     .replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, (_, t: string, u: string) => (t === u ? u : `${t} ${u}`))
-    .replace(/^\s*[-*+]\s+/gm, '· ')
-    .replace(/^\s*>\s?/gm, '')
-    .replace(/^\s*([-*_]\s*){3,}$/gm, '')
+    .replace(/^[ \t]*[-*+][ \t]+/gm, '· ')
+    .replace(/^[ \t]*>[ \t]?/gm, '')
+    .replace(/^[ \t]*([-*_][ \t]*){3,}$/gm, '')
 }
 
 export interface Prepared {
@@ -29,11 +33,16 @@ export interface Prepared {
   stickerNames: string[]
 }
 
-export function prepareReply(raw: string, cfg: ReplySection): Prepared {
+/**
+ * Turn model text into what gets sent. Plain-text mode strips Markdown and may split short multi-part replies
+ * into bubbles; Markdown mode (e.g. QQBot) keeps the text intact as one message.
+ */
+export function prepareReply(raw: string, cfg: ReplySection, markdown = false): Prepared {
   const { text: noMarkers, names } = extractStickerMarkers(raw)
-  let text = cfg.stripMarkdown ? stripMarkdown(noMarkers) : noMarkers
+  let text = cfg.stripMarkdown && !markdown ? stripMarkdown(noMarkers) : noMarkers
   text = text.replace(/\n{3,}/g, '\n\n').trim()
   if (!text) return { bubbles: [], stickerNames: names }
+  if (markdown) return { bubbles: [text], stickerNames: names }
   if (text.length > cfg.maxChars) {
     if (cfg.longText === 'forward') return { bubbles: [], forward: text, stickerNames: names }
     text = truncate(text, cfg.maxChars)
@@ -76,9 +85,14 @@ async function showTyping(e: any, cfg: ReplySection) {
  * Send the model's reply like a person would: short pause scaled to length, at most a few bubbles,
  * quote only when the conversation has moved on, and never exceed the group/global rate limits.
  */
-export async function deliver(e: any, raw: string, eff: EffectiveConfig, opts: { startedAt: number; convKey: string; suppressText?: boolean }) {
+export async function deliver(
+  e: any,
+  raw: string,
+  eff: EffectiveConfig,
+  opts: { startedAt: number; convKey: string; suppressText?: boolean; images?: Buffer[] },
+) {
   const cfg = eff.reply
-  const prep = prepareReply(raw, cfg)
+  const prep = prepareReply(raw, cfg, markdownEnabled(e, cfg))
   const sticker = chooseSticker(opts.convKey, prep.stickerNames, eff.sticker)
   const elapsed = Date.now() - opts.startedAt
 
@@ -99,7 +113,7 @@ export async function deliver(e: any, raw: string, eff: EffectiveConfig, opts: {
     if (prep.forward) {
       if (quote || at) await e.reply('内容有点长，我整理在下面啦', quote, { at })
       await sendForward(e, [prep.forward], botNickname(e))
-      recordBotMessage(e, truncate(prep.forward, 100))
+      recordBotMessage(e, truncate(prep.forward, 100), opts.convKey)
     } else {
       for (let i = 0; i < prep.bubbles.length; i++) {
         const b = prep.bubbles[i]
@@ -108,20 +122,30 @@ export async function deliver(e: any, raw: string, eff: EffectiveConfig, opts: {
             // out of budget: merge the rest into one last message
             const rest = prep.bubbles.slice(i).join('\n')
             await e.reply(rest)
-            recordBotMessage(e, rest)
+            recordBotMessage(e, rest, opts.convKey)
             break
           }
           await showTyping(e, cfg)
           await sleep(typingDelay(b.length, cfg))
         }
         await e.reply(b, i === 0 && quote, i === 0 && at ? { at: true } : {})
-        recordBotMessage(e, b)
+        recordBotMessage(e, b, opts.convKey)
       }
     }
   }
 
+  // tool-rendered images (render_html) follow the text; they are the answer, so wait longer for a slot
+  for (const img of opts.images ?? []) {
+    if (!(await takeSlot(e, cfg, 20000))) {
+      log.warn('达到发送频率上限，渲染图片未发送')
+      break
+    }
+    await e.reply(seg().image(img))
+    recordBotMessage(e, '[图片]', opts.convKey)
+  }
+
   if (sticker && (await takeSlot(e, cfg, 3000))) {
     await sleep(randFloat(600, 1800))
-    if (await sendSticker(e, sticker, eff.sticker.sendAs)) recordBotMessage(e, `[表情:${sticker.name}]`)
+    if (await sendSticker(e, sticker, eff.sticker)) recordBotMessage(e, `[表情:${sticker.name}]`, opts.convKey)
   }
 }

@@ -83,7 +83,7 @@ export const ADMIN_HELP_STICKER = `【管理 · 表情包】
 export const ADMIN_HELP_TOOLS = `【管理 · 工具 / 技能 / 指令】
 #llm工具列表 — 内置/自定义工具及状态
 #llm启用工具 <名称> / #llm禁用工具 <名称>
-#llm搜索设置 <native|tavily|brave|searxng|jina|none> [Key或地址]
+#llm搜索设置 <native|anysearch|tavily|brave|searxng|jina|none> [Key或地址]
 #llm技能列表 / #llm查看技能 <名称> / #llm删除技能 <名称>
 #llm添加技能 <名称>（换行）<SKILL.md 内容，第一行或 frontmatter 写简介>
 #llm指令列表 [关键词] — 可被自然语言调用的指令

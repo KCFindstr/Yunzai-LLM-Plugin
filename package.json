@@ -13,7 +13,8 @@
     "type-check": "tsc --noEmit",
     "test": "node --test --test-concurrency=1 test/",
     "sandbox": "node sandbox/run.mjs",
-    "config": "node cli/config.mjs"
+    "config": "node cli/config.mjs",
+    "exec-setup": "node cli/exec-setup.mjs"
   },
   "keywords": [
     "yunzai",

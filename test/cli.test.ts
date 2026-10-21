@@ -56,6 +56,14 @@ describe('config CLI subcommands', () => {
     assert.equal(userYaml(), '# 空\n', 'nothing written on rejected input')
   })
 
+  it('model ids may be Chinese but not contain spaces', () => {
+    writeUserConfig('')
+    run(['set', 'models.0.id', '小克'])
+    run(['set', 'defaultModel', '小克'])
+    assert.equal(YAML.parse(userYaml()).defaultModel, '小克')
+    assert.notEqual(runFail(['set', 'models.1.id', '小 克']).code, 0)
+  })
+
   it('list shows valid keys that are not set yet, filtered by provider type', () => {
     writeUserConfig('reply:\n  maxBubbles: 3\n')
     const p = run(['list', 'providers.anthropic'])

@@ -8,7 +8,11 @@ TRSS-Yunzai / Miao-Yunzai 的大模型对话插件。只在被 **@** 时说话�
 - **按实际花费的额度控制**：每个模型可设置「5 小时滚动额度」和「每周额度」（美元），按人 / 按群 / 全局三种范围；用量按接口返回的真实 token（含缓存命中、缓存写入、思考、联网搜索）× 价格计算。价格自动从 LiteLLM / OpenRouter 价格表获取（Claude 内置官方价），也可手动设置；OpenRouter 直接使用返回的实际费用。额度用完自动切换备用模型。
 - **自然语言转指令**：`@机器人 帮我查查深渊数据` 等同于发送 `#深渊`。插件在运行时扫描已安装插件的指令规则和帮助菜单，并用内置的原神 / 星铁 / 绝区零常用指令表交叉验证，只把真实存在的指令提供给模型。指令以原用户身份重新分发，权限、群开关全部照旧。
 - **表情包**：管理员发图片即可添加，视觉模型自动识别命名；聊天时模型偶尔（有概率和冷却控制）发一个合适的表情，以 QQ 表情形式发送。支持商城表情（mface）和导入机器人收藏表情（NapCat）。
-- **工具 / 技能**：联网搜索（模型自带搜索或 Tavily / Brave / SearXNG / Jina）、网页读取（防内网访问）、自定义 JS 工具、HTTP 工具、`skills/*/SKILL.md` 技能（按需加载，省 token）。
+- **工具 / 技能**：联网搜索（模型自带搜索或 AnySearch / Tavily / Brave / SearXNG / Jina）、网页读取（防内网访问）、HTML 渲染成图片（长回答/表格/攻略，复用机器人自带的 Chromium，禁用脚本）、自定义 JS 工具、HTTP 工具、`skills/*/SKILL.md` 技能（按需加载，省 token）。
+- **运行代码（可选，Windows + WSL2）**：`run_code` 工具在专用 WSL 发行版里用 bubblewrap 隔离运行 Python / Node / Bash（精确计算、数据处理、画图表），可访问公网但看不到 Windows 磁盘、本机和局域网，有时间/内存/磁盘上限。`npm run exec-setup -- --install` 一键创建，然后设置 `tools.exec.enable: true`（默认仅管理员可触发，`tools.exec.access: all` 开放给所有人）。
+- **思考强度自动选择**：`thinking: auto` 每条消息先用一个便宜的小模型判断是闲聊 / 提问 / 复杂问题（关闭思考，约 200 token、0.6~1 秒，超时自动退回本地关键词规则），再选对应的思考强度；也支持 TypeSafe Jev 或自建 Kev（`chat.thinkingJudge`）。
+- **Markdown 输出**：`reply.markdown` 默认关闭（OneBot 不支持）；接入 QQ 官方机器人（QQBot）时可设为 `true` 或 `auto`。
+- **人设文件**：人设可以写成 `file:PERSONA.md`，直接编辑文件即可生效（示例见 `config/PERSONA.md`）。完整的请求示例见 [docs/EXAMPLE_ROLLOUT.md](docs/EXAMPLE_ROLLOUT.md)。
 - **降低风控**：只在被呼叫时回复；模拟打字延迟；一次最多 N 条消息；群/全局发送频率上限；有人插话才引用；长文合并转发；去除 Markdown；错误和额度提示有冷却。
 - **省 token**：稳定的系统提示（时间等动态信息放在用户消息里）以命中缓存；Anthropic 显式缓存断点、OpenAI `prompt_cache_key`、Gemini 服务端会话；历史按块截断（而不是每轮滑动）以保持缓存前缀；旧历史压缩成摘要；工具调用过程不写入长期记忆；执行指令后不再额外调用模型。
 - **私聊管理**：主人/插件管理员私聊发送 `#llm帮助` 查看全部管理指令，模型、Key、额度、人设、表情、工具都能用指令配置。

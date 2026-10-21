@@ -7,6 +7,8 @@ interface Line {
   text: string
   mid?: string
   bot?: boolean
+  /** conversation (session key) whose history already contains this line */
+  conv?: string
 }
 
 const MAX_LINES = 40
@@ -72,17 +74,28 @@ export function recordGroupMessage(e: any) {
   logs.set(key, list)
 }
 
-export function recordBotMessage(e: any, text: string) {
+export function recordBotMessage(e: any, text: string, conv?: string) {
   if (!e?.group_id || !text) return
   const key = keyOf(e)
   const list = logs.get(key) ?? []
-  list.push({ t: Date.now(), uid: String(e.self_id), name: '你', text: truncate(text.replace(/\s+/g, ' '), 200), bot: true })
+  list.push({ t: Date.now(), uid: String(e.self_id), name: '你', text: truncate(text.replace(/\s+/g, ' '), 200), bot: true, conv })
   if (list.length > MAX_LINES) list.splice(0, list.length - MAX_LINES)
   logs.set(key, list)
 }
 
 /** Recent lines before the triggering message (excluded), oldest first. */
-export function recentLines(e: any, n: number, maxChars: number, withinMs = 30 * 60_000): string[] {
+/** Mark the triggering message as part of conversation `conv` (it is now in that session's history). */
+export function markHandled(e: any, conv: string) {
+  if (!e?.group_id || e.message_id == null) return
+  const l = (logs.get(keyOf(e)) ?? []).find(x => x.mid === String(e.message_id))
+  if (l) l.conv = conv
+}
+
+/**
+ * Lines already in `conv`'s own history (its handled messages and the bot's replies there) are skipped, so
+ * they aren't sent twice; other members' exchanges with the bot still count as ambient context.
+ */
+export function recentLines(e: any, n: number, maxChars: number, conv?: string, withinMs = 30 * 60_000): string[] {
   if (!e?.group_id || n <= 0) return []
   const list = logs.get(keyOf(e)) ?? []
   const mid = e.message_id != null ? String(e.message_id) : undefined
@@ -92,6 +105,7 @@ export function recentLines(e: any, n: number, maxChars: number, withinMs = 30 *
     const l = list[i]
     if (l.t < cutoff) break
     if (mid && l.mid === mid) continue
+    if (conv && l.conv === conv) continue
     out.push(`${l.name}: ${truncate(l.text, maxChars)}`)
   }
   return out.reverse()

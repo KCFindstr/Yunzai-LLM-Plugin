@@ -1,0 +1,13 @@
+import type { ReplySection } from '../core/configTypes.ts'
+
+/** True when the event comes from the official QQ bot platform adapter (TRSS QQBot-Plugin). */
+export function isQQBotEvent(e: any): boolean {
+  const name = String(e?.adapter_name ?? e?.bot?.adapter?.name ?? e?.bot?.version?.name ?? '')
+  return /qqbot/i.test(name)
+}
+
+/** Whether replies for this event are written and sent as Markdown. */
+export function markdownEnabled(e: any, reply: ReplySection): boolean {
+  if (reply.markdown === 'auto') return isQQBotEvent(e)
+  return reply.markdown === true
+}
