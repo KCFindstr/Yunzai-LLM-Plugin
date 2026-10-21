@@ -48,12 +48,12 @@ export function anthropicEffort(t: ThinkingLevel): string | undefined {
   }
 }
 
-/** Gemini generation_config.thinking_level mapping (minimal|low|medium|high). */
-export function geminiThinking(t: ThinkingLevel): string {
+/** Gemini generation_config.thinking_level mapping (low|medium|high). */
+export function geminiThinking(t: ThinkingLevel): string | undefined {
   switch (t) {
     case 'off':
+      return undefined
     case 'minimal':
-      return 'minimal'
     case 'low':
       return 'low'
     case 'medium':

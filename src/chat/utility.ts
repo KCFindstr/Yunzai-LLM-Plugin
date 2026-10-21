@@ -44,16 +44,35 @@ export async function utilityChat(opts: {
   if (!picked) throw new Error(opts.vision ? '没有可用的视觉模型（需配置 vision 模型及 API Key）' : '没有可用的模型')
   const block = checkQuota(picked.model, opts.quotaCtx)
   if (block) throw new Error(`模型 ${picked.model.id} 额度已用完`)
-  const res = await chat({
-    model: picked.model,
-    provider: picked.provider,
-    system: opts.system,
-    messages: [{ role: 'user', content: opts.user }],
-    tools: [],
-    thinking: 'off',
-    maxTokens: opts.maxTokens ?? 600,
-    temperature: null,
-  })
+  let thinking = picked.model.thinking ?? 'off'
+  let res: any
+  try {
+    res = await chat({
+      model: picked.model,
+      provider: picked.provider,
+      system: opts.system,
+      messages: [{ role: 'user', content: opts.user }],
+      tools: [],
+      thinking,
+      maxTokens: opts.maxTokens ?? 600,
+      temperature: picked.model.temperature ?? null,
+    })
+  } catch (err: any) {
+    if (thinking !== 'off' && /reason|thinking|effort|output_config/.test(`${err?.message ?? ''} ${err?.body ?? ''}`.toLowerCase())) {
+      res = await chat({
+        model: picked.model,
+        provider: picked.provider,
+        system: opts.system,
+        messages: [{ role: 'user', content: opts.user }],
+        tools: [],
+        thinking: 'off',
+        maxTokens: opts.maxTokens ?? 600,
+        temperature: picked.model.temperature ?? null,
+      })
+    } else {
+      throw err
+    }
+  }
   const cost = computeCost(res.usage, resolvePrice(picked.model))
   record(picked.model, opts.quotaCtx, cost, res.usage)
   log.debug(`utility call ${picked.model.id} cost=${cost.toFixed(5)}`)

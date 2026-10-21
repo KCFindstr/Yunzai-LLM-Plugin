@@ -1669,8 +1669,8 @@ function anthropicEffort(t) {
 function geminiThinking(t) {
   switch (t) {
     case "off":
+      return void 0;
     case "minimal":
-      return "minimal";
     case "low":
       return "low";
     case "medium":
@@ -1828,7 +1828,9 @@ var gemini = {
           });
       }
     }
-    const generation_config = { max_output_tokens: p.maxTokens, thinking_level: geminiThinking(p.thinking) };
+    const generation_config = { max_output_tokens: p.maxTokens };
+    const thinkingLevel = geminiThinking(p.thinking);
+    if (thinkingLevel) generation_config.thinking_level = thinkingLevel;
     if (p.temperature != null) generation_config.temperature = p.temperature;
     if (p.model.topP != null) generation_config.top_p = p.model.topP;
     let body = { model: p.model.model, input, system_instruction: p.system, store: store5, generation_config };
@@ -2099,16 +2101,35 @@ async function utilityChat(opts) {
   if (!picked) throw new Error(opts.vision ? "\u6CA1\u6709\u53EF\u7528\u7684\u89C6\u89C9\u6A21\u578B\uFF08\u9700\u914D\u7F6E vision \u6A21\u578B\u53CA API Key\uFF09" : "\u6CA1\u6709\u53EF\u7528\u7684\u6A21\u578B");
   const block = checkQuota(picked.model, opts.quotaCtx);
   if (block) throw new Error(`\u6A21\u578B ${picked.model.id} \u989D\u5EA6\u5DF2\u7528\u5B8C`);
-  const res = await chat({
-    model: picked.model,
-    provider: picked.provider,
-    system: opts.system,
-    messages: [{ role: "user", content: opts.user }],
-    tools: [],
-    thinking: "off",
-    maxTokens: opts.maxTokens ?? 600,
-    temperature: null
-  });
+  let thinking = picked.model.thinking ?? "off";
+  let res;
+  try {
+    res = await chat({
+      model: picked.model,
+      provider: picked.provider,
+      system: opts.system,
+      messages: [{ role: "user", content: opts.user }],
+      tools: [],
+      thinking,
+      maxTokens: opts.maxTokens ?? 600,
+      temperature: picked.model.temperature ?? null
+    });
+  } catch (err) {
+    if (thinking !== "off" && /reason|thinking|effort|output_config/.test(`${err?.message ?? ""} ${err?.body ?? ""}`.toLowerCase())) {
+      res = await chat({
+        model: picked.model,
+        provider: picked.provider,
+        system: opts.system,
+        messages: [{ role: "user", content: opts.user }],
+        tools: [],
+        thinking: "off",
+        maxTokens: opts.maxTokens ?? 600,
+        temperature: picked.model.temperature ?? null
+      });
+    } else {
+      throw err;
+    }
+  }
   const cost = computeCost(res.usage, resolvePrice(picked.model));
   record(picked.model, opts.quotaCtx, cost, res.usage);
   log.debug(`utility call ${picked.model.id} cost=${cost.toFixed(5)}`);

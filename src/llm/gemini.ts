@@ -51,7 +51,9 @@ export const gemini: Adapter = {
       }
     }
 
-    const generation_config: any = { max_output_tokens: p.maxTokens, thinking_level: geminiThinking(p.thinking) }
+    const generation_config: any = { max_output_tokens: p.maxTokens }
+    const thinkingLevel = geminiThinking(p.thinking)
+    if (thinkingLevel) generation_config.thinking_level = thinkingLevel
     if (p.temperature != null) generation_config.temperature = p.temperature
     if (p.model.topP != null) generation_config.top_p = p.model.topP
     let body: any = { model: p.model.model, input, system_instruction: p.system, store, generation_config }
