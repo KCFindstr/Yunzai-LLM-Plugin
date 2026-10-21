@@ -2193,6 +2193,7 @@ var ADMIN_HELP_PERSONA = `\u3010\u7BA1\u7406 \xB7 \u4EBA\u8BBE\u3011
 #llm\u5220\u9664\u4EBA\u8BBE <\u540D\u79F0>`;
 var ADMIN_HELP_STICKER = `\u3010\u7BA1\u7406 \xB7 \u8868\u60C5\u5305\u3011
 #llm\u6DFB\u52A0\u8868\u60C5 [\u540D\u79F0] [\u63CF\u8FF0] \u2014 \u5FC5\u987B\u5728\u540C\u4E00\u6761\u6D88\u606F\u91CC\u9644\u5E26\u56FE\u7247/\u8868\u60C5\uFF0C\u6216\u5F15\u7528\uFF08\u56DE\u590D\uFF09\u4E00\u6761\u56FE\u7247\u6D88\u606F\u53D1\u9001\uFF1B\u53EA\u6DFB\u52A0\u8FD9\u6761\u6D88\u606F/\u88AB\u5F15\u7528\u6D88\u606F\u91CC\u7684\u56FE\u7247
+\u{1F4A1} \u4E5F\u652F\u6301\u81EA\u7136\u8BED\u8A00\uFF1A@\u673A\u5668\u4EBA \u52A0\u4E00\u4E0B\u8FD9\u4E2A\u8868\u60C5 [\u53EB\u540D\u79F0]\uFF08\u9644\u5E26\u6216\u5F15\u7528\u56FE\u7247\uFF0C\u81EA\u52A8\u89C6\u89C9\u8BC6\u522B\u5165\u5E93\uFF09
 #llm\u5BFC\u5165\u6536\u85CF\u8868\u60C5 [\u6570\u91CF] \u2014 \u5BFC\u5165\u673A\u5668\u4EBAQQ\u53F7\u7684\u6536\u85CF\u8868\u60C5\uFF08NapCat\uFF09
 #llm\u8868\u60C5\u5217\u8868 \u2014 \u67E5\u770B\u5168\u90E8\u8868\u60C5
 #llm\u67E5\u770B\u8868\u60C5 <\u7F16\u53F7|\u540D\u79F0>
@@ -2377,6 +2378,86 @@ async function indexSticker(s, opts = {}) {
   updateSticker(s.id, patch);
   log.info(`\u8868\u60C5 ${s.id} \u8BC6\u522B\u4E3A\u300C${patch.name}\u300D`);
   return { ...s, ...patch };
+}
+
+// src/stickers/add.ts
+async function collectImages(e) {
+  const segs = [...e.message ?? []];
+  if (e.reply_id && typeof e.getReply === "function") {
+    try {
+      const r = await e.getReply();
+      segs.push(...r?.message ?? []);
+    } catch {
+    }
+  }
+  const images = [];
+  const mfaces = [];
+  for (const s of segs) {
+    if (s?.type === "mface" && s.emoji_id) mfaces.push(s);
+    else if (s?.type === "image" && s.url) {
+      const buf = await fetchBuffer(s.url, { maxBytes: 10 * 1024 * 1024 });
+      if (buf) images.push({ buf });
+    }
+  }
+  return { images, mfaces };
+}
+async function addStickersFrom(e, hint) {
+  const { images, mfaces } = await collectImages(e);
+  const added = [];
+  const dup = [];
+  for (const img of images) {
+    const [s, isNew] = addImageSticker(img.buf, { addedBy: String(e.user_id), name: hint?.name, desc: hint?.desc });
+    (isNew ? added : dup).push(s);
+  }
+  for (const m of mfaces) {
+    const preview = m.url ? await fetchBuffer(m.url, { maxBytes: 5 * 1024 * 1024 }) : void 0;
+    const [s, isNew] = addMfaceSticker(
+      { emoji_id: m.emoji_id, emoji_package_id: m.emoji_package_id, key: m.key, summary: m.summary },
+      preview,
+      String(e.user_id)
+    );
+    (isNew ? added : dup).push(s);
+  }
+  if (!added.length && !dup.length) return 0;
+  const lines = [];
+  for (const s of added) {
+    if (hint?.name && hint?.desc) {
+      lines.push(`\u2705 ${s.id}\u300C${s.name}\u300D`);
+      continue;
+    }
+    try {
+      const r = await indexSticker(s, { hint: hint?.name, userId: String(e.user_id) });
+      lines.push(`\u2705 ${r.id}\u300C${r.name}\u300D${r.desc}`);
+    } catch (err) {
+      lines.push(`\u26A0\uFE0F ${s.id} \u5DF2\u4FDD\u5B58\u4F46\u8BC6\u522B\u5931\u8D25\uFF1A${truncate(err.message, 60)}\uFF08\u53EF\u7528 #llm\u91CD\u547D\u540D\u8868\u60C5 \u624B\u52A8\u547D\u540D\uFF09`);
+    }
+  }
+  for (const s of dup) lines.push(`\u21A9\uFE0F ${s.id}\u300C${s.name}\u300D\u5DF2\u5B58\u5728`);
+  await e.reply(lines.join("\n"));
+  return added.length + dup.length;
+}
+function matchStickerAddIntent(text) {
+  const t = text.trim();
+  if (!t) return null;
+  const ACTION_VERBS = "(?:\u52A0\u4E00\u4E0B|\u6DFB\u52A0|\u4FDD\u5B58\u4E00\u4E0B|\u4FDD\u5B58\u4E0B|\u4FDD\u5B58|\u5B58\u4E00\u4E0B|\u5B58\u4E0B|\u5B58\u4E2A|\u5B58|\u6536\u85CF\u4E00\u4E0B|\u6536\u85CF|\u8BB0\u4F4F|\u6536\u4E00\u4E0B|\u6536\u4E0B|\u6536\u5F55|\u52A0)";
+  const STICKER_NOUNS = "(?:\u8FD9\u4E2A|\u8FD9\u5F20|\u8FD9\u53EA|\u672C)?(?:\u8868\u60C5\u5305|\u8868\u60C5|\u52A8\u56FE|\u56FE|mface)";
+  const NAME_TAG = "(?:(?:\u53EB|\u540D\u4E3A|\u540D\u5B57\u53EB|\u79F0\u4F5C|\u5907\u6CE8\u4E3A)\\s*([\\S]+))";
+  const regexA = new RegExp("^(?:\u5E2E\u6211|\u8BF7)?(?:\u628A)?\\s*" + ACTION_VERBS + "\\s*(?:\u4E00\u4E0B)?\\s*" + STICKER_NOUNS + "?(?:\\s+" + NAME_TAG + "|\\s+([\\S]+))?$", "i");
+  const regexB = new RegExp("^(?:\u5E2E\u6211|\u8BF7)?(?:\u628A)?\\s*" + STICKER_NOUNS + "\\s*(?:\u7ED9(?:\u6211|\u4F60))?\\s*" + ACTION_VERBS + "(?:\u4E00\u4E0B)?(?:\\s*(?:\u4E3A|\u6210)?(?:\u8868\u60C5\u5305|\u8868\u60C5))?(?:\\s+" + NAME_TAG + "|\\s+([\\S]+))?$", "i");
+  let m = regexA.exec(t);
+  if (m) return { matched: true, name: (m[1] || m[2])?.trim() };
+  m = regexB.exec(t);
+  if (m) return { matched: true, name: (m[1] || m[2])?.trim() };
+  if (t.length <= 25) {
+    const hasAction = /(?:加一下|添加|保存|存一下|存个|收藏|记住|收录|加)/.test(t);
+    const hasNoun = /(?:表情包|表情|动图)/.test(t);
+    const notSend = !/(?:发|送|来一个|来只|给我)/.test(t);
+    if (hasAction && hasNoun && notSend) {
+      const nameMatch = /(?:叫|名为|名字叫|备注为)\s*([\S]+)/.exec(t);
+      return { matched: true, name: nameMatch ? nameMatch[1].trim() : void 0 };
+    }
+  }
+  return null;
 }
 
 // src/stickers/picker.ts
@@ -2949,61 +3030,6 @@ function usageLines(userId, groupId) {
     if (segs.length) lines.push(`${m.id}\uFF1A${segs.join("\uFF1B")}`);
   }
   return lines;
-}
-async function collectImages(e) {
-  const segs = [...e.message ?? []];
-  if (e.reply_id && typeof e.getReply === "function") {
-    try {
-      const r = await e.getReply();
-      segs.push(...r?.message ?? []);
-    } catch {
-    }
-  }
-  const images = [];
-  const mfaces = [];
-  for (const s of segs) {
-    if (s?.type === "mface" && s.emoji_id) mfaces.push(s);
-    else if (s?.type === "image" && s.url) {
-      const buf = await fetchBuffer(s.url, { maxBytes: 10 * 1024 * 1024 });
-      if (buf) images.push({ buf });
-    }
-  }
-  return { images, mfaces };
-}
-async function addStickersFrom(e, hint) {
-  const { images, mfaces } = await collectImages(e);
-  const added = [];
-  const dup = [];
-  for (const img of images) {
-    const [s, isNew] = addImageSticker(img.buf, { addedBy: String(e.user_id), name: hint?.name, desc: hint?.desc });
-    (isNew ? added : dup).push(s);
-  }
-  for (const m of mfaces) {
-    const preview = m.url ? await fetchBuffer(m.url, { maxBytes: 5 * 1024 * 1024 }) : void 0;
-    const [s, isNew] = addMfaceSticker(
-      { emoji_id: m.emoji_id, emoji_package_id: m.emoji_package_id, key: m.key, summary: m.summary },
-      preview,
-      String(e.user_id)
-    );
-    (isNew ? added : dup).push(s);
-  }
-  if (!added.length && !dup.length) return 0;
-  const lines = [];
-  for (const s of added) {
-    if (hint?.name && hint?.desc) {
-      lines.push(`\u2705 ${s.id}\u300C${s.name}\u300D`);
-      continue;
-    }
-    try {
-      const r = await indexSticker(s, { hint: hint?.name, userId: String(e.user_id) });
-      lines.push(`\u2705 ${r.id}\u300C${r.name}\u300D${r.desc}`);
-    } catch (err) {
-      lines.push(`\u26A0\uFE0F ${s.id} \u5DF2\u4FDD\u5B58\u4F46\u8BC6\u522B\u5931\u8D25\uFF1A${truncate(err.message, 60)}\uFF08\u53EF\u7528 #llm\u91CD\u547D\u540D\u8868\u60C5 \u624B\u52A8\u547D\u540D\uFF09`);
-    }
-  }
-  for (const s of dup) lines.push(`\u21A9\uFE0F ${s.id}\u300C${s.name}\u300D\u5DF2\u5B58\u5728`);
-  await e.reply(lines.join("\n"));
-  return added.length + dup.length;
 }
 var COMMANDS = [
   // ----- user -----
@@ -4521,6 +4547,20 @@ var LLMChat = class extends BasePlugin {
     if (!reason) return false;
     const eff = config.effective(e.group_id);
     const isAdmin = config.isAdmin(e);
+    const rawText = segmentsToText(e.message ?? [], e.self_id);
+    const stickerIntent = matchStickerAddIntent(rawText);
+    if (stickerIntent) {
+      if (!isAdmin) {
+        await e.reply("\u53EA\u6709\u7BA1\u7406\u5458\u53EF\u4EE5\u6DFB\u52A0\u8868\u60C5\u5305\u54E6~");
+        return true;
+      }
+      const hint = stickerIntent.name ? { name: stickerIntent.name } : void 0;
+      const count = await addStickersFrom(e, hint);
+      if (!count) {
+        await e.reply("\u6CA1\u6709\u627E\u5230\u56FE\u7247\u3002\u8BF7\u5728\u8FD9\u6761\u6D88\u606F\u91CC\u9644\u5E26\u56FE\u7247/\u8868\u60C5\uFF0C\u6216\u8005\u5F15\u7528\uFF08\u56DE\u590D\uFF09\u4E00\u6761\u56FE\u7247\u6D88\u606F\u518D\u5BF9\u6211\u8BF4\u201C\u52A0\u4E00\u4E0B\u8FD9\u4E2A\u8868\u60C5\u201D");
+      }
+      return true;
+    }
     if (!hasContent(e) && !e.reply_id) {
       const usable = Boolean(pickModel([eff.model, ...cfg.fallbackModels]));
       if (usable && cfg.trigger.emptyAtReply && reason === "at" && userCd.pass(`empty:${e.self_id}:${e.user_id}`, 30))

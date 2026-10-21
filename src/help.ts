@@ -1,4 +1,4 @@
-/** Help menu sections. Each string is sent as one node of a forward message. */
+﻿/** Help menu sections. Each string is sent as one node of a forward message. */
 
 export const USER_HELP = `【LLM 对话 · 使用说明】
 • 在群里 @我 + 内容 就能和我聊天；回复（引用）我的消息也可以继续聊
@@ -71,6 +71,7 @@ export const ADMIN_HELP_PERSONA = `【管理 · 人设】
 
 export const ADMIN_HELP_STICKER = `【管理 · 表情包】
 #llm添加表情 [名称] [描述] — 必须在同一条消息里附带图片/表情，或引用（回复）一条图片消息发送；只添加这条消息/被引用消息里的图片
+💡 也支持自然语言：@机器人 加一下这个表情 [叫名称]（附带或引用图片，自动视觉识别入库）
 #llm导入收藏表情 [数量] — 导入机器人QQ号的收藏表情（NapCat）
 #llm表情列表 — 查看全部表情
 #llm查看表情 <编号|名称>
