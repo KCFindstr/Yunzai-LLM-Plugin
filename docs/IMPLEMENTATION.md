@@ -135,7 +135,7 @@ Only erasable TS syntax (no enums/parameter properties/namespaces) — `erasable
   `docs/EXAMPLE_ROLLOUT.md` regenerated with markdown on (generator script lives outside the repo; it reads a
   `MOCK_DUMP` jsonl from `sandbox/run.mjs --mock --script … --overlay …`).
 - Thinking judge (2026-10-21, `src/chat/thinking.ts`, `chat.thinkingJudge`): `thinking: auto` now asks a judge
-  (default mode `model`: utilityChat with `JUDGE_PROMPT`, thinking off, max_tokens 8, temperature 0, timeout 1.5s,
+  (default mode `model`: utilityChat with `JUDGE_PROMPT`, thinking off, max_tokens 8, temperature 0, timeout 5s (default),
   falls back to the keyword heuristic). Obvious cases skip the call (empty, ≤4 chars without ?, >300 chars).
   `systemone` mode speaks TypeSafe's System One API (`POST https://api.typesafe.ai/v1/systemone`, a `choice`
   question) — Jev (waitlist) or a self-hosted Kev. Eval set `test/fixtures/thinking-eval.json` (58 msgs, labels are

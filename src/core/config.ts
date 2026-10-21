@@ -290,12 +290,29 @@ export function normalize(raw: any): PluginConfig {
     url: typeof tj.url === 'string' && tj.url ? tj.url : 'https://api.typesafe.ai/v1/systemone',
     apiKey: typeof tj.apiKey === 'string' ? tj.apiKey : '',
     systemoneModel: typeof tj.systemoneModel === 'string' && tj.systemoneModel ? tj.systemoneModel : 'jev-latest',
-    timeoutMs: Math.min(5000, Math.max(200, Number(tj.timeoutMs) || 1500)),
+    timeoutMs: Math.min(10000, Math.max(200, Number(tj.timeoutMs) || 5000)),
   }
   c.sticker = isPlainObject(c.sticker) ? c.sticker : {}
   c.tools = isPlainObject(c.tools) ? c.tools : {}
-  c.tools.webSearch ??= { enable: false, provider: 'none' }
-  c.tools.webFetch ??= { enable: false }
+  const ws = isPlainObject(c.tools.webSearch) ? c.tools.webSearch : {}
+  c.tools.webSearch = {
+    enable: ws.enable !== false,
+    provider: ['native', 'anysearch', 'tavily', 'brave', 'searxng', 'jina', 'none'].includes(ws.provider) ? ws.provider : 'none',
+    apiKey: typeof ws.apiKey === 'string' ? ws.apiKey : '',
+    baseUrl: typeof ws.baseUrl === 'string' ? ws.baseUrl : '',
+    maxResults: Math.min(10, Math.max(1, Number(ws.maxResults) || 5)),
+    maxPerTurn: Math.min(100, Math.max(1, Number(ws.maxPerTurn ?? ws.maxSearchesPerTurn) || 3)),
+  }
+  const wf = isPlainObject(c.tools.webFetch) ? c.tools.webFetch : {}
+  c.tools.webFetch = {
+    enable: wf.enable !== false,
+    maxChars: Number.isFinite(Number(wf.maxChars)) && Number(wf.maxChars) >= 500 ? Number(wf.maxChars) : 6000,
+    timeout: Math.min(60, Math.max(1, Number(wf.timeout) || 15)),
+    reader: wf.reader === 'jina' ? 'jina' : 'direct',
+    jinaKey: typeof wf.jinaKey === 'string' ? wf.jinaKey : '',
+    allowPrivateNetwork: wf.allowPrivateNetwork === true,
+    maxPerTurn: Math.min(100, Math.max(1, Number(wf.maxPerTurn ?? wf.maxFetchesPerTurn) || 3)),
+  }
   c.tools.botCommand ??= { enable: false }
   c.tools.botCommand.blacklist = asArray(c.tools.botCommand.blacklist)
   c.tools.botCommand.hints = asArray(c.tools.botCommand.hints)
@@ -312,7 +329,7 @@ export function normalize(raw: any): PluginConfig {
     memoryMB: Math.min(4096, Math.max(64, Number(ex.memoryMB) || 512)),
     diskMB: Math.min(2048, Math.max(8, Number(ex.diskMB) || 128)),
     maxOutput: Math.min(20000, Math.max(256, Number(ex.maxOutput) || 4000)),
-    maxRunsPerTurn: Math.min(10, Math.max(1, Number(ex.maxRunsPerTurn) || 3)),
+    maxRunsPerTurn: Math.min(100, Math.max(1, Number(ex.maxRunsPerTurn) || 3)),
   }
   c.sticker.maxSendSize = Number.isFinite(Number(c.sticker.maxSendSize)) ? Number(c.sticker.maxSendSize) : 240
   c.tools.disabled = asArray(c.tools.disabled)

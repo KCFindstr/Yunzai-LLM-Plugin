@@ -191,7 +191,7 @@ chat:
     url: https://api.typesafe.ai/v1/systemone
     apiKey: ''
     systemoneModel: jev-latest
-    timeoutMs: 1500
+    timeoutMs: 5000
   # 是否把用户发的图片给模型看
   includeImages: true
   maxImages: 2
@@ -275,6 +275,8 @@ tools:
     apiKey: ''
     baseUrl: ''
     maxResults: 5
+    # 每轮最多搜索次数
+    maxPerTurn: 3
   webFetch:
     enable: true
     # 返回给模型的最大字符数
@@ -285,6 +287,8 @@ tools:
     jinaKey: ''
     # 允许访问内网地址（危险，默认禁止）
     allowPrivateNetwork: false
+    # 每轮最多打开网页次数
+    maxPerTurn: 3
   botCommand:
     # 允许把自然语言转成机器人已有指令执行（如「帮我查深渊」→ #深渊）
     enable: true

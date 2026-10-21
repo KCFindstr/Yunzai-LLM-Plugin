@@ -198,7 +198,8 @@ export function registerWebTools() {
     async run(args, ctx) {
       const q = String(args.query ?? '').trim()
       if (!q) return { content: '缺少 query', isError: true }
-      if (ctx.turn.searches >= 3) return { content: '本轮搜索次数已达上限，请根据已有信息回答', isError: true }
+      const maxSearches = ctx.eff.tools.webSearch.maxPerTurn ?? 3
+      if (ctx.turn.searches >= maxSearches) return { content: `本轮搜索次数已达上限（最多 ${maxSearches} 次），请根据已有信息回答`, isError: true }
       ctx.turn.searches++
       const hits = await searchExternal(q, ctx)
       if (!hits.length) return '没有搜索到结果'
@@ -219,7 +220,8 @@ export function registerWebTools() {
     async run(args, ctx) {
       const url = String(args.url ?? '').trim()
       if (!/^https?:\/\//i.test(url)) return { content: '请提供完整的 http(s) 链接', isError: true }
-      if (ctx.turn.fetches >= 3) return { content: '本轮打开网页次数已达上限', isError: true }
+      const maxFetches = ctx.eff.tools.webFetch.maxPerTurn ?? 3
+      if (ctx.turn.fetches >= maxFetches) return { content: `本轮打开网页次数已达上限（最多 ${maxFetches} 次）`, isError: true }
       ctx.turn.fetches++
       return fetchPage(url, ctx)
     },

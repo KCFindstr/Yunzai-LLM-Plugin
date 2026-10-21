@@ -2,7 +2,7 @@ import { checkQuota, record, type QuotaBlock, type QuotaCtx } from '../billing/l
 import { computeCost, resolvePrice } from '../billing/pricing.ts'
 import { config } from '../core/config.ts'
 import type { EffectiveConfig, ThinkingLevel } from '../core/configTypes.ts'
-import { log } from '../core/log.ts'
+import { brief, log } from '../core/log.ts'
 import { Semaphore, sha1 } from '../core/util.ts'
 import { botNickname } from '../core/yunzai.ts'
 import { addUsage, chat, emptyUsage, LLMError, partsToText, usesServerState, type Msg, type ServerState, type UserMsg } from '../llm/index.ts'
@@ -197,6 +197,7 @@ async function runTurnInner(req: TurnRequest): Promise<TurnOutcome> {
         break
       }
       finalText = res.text
+      if (res.text) log.debug(`[${model.id}] 第${round + 1}轮附带文字：${brief(res.text, 300)}`)
       if (round >= maxRounds - 1) break
       const { results, terminal } = await registry.execute(res.toolCalls, ctx, offered)
       if (round === maxRounds - 2)
@@ -211,8 +212,9 @@ async function runTurnInner(req: TurnRequest): Promise<TurnOutcome> {
   }
 
   log.info(
-    `[${model.id}] ${Date.now() - started}ms in=${usage.input} cache=${usage.cacheRead}/${usage.cacheWrite + usage.cacheWrite1h} out=${usage.output} $${cost.toFixed(5)}${turn.dispatched ? ` cmd=${turn.dispatched}` : ''}`,
+    `[${model.id}] ${Date.now() - started}ms think=${thinking} in=${usage.input} cache=${usage.cacheRead}/${usage.cacheWrite + usage.cacheWrite1h} out=${usage.output}${usage.reasoning ? `(思考${usage.reasoning})` : ''}${usage.webSearches ? ` 自带搜索${usage.webSearches}次` : ''} $${cost.toFixed(5)}${turn.dispatched ? ` cmd=${turn.dispatched}` : ''}`,
   )
+  if (finalText) log.debug(`[${model.id}] 回复：${brief(finalText, 500)}`)
 
   if (turn.memoryChanged) {
     const mctx = { userId: e.user_id, groupId: e.group_id }

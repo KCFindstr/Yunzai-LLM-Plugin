@@ -1,6 +1,6 @@
 import type { QuotaCtx } from '../billing/ledger.ts'
 import type { ChatSection, ThinkingJudgeConfig, ThinkingLevel, ThinkingSetting } from '../core/configTypes.ts'
-import { log } from '../core/log.ts'
+import { brief, log } from '../core/log.ts'
 import { utilityCandidates, utilityChat } from './utility.ts'
 
 /** Requests that benefit from deeper reasoning or research. */
@@ -110,9 +110,9 @@ export async function judgeMessage(input: JudgeInput, cfg: ThinkingJudgeConfig, 
     try {
       const kind = cfg.mode === 'systemone' ? await judgeWithSystemOne({ ...input, text: t }, cfg) : await judgeWithModel({ ...input, text: t }, cfg, quotaCtx)
       if (kind) return done(kind, cfg.mode)
-      log.debug('思考强度判断：无法解析结果，改用关键词规则')
+      log.info('思考强度判断：无法解析结果，改用关键词规则')
     } catch (err: any) {
-      log.debug(`思考强度判断失败（${err?.message ?? err}），改用关键词规则`)
+      log.info(`思考强度判断失败（${err?.message ?? err}），改用关键词规则`)
     }
   }
   return done(classifyMessage(t, input), 'heuristic')
@@ -128,6 +128,6 @@ export async function resolveThinking(setting: ThinkingSetting, chat: ChatSectio
   const levels = chat.autoThinking
   if (levels.casual === levels.question && levels.question === levels.complex) return levels.casual
   const j = await judgeMessage(input, chat.thinkingJudge, quotaCtx)
-  log.debug(`思考强度 ${levels[j.kind]}（${j.kind}，${j.source} ${j.ms}ms）`)
+  log.info(`思考强度 ${levels[j.kind]}（${j.kind}，由 ${j.source} 判断${j.source === 'obvious' ? '' : `，${j.ms}ms`}）：${brief(input.text, 40)}`)
   return levels[j.kind]
 }

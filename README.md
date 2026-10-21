@@ -80,4 +80,6 @@ pnpm test         # node:test，全部使用本地模拟服务器，不会调用
 pnpm sandbox      # 本地沙盒：真实 Yunzai + 模拟 NapCat，见 sandbox/README.md
 ```
 
+日志：每轮会输出思考强度及判断来源、每次工具调用（含参数、耗时）和用量汇总。启动前设置环境变量 `YZ_LLM_DEBUG=1`（如写进 `start.bat`）还会输出工具结果和回复全文，且不需要把整个 Yunzai 调成 debug 级别。
+
 实现细节与交接说明见 [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md)。

@@ -1,5 +1,5 @@
 import type { EffectiveConfig, ModelConfig } from '../core/configTypes.ts'
-import { log } from '../core/log.ts'
+import { brief, log } from '../core/log.ts'
 import { truncate } from '../core/util.ts'
 import type { ToolCall, ToolResult, ToolSpec } from '../llm/types.ts'
 
@@ -84,7 +84,10 @@ class Registry {
     const results = await Promise.all(
       calls.map(async (call): Promise<ToolResult> => {
         const def = allowed.get(call.name)
-        if (!def) return { id: call.id, name: call.name, content: `工具 ${call.name} 不可用`, isError: true }
+        if (!def) {
+          log.warn(`模型调用了未提供的工具 ${call.name}(${brief(call.args ?? {})})`)
+          return { id: call.id, name: call.name, content: `工具 ${call.name} 不可用`, isError: true }
+        }
         if (call.args?._invalid_json)
           return { id: call.id, name: call.name, content: '参数不是合法 JSON，请重试', isError: true }
         try {
@@ -95,10 +98,11 @@ class Registry {
           ])
           const o: ToolOutput = typeof out === 'string' ? { content: out } : out
           if (o.terminal) terminal = true
-          log.info(`工具 ${call.name} ${o.isError ? '失败' : '完成'} (${Date.now() - started}ms)`)
+          log.info(`工具 ${call.name}(${brief(call.args ?? {})}) ${o.isError ? '失败' : '完成'} ${Date.now() - started}ms → ${(o.content ?? '').length}字`)
+          log.debug(`工具 ${call.name} 结果：${brief(o.content, 600)}`)
           return { id: call.id, name: call.name, content: truncate(o.content || '(无结果)', MAX_RESULT_CHARS), isError: o.isError }
         } catch (err: any) {
-          log.warn(`工具 ${call.name} 出错: ${err?.message ?? err}`)
+          log.warn(`工具 ${call.name}(${brief(call.args ?? {})}) 出错: ${err?.message ?? err}`)
           return { id: call.id, name: call.name, content: `执行出错: ${err?.message ?? err}`, isError: true }
         }
       }),

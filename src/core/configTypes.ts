@@ -160,6 +160,7 @@ export interface ToolsSection {
     apiKey: string
     baseUrl: string
     maxResults: number
+    maxPerTurn: number
   }
   webFetch: {
     enable: boolean
@@ -168,6 +169,7 @@ export interface ToolsSection {
     reader: 'direct' | 'jina'
     jinaKey: string
     allowPrivateNetwork: boolean
+    maxPerTurn: number
   }
   botCommand: {
     enable: boolean

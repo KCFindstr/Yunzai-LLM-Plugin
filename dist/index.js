@@ -20,6 +20,7 @@ var CONFIG_FILE = path.join(CONFIG_DIR, "config.yaml");
 
 // src/core/log.ts
 var TAG = "[LLM]";
+var verbose = /^(1|true|yes|on)$/i.test(process.env.YZ_LLM_DEBUG ?? "");
 function sink(level, args) {
   const l = globalThis.logger;
   if (l && typeof l[level] === "function") return l[level](TAG, ...args);
@@ -28,12 +29,17 @@ function sink(level, args) {
   fn(TAG, ...args);
 }
 var log = {
-  debug: (...a) => sink("debug", a),
+  verbose,
+  debug: (...a) => verbose ? sink("info", ["[debug]", ...a]) : sink("debug", a),
   info: (...a) => sink("info", a),
   mark: (...a) => sink("mark", a),
   warn: (...a) => sink("warn", a),
   error: (...a) => sink("error", a)
 };
+function brief(v, max = 160) {
+  const s = (typeof v === "string" ? v : JSON.stringify(v) ?? String(v)).replace(/\s+/g, " ").trim();
+  return s.length > max ? `${s.slice(0, max)}\u2026(${s.length}\u5B57)` : s;
+}
 
 // src/core/util.ts
 import crypto from "crypto";
@@ -453,12 +459,29 @@ function normalize(raw) {
     url: typeof tj.url === "string" && tj.url ? tj.url : "https://api.typesafe.ai/v1/systemone",
     apiKey: typeof tj.apiKey === "string" ? tj.apiKey : "",
     systemoneModel: typeof tj.systemoneModel === "string" && tj.systemoneModel ? tj.systemoneModel : "jev-latest",
-    timeoutMs: Math.min(5e3, Math.max(200, Number(tj.timeoutMs) || 1500))
+    timeoutMs: Math.min(1e4, Math.max(200, Number(tj.timeoutMs) || 5e3))
   };
   c.sticker = isPlainObject(c.sticker) ? c.sticker : {};
   c.tools = isPlainObject(c.tools) ? c.tools : {};
-  c.tools.webSearch ??= { enable: false, provider: "none" };
-  c.tools.webFetch ??= { enable: false };
+  const ws = isPlainObject(c.tools.webSearch) ? c.tools.webSearch : {};
+  c.tools.webSearch = {
+    enable: ws.enable !== false,
+    provider: ["native", "anysearch", "tavily", "brave", "searxng", "jina", "none"].includes(ws.provider) ? ws.provider : "none",
+    apiKey: typeof ws.apiKey === "string" ? ws.apiKey : "",
+    baseUrl: typeof ws.baseUrl === "string" ? ws.baseUrl : "",
+    maxResults: Math.min(10, Math.max(1, Number(ws.maxResults) || 5)),
+    maxPerTurn: Math.min(100, Math.max(1, Number(ws.maxPerTurn ?? ws.maxSearchesPerTurn) || 3))
+  };
+  const wf = isPlainObject(c.tools.webFetch) ? c.tools.webFetch : {};
+  c.tools.webFetch = {
+    enable: wf.enable !== false,
+    maxChars: Number.isFinite(Number(wf.maxChars)) && Number(wf.maxChars) >= 500 ? Number(wf.maxChars) : 6e3,
+    timeout: Math.min(60, Math.max(1, Number(wf.timeout) || 15)),
+    reader: wf.reader === "jina" ? "jina" : "direct",
+    jinaKey: typeof wf.jinaKey === "string" ? wf.jinaKey : "",
+    allowPrivateNetwork: wf.allowPrivateNetwork === true,
+    maxPerTurn: Math.min(100, Math.max(1, Number(wf.maxPerTurn ?? wf.maxFetchesPerTurn) || 3))
+  };
   c.tools.botCommand ??= { enable: false };
   c.tools.botCommand.blacklist = asArray(c.tools.botCommand.blacklist);
   c.tools.botCommand.hints = asArray(c.tools.botCommand.hints);
@@ -475,7 +498,7 @@ function normalize(raw) {
     memoryMB: Math.min(4096, Math.max(64, Number(ex.memoryMB) || 512)),
     diskMB: Math.min(2048, Math.max(8, Number(ex.diskMB) || 128)),
     maxOutput: Math.min(2e4, Math.max(256, Number(ex.maxOutput) || 4e3)),
-    maxRunsPerTurn: Math.min(10, Math.max(1, Number(ex.maxRunsPerTurn) || 3))
+    maxRunsPerTurn: Math.min(100, Math.max(1, Number(ex.maxRunsPerTurn) || 3))
   };
   c.sticker.maxSendSize = Number.isFinite(Number(c.sticker.maxSendSize)) ? Number(c.sticker.maxSendSize) : 240;
   c.tools.disabled = asArray(c.tools.disabled);
@@ -2867,7 +2890,10 @@ var Registry = class {
     const results = await Promise.all(
       calls.map(async (call) => {
         const def = allowed.get(call.name);
-        if (!def) return { id: call.id, name: call.name, content: `\u5DE5\u5177 ${call.name} \u4E0D\u53EF\u7528`, isError: true };
+        if (!def) {
+          log.warn(`\u6A21\u578B\u8C03\u7528\u4E86\u672A\u63D0\u4F9B\u7684\u5DE5\u5177 ${call.name}(${brief(call.args ?? {})})`);
+          return { id: call.id, name: call.name, content: `\u5DE5\u5177 ${call.name} \u4E0D\u53EF\u7528`, isError: true };
+        }
         if (call.args?._invalid_json)
           return { id: call.id, name: call.name, content: "\u53C2\u6570\u4E0D\u662F\u5408\u6CD5 JSON\uFF0C\u8BF7\u91CD\u8BD5", isError: true };
         try {
@@ -2878,10 +2904,11 @@ var Registry = class {
           ]);
           const o = typeof out === "string" ? { content: out } : out;
           if (o.terminal) terminal = true;
-          log.info(`\u5DE5\u5177 ${call.name} ${o.isError ? "\u5931\u8D25" : "\u5B8C\u6210"} (${Date.now() - started}ms)`);
+          log.info(`\u5DE5\u5177 ${call.name}(${brief(call.args ?? {})}) ${o.isError ? "\u5931\u8D25" : "\u5B8C\u6210"} ${Date.now() - started}ms \u2192 ${(o.content ?? "").length}\u5B57`);
+          log.debug(`\u5DE5\u5177 ${call.name} \u7ED3\u679C\uFF1A${brief(o.content, 600)}`);
           return { id: call.id, name: call.name, content: truncate(o.content || "(\u65E0\u7ED3\u679C)", MAX_RESULT_CHARS), isError: o.isError };
         } catch (err) {
-          log.warn(`\u5DE5\u5177 ${call.name} \u51FA\u9519: ${err?.message ?? err}`);
+          log.warn(`\u5DE5\u5177 ${call.name}(${brief(call.args ?? {})}) \u51FA\u9519: ${err?.message ?? err}`);
           return { id: call.id, name: call.name, content: `\u6267\u884C\u51FA\u9519: ${err?.message ?? err}`, isError: true };
         }
       })
@@ -4307,9 +4334,9 @@ async function judgeMessage(input, cfg, quotaCtx) {
     try {
       const kind = cfg.mode === "systemone" ? await judgeWithSystemOne({ ...input, text: t }, cfg) : await judgeWithModel({ ...input, text: t }, cfg, quotaCtx);
       if (kind) return done(kind, cfg.mode);
-      log.debug("\u601D\u8003\u5F3A\u5EA6\u5224\u65AD\uFF1A\u65E0\u6CD5\u89E3\u6790\u7ED3\u679C\uFF0C\u6539\u7528\u5173\u952E\u8BCD\u89C4\u5219");
+      log.info("\u601D\u8003\u5F3A\u5EA6\u5224\u65AD\uFF1A\u65E0\u6CD5\u89E3\u6790\u7ED3\u679C\uFF0C\u6539\u7528\u5173\u952E\u8BCD\u89C4\u5219");
     } catch (err) {
-      log.debug(`\u601D\u8003\u5F3A\u5EA6\u5224\u65AD\u5931\u8D25\uFF08${err?.message ?? err}\uFF09\uFF0C\u6539\u7528\u5173\u952E\u8BCD\u89C4\u5219`);
+      log.info(`\u601D\u8003\u5F3A\u5EA6\u5224\u65AD\u5931\u8D25\uFF08${err?.message ?? err}\uFF09\uFF0C\u6539\u7528\u5173\u952E\u8BCD\u89C4\u5219`);
     }
   }
   return done(classifyMessage(t, input), "heuristic");
@@ -4319,7 +4346,7 @@ async function resolveThinking(setting, chat2, input, quotaCtx) {
   const levels = chat2.autoThinking;
   if (levels.casual === levels.question && levels.question === levels.complex) return levels.casual;
   const j = await judgeMessage(input, chat2.thinkingJudge, quotaCtx);
-  log.debug(`\u601D\u8003\u5F3A\u5EA6 ${levels[j.kind]}\uFF08${j.kind}\uFF0C${j.source} ${j.ms}ms\uFF09`);
+  log.info(`\u601D\u8003\u5F3A\u5EA6 ${levels[j.kind]}\uFF08${j.kind}\uFF0C\u7531 ${j.source} \u5224\u65AD${j.source === "obvious" ? "" : `\uFF0C${j.ms}ms`}\uFF09\uFF1A${brief(input.text, 40)}`);
   return levels[j.kind];
 }
 
@@ -4716,6 +4743,7 @@ ${session.summary}` }] });
         break;
       }
       finalText = res.text;
+      if (res.text) log.debug(`[${model.id}] \u7B2C${round + 1}\u8F6E\u9644\u5E26\u6587\u5B57\uFF1A${brief(res.text, 300)}`);
       if (round >= maxRounds - 1) break;
       const { results, terminal } = await registry.execute(res.toolCalls, ctx, offered);
       if (round === maxRounds - 2)
@@ -4729,8 +4757,9 @@ ${session.summary}` }] });
     if (!finalText && !turn.dispatched) return { kind: "error", message: err?.message ?? String(err) };
   }
   log.info(
-    `[${model.id}] ${Date.now() - started}ms in=${usage2.input} cache=${usage2.cacheRead}/${usage2.cacheWrite + usage2.cacheWrite1h} out=${usage2.output} $${cost.toFixed(5)}${turn.dispatched ? ` cmd=${turn.dispatched}` : ""}`
+    `[${model.id}] ${Date.now() - started}ms think=${thinking} in=${usage2.input} cache=${usage2.cacheRead}/${usage2.cacheWrite + usage2.cacheWrite1h} out=${usage2.output}${usage2.reasoning ? `(\u601D\u8003${usage2.reasoning})` : ""}${usage2.webSearches ? ` \u81EA\u5E26\u641C\u7D22${usage2.webSearches}\u6B21` : ""} $${cost.toFixed(5)}${turn.dispatched ? ` cmd=${turn.dispatched}` : ""}`
   );
+  if (finalText) log.debug(`[${model.id}] \u56DE\u590D\uFF1A${brief(finalText, 500)}`);
   if (turn.memoryChanged) {
     const mctx = { userId: e.user_id, groupId: e.group_id };
     maybeCompact("user", String(e.user_id), mctx).catch(() => {
@@ -5250,7 +5279,8 @@ function registerWebTools() {
     async run(args, ctx) {
       const q = String(args.query ?? "").trim();
       if (!q) return { content: "\u7F3A\u5C11 query", isError: true };
-      if (ctx.turn.searches >= 3) return { content: "\u672C\u8F6E\u641C\u7D22\u6B21\u6570\u5DF2\u8FBE\u4E0A\u9650\uFF0C\u8BF7\u6839\u636E\u5DF2\u6709\u4FE1\u606F\u56DE\u7B54", isError: true };
+      const maxSearches = ctx.eff.tools.webSearch.maxPerTurn ?? 3;
+      if (ctx.turn.searches >= maxSearches) return { content: `\u672C\u8F6E\u641C\u7D22\u6B21\u6570\u5DF2\u8FBE\u4E0A\u9650\uFF08\u6700\u591A ${maxSearches} \u6B21\uFF09\uFF0C\u8BF7\u6839\u636E\u5DF2\u6709\u4FE1\u606F\u56DE\u7B54`, isError: true };
       ctx.turn.searches++;
       const hits = await searchExternal(q, ctx);
       if (!hits.length) return "\u6CA1\u6709\u641C\u7D22\u5230\u7ED3\u679C";
@@ -5272,7 +5302,8 @@ ${truncate((h.snippet ?? "").replace(/\s+/g, " "), 300)}`).join("\n\n");
     async run(args, ctx) {
       const url = String(args.url ?? "").trim();
       if (!/^https?:\/\//i.test(url)) return { content: "\u8BF7\u63D0\u4F9B\u5B8C\u6574\u7684 http(s) \u94FE\u63A5", isError: true };
-      if (ctx.turn.fetches >= 3) return { content: "\u672C\u8F6E\u6253\u5F00\u7F51\u9875\u6B21\u6570\u5DF2\u8FBE\u4E0A\u9650", isError: true };
+      const maxFetches = ctx.eff.tools.webFetch.maxPerTurn ?? 3;
+      if (ctx.turn.fetches >= maxFetches) return { content: `\u672C\u8F6E\u6253\u5F00\u7F51\u9875\u6B21\u6570\u5DF2\u8FBE\u4E0A\u9650\uFF08\u6700\u591A ${maxFetches} \u6B21\uFF09`, isError: true };
       ctx.turn.fetches++;
       return fetchPage(url, ctx);
     }
