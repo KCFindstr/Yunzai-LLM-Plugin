@@ -60,7 +60,9 @@ export function uniqueName(name: string, selfId?: string): string {
 }
 
 /** Add an image sticker; returns [sticker, isNew]. Dedupes by content hash. */
-export function addImageSticker(buf: Buffer, meta: { addedBy?: string; name?: string; desc?: string } = {}): [Sticker, boolean] {
+export interface StickerMeta { addedBy?: string; name?: string; desc?: string; use?: string; tags?: string[]; text?: string }
+
+export function addImageSticker(buf: Buffer, meta: StickerMeta = {}): [Sticker, boolean] {
   const hash = sha1(buf)
   const existing = store.data.items.find(s => s.hash === hash)
   if (existing) return [existing, false]
@@ -76,8 +78,9 @@ export function addImageSticker(buf: Buffer, meta: { addedBy?: string; name?: st
     kind: 'image',
     name: uniqueName(meta.name || '未命名'),
     desc: meta.desc ?? '',
-    use: '',
-    tags: [],
+    use: meta.use ?? '',
+    tags: meta.tags ?? [],
+    ...(meta.text ? { text: meta.text } : {}),
     indexed: Boolean(meta.name && meta.desc),
     addedBy: meta.addedBy,
     addedAt: Date.now(),

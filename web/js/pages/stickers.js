@@ -3,7 +3,7 @@ import { menuButton } from '../main.js'
 import { act, badge, card, confirmDanger, empty, fmt, h, modal, mount, toast } from '../ui.js'
 
 const MAX_BYTES = 10 * 1024 * 1024
-const FILTERS = [['all', '全部'], ['unindexed', '未识别'], ['image', '图片'], ['mface', '商城表情']]
+const FILTERS = [['all', '全部'], ['unindexed', '未识别'], ['incomplete', '信息不完整'], ['image', '图片'], ['mface', '商城表情']]
 const SORTS = [['new', '最新添加'], ['uses', '最常使用'], ['name', '名称']]
 
 let view = { filter: 'all', sort: 'new', q: '', auto: true, hint: '' }
@@ -19,11 +19,12 @@ export async function render(root) {
   const delSelBtn = h('button', { class: 'btn danger', disabled: true, onclick: deleteSelected }, '删除选中')
 
   const reload = async () => { list = await get('/api/stickers'); draw() }
+  const fillBtn = h('button', { class: 'btn', style: { display: 'none' }, onclick: e => fillAll(e.currentTarget) })
 
   function visible() {
     const q = view.q.toLowerCase()
     const out = list.filter(s =>
-      (view.filter === 'all' || (view.filter === 'unindexed' ? !s.indexed : s.kind === view.filter)) &&
+      (view.filter === 'all' || (view.filter === 'unindexed' ? !s.indexed : view.filter === 'incomplete' ? s.incomplete : s.kind === view.filter)) &&
       (!q || `${s.name} ${s.desc} ${s.use} ${(s.tags ?? []).join(' ')} ${s.text ?? ''} ${s.id}`.toLowerCase().includes(q)))
     if (view.sort === 'uses') out.sort((a, b) => b.uses - a.uses)
     else if (view.sort === 'name') out.sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'))
@@ -34,7 +35,10 @@ export async function render(root) {
   function draw() {
     for (const id of [...selected]) if (!list.some(s => s.id === id)) selected.delete(id)
     const items = visible()
-    countEl.textContent = `显示 ${items.length} / ${list.length} 个 · 未识别 ${list.filter(s => !s.indexed).length} 个${selected.size ? ` · 已选 ${selected.size}` : ''}`
+    const incomplete = list.filter(s => s.incomplete && s.hasImage).length
+    countEl.textContent = `显示 ${items.length} / ${list.length} 个 · 未识别 ${list.filter(s => !s.indexed).length} 个 · 信息不完整 ${incomplete} 个${selected.size ? ` · 已选 ${selected.size}` : ''}`
+    fillBtn.style.display = incomplete ? '' : 'none'
+    fillBtn.textContent = `补全缺失信息（${incomplete}）`
     delSelBtn.disabled = !selected.size
     delSelBtn.textContent = selected.size ? `删除选中（${selected.size}）` : '删除选中'
     mount(grid, items.length ? items.map(tile) : h('div', { style: { gridColumn: '1 / -1' } }, empty(list.length ? '没有匹配的表情' : '还没有表情包：把图片拖到这里，或点「上传」')))
@@ -50,10 +54,11 @@ export async function render(root) {
         h('div', { class: 'row', style: { flexWrap: 'nowrap' } }, h('b', { class: 'clip', title: s.name }, s.name), s.kind === 'mface' ? badge('商城', 'accent') : null),
         h('div', { class: 'muted clamp', title: s.desc }, s.desc || '（未识别）'),
         s.tags?.length ? h('div', { class: 'chips', style: { marginTop: '4px' } }, s.tags.slice(0, 4).map(t => h('span', { class: 'chip' }, t))) : null,
-        h('div', { class: 'row', style: { marginTop: '6px', gap: '4px' } }, s.indexed ? null : badge('未识别', 'warn'), badge(`用过 ${s.uses}`)),
+        h('div', { class: 'row', style: { marginTop: '6px', gap: '4px' } }, s.indexed ? null : badge('未识别', 'warn'), s.incomplete ? badge('信息不完整', 'warn') : null, badge(`用过 ${s.uses}`)),
         h('div', { class: 'row', style: { marginTop: '4px', gap: '2px', flexWrap: 'nowrap', justifyContent: 'flex-end' } },
           h('button', { class: 'btn sm ghost', title: '编辑', onclick: () => edit(s) }, '编辑'),
-          s.hasImage ? h('button', { class: 'btn sm ghost', title: '用视觉模型重新识别名称和描述', onclick: e => reindex(s, e.currentTarget) }, '识别') : null,
+          s.hasImage && s.incomplete ? h('button', { class: 'btn sm ghost', title: '保留名称和描述，用视觉模型补全适用场景、标签和图中文字', onclick: e => reindex(s, e.currentTarget, 'fill') }, '补全') : null,
+          s.hasImage ? h('button', { class: 'btn sm ghost', title: '用视觉模型重新识别全部信息（会覆盖名称和描述）', onclick: e => reindex(s, e.currentTarget, 'full') }, '识别') : null,
           h('button', { class: 'btn sm ghost danger', title: '删除', onclick: async () => {
             if (await confirmDanger(`删除表情「${s.name}」？`)) act(() => del(`/api/stickers/${enc(s.id)}`), '已删除').then(ok => ok && reload())
           } }, '删除'),
@@ -82,18 +87,54 @@ export async function render(root) {
       text: h('input', { type: 'text', value: s.text ?? '' }),
     }
     const labels = { name: '名称（模型发表情时用 [表情:名称]）', desc: '画面描述', use: '适用场景', tags: '标签', text: '图中文字' }
-    const body = h('div', { class: 'col' }, Object.entries(fields).map(([k, el]) => h('label', { class: 'col', style: { gap: '4px' } }, h('span', { class: 'small muted' }, labels[k]), el)))
+    const status = h('span', { class: 'small muted' })
+    const suggest = h('button', { class: 'btn sm', disabled: !s.hasImage, onclick: async () => {
+      suggest.disabled = true
+      status.textContent = '视觉模型识别中…'
+      try {
+        // keep what's typed; only empty boxes get the model's suggestion (nothing is saved until 保存)
+        const r = await post(`/api/stickers/${enc(s.id)}/index`, { mode: 'fill', dryRun: true })
+        const fillIn = { name: r.name, desc: r.desc, use: r.use, tags: (r.tags ?? []).join('、'), text: r.text }
+        let n = 0
+        for (const [k, el] of Object.entries(fields)) if (!el.value.trim() && fillIn[k]) { el.value = fillIn[k]; n++ }
+        status.textContent = n ? `已填入 ${n} 项，检查后点保存` : '没有需要补全的空白项'
+      } catch (err) {
+        status.textContent = err.message
+      } finally {
+        suggest.disabled = false
+      }
+    } }, '✨ 自动补全空白项')
+    const body = h('div', { class: 'col' },
+      h('div', { class: 'row' }, suggest, status),
+      Object.entries(fields).map(([k, el]) => h('label', { class: 'col', style: { gap: '4px' } }, h('span', { class: 'small muted' }, labels[k]), el)))
     const ok = await modal(`编辑「${s.name}」`, body, [{ label: '取消', value: false }, { label: '保存', kind: 'primary', value: true }])
     if (!ok) return
     const patch = Object.fromEntries(Object.entries(fields).map(([k, el]) => [k, el.value]))
     if (await act(() => put(`/api/stickers/${enc(s.id)}`, patch), '已保存')) reload()
   }
 
-  async function reindex(s, btn) {
-    if (btn) { btn.disabled = true; btn.textContent = '识别中…' }
-    const r = await act(() => post(`/api/stickers/${enc(s.id)}/index`), r => `识别为「${r.name}」`)
+  async function reindex(s, btn, mode = 'full') {
+    if (mode === 'full' && s.indexed && !(await confirmDanger(`重新识别「${s.name}」？名称、描述、适用场景、标签都会被视觉模型的结果覆盖。只想补空白项请用「补全」。`, '重新识别'))) return
+    const label = btn?.textContent
+    if (btn) { btn.disabled = true; btn.textContent = mode === 'fill' ? '补全中…' : '识别中…' }
+    const r = await act(() => post(`/api/stickers/${enc(s.id)}/index`, { mode }), r => (mode === 'fill' ? `已补全「${r.name}」` : `识别为「${r.name}」`))
     if (r) reload()
-    else if (btn) { btn.disabled = false; btn.textContent = '识别' }
+    else if (btn) { btn.disabled = false; btn.textContent = label }
+  }
+
+  async function fillAll(btn) {
+    const pending = list.filter(s => s.incomplete && s.hasImage)
+    if (!pending.length) return toast('没有信息不完整的表情')
+    if (!(await confirmDanger(`用视觉模型补全 ${pending.length} 个表情的适用场景、标签和图中文字？已有的名称和描述保持不变。`, '开始补全'))) return
+    btn.disabled = true
+    let done = 0, failed = 0
+    for (const s of pending) {
+      btn.textContent = `补全中 ${done + failed + 1}/${pending.length}`
+      try { await post(`/api/stickers/${enc(s.id)}/index`, { mode: 'fill' }); done++ } catch { failed++ }
+    }
+    btn.disabled = false
+    toast(`补全完成：成功 ${done} 个${failed ? `，失败 ${failed} 个` : ''}`, failed ? 'bad' : 'ok')
+    reload()
   }
 
   async function indexAll(btn) {
@@ -195,7 +236,7 @@ export async function render(root) {
       countEl,
       h('span', { class: 'spacer', style: { flex: 1 } }),
       h('button', { class: 'btn', onclick: () => { const items = visible(); const all = items.every(s => selected.has(s.id)); for (const s of items) all ? selected.delete(s.id) : selected.add(s.id); draw() } }, '全选/取消'),
-      indexBtn, delSelBtn),
+      fillBtn, indexBtn, delSelBtn),
     grid,
   )
   draw()

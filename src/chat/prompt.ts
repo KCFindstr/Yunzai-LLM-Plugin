@@ -62,7 +62,7 @@ export function buildSystemPrompt(p: SystemPromptInput): string {
   if (eff.sticker.enable) {
     const lines = stickerPromptLines(eff.sticker.maxInPrompt)
     if (lines.length) parts.push(['# 表情包', '气氛合适时可在最后单独写 [表情:名称]，每次最多一个，名称从下表选；list_stickers 可查完整列表。', ...lines].join('\n'))
-    if (tools.has('add_sticker')) parts.push('用户想保存当前或引用图片为表情时用 add_sticker，名称/用途按用户要求，否则留空。')
+    if (tools.has('add_sticker')) parts.push('用户想保存当前或引用图片为表情时用 add_sticker：能看到图片就把名称、描述、适用场景、标签、图中文字都填好（用户指定的名称/用途优先），看不清的项留空。')
   }
   return parts.join('\n\n')
 }

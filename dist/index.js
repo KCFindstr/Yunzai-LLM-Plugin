@@ -1307,6 +1307,16 @@ function observeUsers(event) {
   }
   store3.save();
 }
+function rememberMessage(event, text2) {
+  if (event?.self_id == null || event?.user_id == null || !text2.trim() || isSensitive(text2)) return;
+  const profile = store3.data[scopeKey2(event)]?.find((p) => p.id === String(event.user_id));
+  if (!profile) return;
+  profile.recent = [...profile.recent ?? [], { t: Date.now(), text: truncate(text2, 150) }].slice(-RECENT_LINES);
+  store3.save();
+}
+function recentMessages(scope, id) {
+  return store3.data[scope]?.find((p) => p.id === id)?.recent ?? [];
+}
 function configuredName(id, groupId) {
   const c = config.get();
   return (groupId != null ? c.groups[String(groupId)]?.names?.[id] : void 0) || c.names[id] || void 0;
@@ -1327,6 +1337,7 @@ function rosterSnapshot() {
         id: p.id,
         seen: p.seen,
         observed: cachedName(event, p.id) ?? p.name,
+        messages: p.recent?.length ?? 0,
         group: groupId ? config.get().groups[groupId]?.names?.[p.id] : void 0,
         global: config.get().names[p.id]
       }))
@@ -1349,7 +1360,7 @@ function groupsWithUser(selfId, userId) {
     return { id, name: g?.group_name ? String(g.group_name) : void 0 };
   });
 }
-var store3, scopeKey2;
+var RECENT_LINES, store3, scopeKey2;
 var init_roster = __esm({
   "src/chat/roster.ts"() {
     "use strict";
@@ -1357,6 +1368,7 @@ var init_roster = __esm({
     init_store();
     init_util();
     init_store2();
+    RECENT_LINES = 5;
     store3 = new JsonStore("recent-users.json", {});
     scopeKey2 = (event) => `${event.self_id}:${event.group_id != null ? `g${event.group_id}` : `p${event.user_id}`}`;
   }
@@ -2884,8 +2896,9 @@ function addImageSticker(buf, meta = {}) {
     kind: "image",
     name: uniqueName(meta.name || "\u672A\u547D\u540D"),
     desc: meta.desc ?? "",
-    use: "",
-    tags: [],
+    use: meta.use ?? "",
+    tags: meta.tags ?? [],
+    ...meta.text ? { text: meta.text } : {},
     indexed: Boolean(meta.name && meta.desc),
     addedBy: meta.addedBy,
     addedAt: Date.now(),
@@ -3660,6 +3673,7 @@ function recordGroupMessage(e) {
   const key = keyOf(e);
   const list2 = logs.get(key) ?? [];
   const name = `${knownName(e) || "\u7FA4\u53CB"}(\u5E73\u53F0ID ${e.user_id})`;
+  rememberMessage(e, text2);
   recordChatter(e, name, text2);
   list2.push({
     t: Date.now(),
@@ -4085,7 +4099,7 @@ function buildSystemPrompt(p) {
   if (eff.sticker.enable) {
     const lines = stickerPromptLines(eff.sticker.maxInPrompt);
     if (lines.length) parts.push(["# \u8868\u60C5\u5305", "\u6C14\u6C1B\u5408\u9002\u65F6\u53EF\u5728\u6700\u540E\u5355\u72EC\u5199 [\u8868\u60C5:\u540D\u79F0]\uFF0C\u6BCF\u6B21\u6700\u591A\u4E00\u4E2A\uFF0C\u540D\u79F0\u4ECE\u4E0B\u8868\u9009\uFF1Blist_stickers \u53EF\u67E5\u5B8C\u6574\u5217\u8868\u3002", ...lines].join("\n"));
-    if (tools2.has("add_sticker")) parts.push("\u7528\u6237\u60F3\u4FDD\u5B58\u5F53\u524D\u6216\u5F15\u7528\u56FE\u7247\u4E3A\u8868\u60C5\u65F6\u7528 add_sticker\uFF0C\u540D\u79F0/\u7528\u9014\u6309\u7528\u6237\u8981\u6C42\uFF0C\u5426\u5219\u7559\u7A7A\u3002");
+    if (tools2.has("add_sticker")) parts.push("\u7528\u6237\u60F3\u4FDD\u5B58\u5F53\u524D\u6216\u5F15\u7528\u56FE\u7247\u4E3A\u8868\u60C5\u65F6\u7528 add_sticker\uFF1A\u80FD\u770B\u5230\u56FE\u7247\u5C31\u628A\u540D\u79F0\u3001\u63CF\u8FF0\u3001\u9002\u7528\u573A\u666F\u3001\u6807\u7B7E\u3001\u56FE\u4E2D\u6587\u5B57\u90FD\u586B\u597D\uFF08\u7528\u6237\u6307\u5B9A\u7684\u540D\u79F0/\u7528\u9014\u4F18\u5148\uFF09\uFF0C\u770B\u4E0D\u6E05\u7684\u9879\u7559\u7A7A\u3002");
   }
   return parts.join("\n\n");
 }
@@ -4969,40 +4983,75 @@ init_log();
 init_utility();
 init_store3();
 import fs6 from "fs";
-var INDEX_PROMPT = `\u4F60\u5728\u5E2EQQ\u804A\u5929\u673A\u5668\u4EBA\u6574\u7406\u8868\u60C5\u5305\u5E93\u3002\u8BF7\u770B\u56FE\u7247\uFF0C\u53EA\u8F93\u51FA\u4E00\u4E2AJSON\u5BF9\u8C61\uFF0C\u4E0D\u8981\u5176\u4ED6\u6587\u5B57\uFF1A
+var INDEX_PROMPT = `\u4F60\u5728\u5E2EQQ\u804A\u5929\u673A\u5668\u4EBA\u6574\u7406\u8868\u60C5\u5305\u5E93\u3002\u8BF7\u770B\u56FE\u7247\uFF0C\u53EA\u8F93\u51FA\u4E00\u4E2AJSON\u5BF9\u8C61\uFF0C\u4E0D\u8981\u5176\u4ED6\u6587\u5B57\uFF0C\u4E94\u4E2A\u5B57\u6BB5\u90FD\u5FC5\u987B\u586B\u5199\uFF1A
 {"name":"2-6\u4E2A\u5B57\u7684\u7B80\u77ED\u540D\u79F0\uFF0C\u53E3\u8BED\u5316\u3001\u80FD\u6982\u62EC\u8FD9\u4E2A\u8868\u60C5\uFF08\u5982\uFF1A\u72D7\u5934\u4FDD\u547D\u3001\u732B\u732B\u9707\u60CA\u3001\u59D4\u5C48\u5DF4\u5DF4\uFF09","desc":"\u753B\u9762\u5185\u5BB9\u4E0E\u60C5\u7EEA\uFF0C20\u5B57\u4EE5\u5185","use":"\u9002\u5408\u5728\u4EC0\u4E48\u804A\u5929\u573A\u666F\u53D1\uFF0C20\u5B57\u4EE5\u5185","tags":["3\u52306\u4E2A\u60C5\u7EEA/\u573A\u666F\u6807\u7B7E"],"text":"\u56FE\u4E2D\u7684\u6587\u5B57\uFF0C\u6CA1\u6709\u5219\u4E3A\u7A7A\u5B57\u7B26\u4E32"}`;
+function stickerIncomplete(s) {
+  return !s.use?.trim() || !s.tags?.length;
+}
+var complete = (j) => j && String(j.name ?? "").trim() && String(j.desc ?? "").trim() && String(j.use ?? "").trim() && Array.isArray(j.tags) && j.tags.length;
 async function indexSticker(s, opts = {}) {
   const file = stickerFile(s);
   if (!file || !fs6.existsSync(file)) throw new Error("\u8868\u60C5\u6587\u4EF6\u4E0D\u5B58\u5728");
   const data = fs6.readFileSync(file).toString("base64");
-  const { text: text2 } = await utilityChat({
+  const fill = opts.mode === "fill";
+  const known = fill ? [s.name && s.name !== "\u672A\u547D\u540D" && `\u540D\u79F0\uFF1A${s.name}`, s.desc && `\u63CF\u8FF0\uFF1A${s.desc}`, s.use && `\u9002\u7528\u573A\u666F\uFF1A${s.use}`].filter(Boolean).join("\uFF1B") : "";
+  const ask = (retry) => utilityChat({
     candidates: utilityCandidates(config.get().sticker.indexModel, true),
     vision: true,
     system: INDEX_PROMPT,
     user: [
       { type: "image", data, mime: s.mime ?? "image/png" },
-      { type: "text", text: opts.hint ? `\u7BA1\u7406\u5458\u5907\u6CE8\uFF1A${opts.hint}` : "\u8BF7\u5206\u6790\u8FD9\u4E2A\u8868\u60C5\u5305\u3002" }
+      {
+        type: "text",
+        text: [
+          opts.hint ? `\u7BA1\u7406\u5458\u5907\u6CE8\uFF1A${opts.hint}` : "\u8BF7\u5206\u6790\u8FD9\u4E2A\u8868\u60C5\u5305\u3002",
+          known ? `\u5DF2\u6709\u4FE1\u606F\uFF08\u53C2\u8003\u5E76\u4FDD\u6301\u4E00\u81F4\uFF09\uFF1A${known}` : "",
+          retry ? "\u4E0A\u4E00\u6B21\u7684\u8F93\u51FA\u7F3A\u5C11\u5B57\u6BB5\uFF1Ause \u548C tags \u5FC5\u987B\u586B\u5199\uFF0Ctags \u81F3\u5C113\u4E2A\u3002\u8BF7\u8F93\u51FA\u5B8C\u6574\u7684JSON\u3002" : ""
+        ].filter(Boolean).join("\n")
+      }
     ],
     maxTokens: 400,
     quotaCtx: { userId: opts.userId, isAdmin: true }
   });
-  const j = extractJson(text2);
-  if (!j?.name) throw new Error(`\u8BC6\u522B\u7ED3\u679C\u65E0\u6CD5\u89E3\u6790: ${text2.slice(0, 80)}`);
+  let j = extractJson((await ask(false)).text);
+  if (!complete(j)) {
+    const again = extractJson((await ask(true)).text);
+    if (again && (complete(again) || !j)) j = again;
+  }
+  if (!j || !fill && !String(j.name ?? "").trim()) throw new Error("\u8BC6\u522B\u7ED3\u679C\u65E0\u6CD5\u89E3\u6790");
+  const tags = (Array.isArray(j.tags) ? j.tags : []).map((t) => String(t).trim()).filter(Boolean).slice(0, 8);
+  const read = {
+    name: String(j.name ?? "").trim(),
+    desc: String(j.desc ?? "").trim().slice(0, 40),
+    use: String(j.use ?? "").trim().slice(0, 40),
+    tags,
+    text: String(j.text ?? "").trim().slice(0, 60)
+  };
+  const keepName = fill && s.name && s.name !== "\u672A\u547D\u540D";
   const patch = {
-    name: uniqueName(String(j.name), s.id),
-    desc: String(j.desc ?? "").slice(0, 40),
-    use: String(j.use ?? "").slice(0, 40),
-    tags: (Array.isArray(j.tags) ? j.tags : []).map(String).slice(0, 8),
-    text: String(j.text ?? "").slice(0, 60),
+    name: keepName ? s.name : uniqueName(read.name || s.name, s.id),
+    desc: fill && s.desc ? s.desc : read.desc,
+    use: fill && s.use ? s.use : read.use,
+    tags: fill && s.tags?.length ? s.tags : read.tags,
+    text: fill && s.text ? s.text : read.text,
     indexed: true
   };
-  updateSticker(s.id, patch);
-  log.info(`\u8868\u60C5 ${s.id} \u8BC6\u522B\u4E3A\u300C${patch.name}\u300D`);
+  if (!opts.dryRun) {
+    updateSticker(s.id, patch);
+    log.info(`\u8868\u60C5 ${s.id} ${fill ? "\u8865\u5168" : "\u8BC6\u522B\u4E3A"}\u300C${patch.name}\u300D${patch.use ? ` \xB7 ${patch.use}` : ""}`);
+  }
   return { ...s, ...patch };
 }
 
 // src/stickers/add.ts
 init_store3();
+function cleanHint(hint) {
+  if (!hint) return void 0;
+  const str2 = (v, max) => typeof v === "string" && v.trim() ? v.trim().slice(0, max) : void 0;
+  const tags = (Array.isArray(hint.tags) ? hint.tags : typeof hint.tags === "string" ? String(hint.tags).split(/[,，、\s]+/) : []).map((t) => String(t).trim()).filter(Boolean).slice(0, 8);
+  const out = { name: str2(hint.name, 20), desc: str2(hint.desc, 40), use: str2(hint.use, 40), tags: tags.length ? tags : void 0, text: str2(hint.text, 60) };
+  return Object.values(out).some((v) => v !== void 0) ? out : void 0;
+}
 async function collectImages(e) {
   const segs = [...e.message ?? []];
   const urls = /* @__PURE__ */ new Set();
@@ -5042,12 +5091,13 @@ async function collectImages(e) {
   }
   return { images, mfaces };
 }
-async function addStickersFrom(e, hint, { reply: reply2 = true } = {}) {
+async function addStickersFrom(e, rawHint, { reply: reply2 = true } = {}) {
+  const hint = cleanHint(rawHint);
   const { images, mfaces } = await collectImages(e);
   const added = [];
   const dup = [];
   for (const img of images) {
-    const [s, isNew] = addImageSticker(img.buf, { addedBy: String(e.user_id), name: hint?.name, desc: hint?.desc });
+    const [s, isNew] = addImageSticker(img.buf, { addedBy: String(e.user_id), ...hint });
     (isNew ? added : dup).push(s);
   }
   for (const m of mfaces) {
@@ -5057,21 +5107,24 @@ async function addStickersFrom(e, hint, { reply: reply2 = true } = {}) {
       preview,
       String(e.user_id)
     );
+    if (isNew && hint)
+      updateSticker(s.id, { ...hint, ...hint.name ? { name: uniqueName(hint.name, s.id) } : {}, ...hint.name && hint.desc ? { indexed: true } : {} });
     (isNew ? added : dup).push(s);
   }
   const total = added.length + dup.length;
   if (!total) return { total: 0, added: [], dup: [], lines: [] };
   const lines = [];
   for (const s of added) {
-    if (hint?.name && hint?.desc) {
-      lines.push(`\u2705 ${s.id}\u300C${s.name}\u300D`);
+    if (s.indexed && !stickerIncomplete(s)) {
+      lines.push(`\u2705 ${s.id}\u300C${s.name}\u300D${s.desc}`);
       continue;
     }
+    const mode = hint ? "fill" : "full";
     try {
-      const r = await indexSticker(s, { hint: hint?.name, userId: String(e.user_id) });
+      const r = await indexSticker(s, { hint: hint?.name, userId: String(e.user_id), mode });
       lines.push(`\u2705 ${r.id}\u300C${r.name}\u300D${r.desc}`);
     } catch (err) {
-      lines.push(`\u26A0\uFE0F ${s.id} \u5DF2\u4FDD\u5B58\u4F46\u8BC6\u522B\u5931\u8D25\uFF1A${truncate(err.message, 60)}\uFF08\u53EF\u7528 #llm\u91CD\u547D\u540D\u8868\u60C5 \u624B\u52A8\u547D\u540D\uFF09`);
+      lines.push(hint?.name && hint?.desc ? `\u2705 ${s.id}\u300C${s.name}\u300D\uFF08\u9002\u7528\u573A\u666F/\u6807\u7B7E\u6682\u672A\u8865\u5168\uFF1A${truncate(err.message, 40)}\uFF09` : `\u26A0\uFE0F ${s.id} \u5DF2\u4FDD\u5B58\u4F46\u8BC6\u522B\u5931\u8D25\uFF1A${truncate(err.message, 60)}\uFF08\u53EF\u7528 #llm\u91CD\u547D\u540D\u8868\u60C5 \u624B\u52A8\u547D\u540D\uFF09`);
     }
   }
   for (const s of dup) lines.push(`\u21A9\uFE0F ${s.id}\u300C${s.name}\u300D\u5DF2\u5B58\u5728`);
@@ -6777,13 +6830,13 @@ ${lines.join("\n")}`);
     names: ["\u8BC6\u522B\u8868\u60C5"],
     level: "admin",
     async run({ e, args }) {
-      const targets = args === "\u5168\u90E8" ? listStickers() : args ? [findSticker(args)].filter(Boolean) : listStickers().filter((s) => !s.indexed);
-      if (!targets.length) return e.reply("\u6CA1\u6709\u9700\u8981\u8BC6\u522B\u7684\u8868\u60C5");
+      const targets = args === "\u5168\u90E8" ? listStickers() : args ? [findSticker(args)].filter(Boolean) : listStickers().filter((s) => !s.indexed || stickerIncomplete(s));
+      if (!targets.length) return e.reply("\u6CA1\u6709\u9700\u8981\u8BC6\u522B\u6216\u8865\u5168\u7684\u8868\u60C5");
       await e.reply(`\u6B63\u5728\u8BC6\u522B ${targets.length} \u4E2A\u8868\u60C5\u2026`);
       let ok = 0;
       for (const s of targets) {
         try {
-          await indexSticker(s, { userId: String(e.user_id) });
+          await indexSticker(s, { userId: String(e.user_id), mode: !args && s.indexed ? "fill" : "full" });
           ok++;
         } catch (err) {
           log.warn(`\u8BC6\u522B\u8868\u60C5 ${s.id} \u5931\u8D25: ${err.message}`);
@@ -7501,18 +7554,15 @@ function registerStickerTools() {
   registry.register({
     name: "add_sticker",
     source: "builtin",
-    description: "\u6DFB\u52A0\u5E76\u4FDD\u5B58\u8868\u60C5\u5305\u5230\u673A\u5668\u4EBA\u7684\u8868\u60C5\u5E93\u3002\u5F53\u7528\u6237\u8981\u6C42\u6DFB\u52A0\u3001\u4FDD\u5B58\u3001\u6536\u85CF\u8868\u60C5\u5305\u6216\u56FE\u7247\u65F6\u8C03\u7528\uFF08\u652F\u6301\u672C\u6D88\u606F\u9644\u5E26\u7684\u56FE\u7247/\u8868\u60C5\uFF0C\u6216\u56DE\u590D/\u5F15\u7528\u7684\u56FE\u7247\u6D88\u606F\uFF09\u3002\u7528\u6237\u5982\u679C\u6307\u5B9A\u4E86\u540D\u79F0\u6216\u4F7F\u7528\u573A\u666F\u53EF\u586B\u5165 name/desc\uFF0C\u672A\u6307\u5B9A\u5219\u7559\u7A7A\uFF0C\u7CFB\u7EDF\u4F1A\u81EA\u52A8\u8FDB\u884C\u89C6\u89C9\u8BC6\u522B\u547D\u540D\u3002",
+    description: "\u6DFB\u52A0\u5E76\u4FDD\u5B58\u8868\u60C5\u5305\u5230\u673A\u5668\u4EBA\u7684\u8868\u60C5\u5E93\u3002\u5F53\u7528\u6237\u8981\u6C42\u6DFB\u52A0\u3001\u4FDD\u5B58\u3001\u6536\u85CF\u8868\u60C5\u5305\u6216\u56FE\u7247\u65F6\u8C03\u7528\uFF08\u652F\u6301\u672C\u6D88\u606F\u9644\u5E26\u7684\u56FE\u7247/\u8868\u60C5\uFF0C\u6216\u56DE\u590D/\u5F15\u7528\u7684\u56FE\u7247\u6D88\u606F\uFF09\u3002\u4F60\u80FD\u770B\u5230\u8FD9\u5F20\u56FE\u65F6\uFF0C\u628A\u4E0B\u9762\u4E94\u9879\u90FD\u6309\u56FE\u7247\u5185\u5BB9\u586B\u597D\uFF08\u7528\u6237\u6307\u5B9A\u7684\u540D\u79F0/\u7528\u9014\u4F18\u5148\uFF09\uFF1B\u770B\u4E0D\u5230\u6216\u4E0D\u786E\u5B9A\u7684\u9879\u7559\u7A7A\uFF0C\u7CFB\u7EDF\u4F1A\u7528\u89C6\u89C9\u6A21\u578B\u8865\u5168\u3002",
     parameters: {
       type: "object",
       properties: {
-        name: {
-          type: "string",
-          description: "\u53EF\u9009\uFF0C\u8868\u60C5\u5305\u540D\u79F0/\u5173\u952E\u8BCD\uFF08\u5982\u201C\u5F00\u5FC3\u732B\u732B\u201D\u3001\u201C\u6D41\u6CEA\u9EC4\u8C46\u201D\uFF09\u3002\u82E5\u7528\u6237\u672A\u6307\u5B9A\u5219\u7559\u7A7A\u3002"
-        },
-        desc: {
-          type: "string",
-          description: "\u53EF\u9009\uFF0C\u8868\u60C5\u5305\u542B\u4E49\u6216\u4F7F\u7528\u573A\u666F\u8BF4\u660E\u3002"
-        }
+        name: { type: "string", description: "2-6\u4E2A\u5B57\u7684\u7B80\u77ED\u540D\u79F0\uFF0C\u53E3\u8BED\u5316\u3001\u80FD\u6982\u62EC\u8FD9\u4E2A\u8868\u60C5\uFF08\u5982\u201C\u72D7\u5934\u4FDD\u547D\u201D\u201C\u732B\u732B\u9707\u60CA\u201D\uFF09\uFF1B\u7528\u6237\u6307\u5B9A\u4E86\u5C31\u7528\u7528\u6237\u7684" },
+        desc: { type: "string", description: "\u753B\u9762\u5185\u5BB9\u4E0E\u60C5\u7EEA\uFF0C20\u5B57\u4EE5\u5185" },
+        use: { type: "string", description: "\u9002\u5408\u5728\u4EC0\u4E48\u804A\u5929\u573A\u666F\u53D1\uFF0C20\u5B57\u4EE5\u5185" },
+        tags: { type: "array", items: { type: "string" }, description: "3\u52306\u4E2A\u60C5\u7EEA/\u573A\u666F\u6807\u7B7E" },
+        text: { type: "string", description: "\u56FE\u4E2D\u7684\u6587\u5B57\uFF0C\u6CA1\u6709\u5C31\u7559\u7A7A" }
       }
     },
     available: (ctx) => ctx.eff.sticker.enable,
@@ -7523,7 +7573,7 @@ function registerStickerTools() {
           isError: true
         };
       }
-      const hint = args.name ? { name: String(args.name).trim(), desc: args.desc ? String(args.desc).trim() : void 0 } : void 0;
+      const hint = { name: args.name, desc: args.desc, use: args.use, tags: args.tags, text: args.text };
       const res = await addStickersFrom(ctx.e, hint, { reply: false });
       if (!res.total) {
         return {
@@ -8148,7 +8198,7 @@ var startedAt = Date.now();
 var MAX_STICKER_BYTES = 10 * 1024 * 1024;
 function stickerView({ mface, ...s }) {
   const f = stickerFile(s);
-  return { ...s, hasImage: Boolean(f && fs12.existsSync(f)) };
+  return { ...s, hasImage: Boolean(f && fs12.existsSync(f)), incomplete: s.indexed && stickerIncomplete(s) };
 }
 var fail = (message, status = 400) => Object.assign(new Error(message), { status });
 function bots() {
@@ -8522,6 +8572,12 @@ var routes = [
     if (!deleteArchiveEntry(params[0], params[1])) throw fail("\u6CA1\u6709\u8FD9\u6761\u6863\u6848", 404);
   }),
   R("GET", "/api/roster", () => rosterSnapshot().map((r) => ({ ...r, label: r.groupId ? nameOf("group", r.groupId) ?? `\u7FA4 ${r.groupId}` : "\u79C1\u804A" })).sort((a, b) => Math.max(0, ...b.people.map((p) => p.seen)) - Math.max(0, ...a.people.map((p) => p.seen)))),
+  R("GET", "/api/roster/:scope/:id", ({ params }) => {
+    const [scope, id] = params;
+    const groupId = scope.split(":")[1]?.startsWith("g") ? scope.split(":")[1].slice(1) : void 0;
+    const turns = recentTurns({ limit: 300 }).filter((t) => t.userId === id && (groupId ? t.groupId === groupId : !t.groupId)).slice(0, 10);
+    return { id, messages: recentMessages(scope, id), turns: turns.map((t) => ({ at: t.at, input: t.input, reply: t.reply })) };
+  }),
   R("GET", "/api/turns", ({ query }) => recentTurns({ limit: Math.min(300, Number(query.get("limit")) || 100) }).map((t) => ({ ...t, label: sessionLabel(t.conv).label }))),
   R("GET", "/api/vectors", ({ query }) => vectorSpace(query)),
   R("GET", "/api/memory", () => {
@@ -8557,9 +8613,9 @@ var routes = [
     const name = typeof body.name === "string" && body.name.trim() ? body.name.trim().slice(0, 20) : void 0;
     const desc = typeof body.desc === "string" && body.desc.trim() ? body.desc.trim().slice(0, 40) : void 0;
     const [s, isNew] = addImageSticker(buf, { addedBy: "web", name, desc });
-    if (!isNew || body.index === false || name && desc) return { sticker: stickerView(s), isNew };
+    if (!isNew || body.index === false) return { sticker: stickerView(s), isNew };
     try {
-      return { sticker: stickerView(await indexSticker(s, { hint: typeof body.hint === "string" ? body.hint.trim() || name : name })), isNew };
+      return { sticker: stickerView(await indexSticker(s, { hint: typeof body.hint === "string" ? body.hint.trim() || name : name, mode: name ? "fill" : "full" })), isNew };
     } catch (err) {
       return { sticker: stickerView(s), isNew, indexError: truncate(err?.message ?? String(err), 200) };
     }
@@ -8568,7 +8624,8 @@ var routes = [
     const s = listStickers().find((x) => x.id === params[0]);
     if (!s) throw fail("\u6CA1\u6709\u8FD9\u4E2A\u8868\u60C5", 404);
     try {
-      return stickerView(await indexSticker(s, { hint: typeof body.hint === "string" ? body.hint.trim() || void 0 : void 0 }));
+      const r = await indexSticker(s, { hint: typeof body.hint === "string" ? body.hint.trim() || void 0 : void 0, mode: body.mode === "fill" ? "fill" : "full", dryRun: body.dryRun === true });
+      return stickerView(r);
     } catch (err) {
       throw fail(`\u8BC6\u522B\u5931\u8D25\uFF1A${truncate(err?.message ?? String(err), 200)}`, 502);
     }

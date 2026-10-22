@@ -1,5 +1,5 @@
 import { truncate } from '../core/util.ts'
-import { observeUsers, knownName } from './roster.ts'
+import { observeUsers, knownName, rememberMessage } from './roster.ts'
 import { markChatterHandled, recordChatter } from './chatter.ts'
 
 interface Line {
@@ -67,6 +67,7 @@ export function recordGroupMessage(e: any) {
   const key = keyOf(e)
   const list = logs.get(key) ?? []
   const name = `${knownName(e) || '群友'}(平台ID ${e.user_id})`
+  rememberMessage(e, text)
   recordChatter(e, name, text)
   list.push({
     t: Date.now(),

@@ -8,18 +8,15 @@ export function registerStickerTools() {
     source: 'builtin',
     description:
       '添加并保存表情包到机器人的表情库。当用户要求添加、保存、收藏表情包或图片时调用（支持本消息附带的图片/表情，或回复/引用的图片消息）。' +
-      '用户如果指定了名称或使用场景可填入 name/desc，未指定则留空，系统会自动进行视觉识别命名。',
+      '你能看到这张图时，把下面五项都按图片内容填好（用户指定的名称/用途优先）；看不到或不确定的项留空，系统会用视觉模型补全。',
     parameters: {
       type: 'object',
       properties: {
-        name: {
-          type: 'string',
-          description: '可选，表情包名称/关键词（如“开心猫猫”、“流泪黄豆”）。若用户未指定则留空。',
-        },
-        desc: {
-          type: 'string',
-          description: '可选，表情包含义或使用场景说明。',
-        },
+        name: { type: 'string', description: '2-6个字的简短名称，口语化、能概括这个表情（如“狗头保命”“猫猫震惊”）；用户指定了就用用户的' },
+        desc: { type: 'string', description: '画面内容与情绪，20字以内' },
+        use: { type: 'string', description: '适合在什么聊天场景发，20字以内' },
+        tags: { type: 'array', items: { type: 'string' }, description: '3到6个情绪/场景标签' },
+        text: { type: 'string', description: '图中的文字，没有就留空' },
       },
     },
     available: ctx => ctx.eff.sticker.enable,
@@ -30,7 +27,8 @@ export function registerStickerTools() {
           isError: true,
         }
       }
-      const hint = args.name ? { name: String(args.name).trim(), desc: args.desc ? String(args.desc).trim() : undefined } : undefined
+      // whatever the model read from the image; empty fields are filled by the vision indexer
+      const hint = { name: args.name, desc: args.desc, use: args.use, tags: args.tags, text: args.text }
       const res = await addStickersFrom(ctx.e, hint, { reply: false })
       if (!res.total) {
         return {

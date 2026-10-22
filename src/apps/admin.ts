@@ -14,7 +14,7 @@ import { pickModel, utilityChat } from '../chat/utility.ts'
 import * as help from '../help.ts'
 import { PROVIDER_TYPES } from '../llm/index.ts'
 import { addStickersFrom, collectImages } from '../stickers/add.ts'
-import { indexSticker } from '../stickers/indexer.ts'
+import { indexSticker, stickerIncomplete } from '../stickers/indexer.ts'
 import { sendSticker } from '../stickers/picker.ts'
 import {
   addImageSticker,
@@ -848,13 +848,14 @@ const COMMANDS: Cmd[] = [
     names: ['识别表情'],
     level: 'admin',
     async run({ e, args }) {
-      const targets = args === '全部' ? listStickers() : args ? [findSticker(args)].filter(Boolean) : listStickers().filter(s => !s.indexed)
-      if (!targets.length) return e.reply('没有需要识别的表情')
+      // no argument: unrecognised stickers get a full pass, recognised-but-incomplete ones keep their name and get filled
+      const targets = args === '全部' ? listStickers() : args ? [findSticker(args)].filter(Boolean) : listStickers().filter(s => !s.indexed || stickerIncomplete(s))
+      if (!targets.length) return e.reply('没有需要识别或补全的表情')
       await e.reply(`正在识别 ${targets.length} 个表情…`)
       let ok = 0
       for (const s of targets as Sticker[]) {
         try {
-          await indexSticker(s, { userId: String(e.user_id) })
+          await indexSticker(s, { userId: String(e.user_id), mode: !args && s.indexed ? 'fill' : 'full' })
           ok++
         } catch (err: any) {
           log.warn(`识别表情 ${s.id} 失败: ${err.message}`)

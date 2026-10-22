@@ -13,12 +13,12 @@ import { CONFIG_DIR, DEFAULT_CONFIG_FILE } from '../core/paths.ts'
 import { deepMerge, detectImageMime, formatDuration, isPlainObject, maskSecret, truncate } from '../core/util.ts'
 import { allVectors, archiveInfo, clearSession, dayInfo, deleteArchiveEntry, listSessions, peekSession } from '../chat/session.ts'
 import { recentTurns } from '../chat/turnLog.ts'
-import { configuredName, rosterSnapshot } from '../chat/roster.ts'
+import { configuredName, recentMessages, rosterSnapshot } from '../chat/roster.ts'
 import { utilityChat } from '../chat/utility.ts'
 import { partsToText } from '../llm/types.ts'
 import { dot, embed, embeddingReady, embeddingTag } from '../memory/embed.ts'
 import { addMemory, clearMemory, deleteMemory, listMemory, memoryOwners, memoryStats, updateMemory, usage as memUsage, type MemScope } from '../memory/store.ts'
-import { indexSticker } from '../stickers/indexer.ts'
+import { indexSticker, stickerIncomplete } from '../stickers/indexer.ts'
 import { addImageSticker, listStickers, removeSticker, stickerFile, updateSticker, type Sticker } from '../stickers/store.ts'
 import { computerQueue } from '../tools/computer.ts'
 import { registry } from '../tools/registry.ts'
@@ -34,7 +34,7 @@ const MAX_STICKER_BYTES = 10 * 1024 * 1024
 /** Sticker as the UI sees it: no mface payload, plus whether a preview file exists. */
 function stickerView({ mface, ...s }: Sticker) {
   const f = stickerFile(s as Sticker)
-  return { ...s, hasImage: Boolean(f && fs.existsSync(f)) }
+  return { ...s, hasImage: Boolean(f && fs.existsSync(f)), incomplete: s.indexed && stickerIncomplete(s as Sticker) }
 }
 const fail = (message: string, status = 400) => Object.assign(new Error(message), { status })
 
@@ -434,6 +434,13 @@ export const routes: Route[] = [
   R('GET', '/api/roster', () => rosterSnapshot()
     .map(r => ({ ...r, label: r.groupId ? (nameOf('group', r.groupId) ?? `群 ${r.groupId}`) : '私聊' }))
     .sort((a, b) => Math.max(0, ...b.people.map(p => p.seen)) - Math.max(0, ...a.people.map(p => p.seen)))),
+  R('GET', '/api/roster/:scope/:id', ({ params }) => {
+    const [scope, id] = params
+    const groupId = scope.split(':')[1]?.startsWith('g') ? scope.split(':')[1].slice(1) : undefined
+    // their own messages here, plus their recent conversations with the bot (in this group, or anywhere for private)
+    const turns = recentTurns({ limit: 300 }).filter(t => t.userId === id && (groupId ? t.groupId === groupId : !t.groupId)).slice(0, 10)
+    return { id, messages: recentMessages(scope, id), turns: turns.map(t => ({ at: t.at, input: t.input, reply: t.reply })) }
+  }),
   R('GET', '/api/turns', ({ query }) => recentTurns({ limit: Math.min(300, Number(query.get('limit')) || 100) }).map(t => ({ ...t, label: sessionLabel(t.conv).label }))),
 
   R('GET', '/api/vectors', ({ query }) => vectorSpace(query)),
@@ -472,10 +479,10 @@ export const routes: Route[] = [
     const name = typeof body.name === 'string' && body.name.trim() ? body.name.trim().slice(0, 20) : undefined
     const desc = typeof body.desc === 'string' && body.desc.trim() ? body.desc.trim().slice(0, 40) : undefined
     const [s, isNew] = addImageSticker(buf, { addedBy: 'web', name, desc })
-    // same rule as #llm添加表情: a full manual name+desc skips vision naming
-    if (!isNew || body.index === false || (name && desc)) return { sticker: stickerView(s), isNew }
+    // same rule as #llm添加表情: a given name (and description) is kept, vision fills the rest
+    if (!isNew || body.index === false) return { sticker: stickerView(s), isNew }
     try {
-      return { sticker: stickerView(await indexSticker(s, { hint: typeof body.hint === 'string' ? body.hint.trim() || name : name })), isNew }
+      return { sticker: stickerView(await indexSticker(s, { hint: typeof body.hint === 'string' ? body.hint.trim() || name : name, mode: name ? 'fill' : 'full' })), isNew }
     } catch (err: any) {
       return { sticker: stickerView(s), isNew, indexError: truncate(err?.message ?? String(err), 200) }
     }
@@ -484,7 +491,9 @@ export const routes: Route[] = [
     const s = listStickers().find(x => x.id === params[0])
     if (!s) throw fail('没有这个表情', 404)
     try {
-      return stickerView(await indexSticker(s, { hint: typeof body.hint === 'string' ? body.hint.trim() || undefined : undefined }))
+      // mode=fill keeps filled-in fields; dryRun only returns the suggestion (the editor fills its form with it)
+      const r = await indexSticker(s, { hint: typeof body.hint === 'string' ? body.hint.trim() || undefined : undefined, mode: body.mode === 'fill' ? 'fill' : 'full', dryRun: body.dryRun === true })
+      return stickerView(r)
     } catch (err: any) {
       throw fail(`识别失败：${truncate(err?.message ?? String(err), 200)}`, 502)
     }

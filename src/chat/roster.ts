@@ -1,9 +1,16 @@
 import { config } from '../core/config.ts'
 import { JsonStore } from '../core/store.ts'
 import { truncate } from '../core/util.ts'
-import { renderMemory } from '../memory/store.ts'
+import { isSensitive, renderMemory } from '../memory/store.ts'
 
-interface Profile { id: string; name?: string; seen: number }
+interface Profile {
+  id: string
+  name?: string
+  seen: number
+  /** last few things they said here, so an admin can tell who an opaque ID is */
+  recent?: { t: number; text: string }[]
+}
+const RECENT_LINES = 5
 const store = new JsonStore<Record<string, Profile[]>>('recent-users.json', {})
 const scopeKey = (event: any) => `${event.self_id}:${event.group_id != null ? `g${event.group_id}` : `p${event.user_id}`}`
 
@@ -44,6 +51,20 @@ export function observeUsers(event: any) {
   store.save()
 }
 
+/** Keep the sender's latest message (after observeUsers has recorded them). */
+export function rememberMessage(event: any, text: string) {
+  if (event?.self_id == null || event?.user_id == null || !text.trim() || isSensitive(text)) return
+  const profile = store.data[scopeKey(event)]?.find(p => p.id === String(event.user_id))
+  if (!profile) return
+  profile.recent = [...(profile.recent ?? []), { t: Date.now(), text: truncate(text, 150) }].slice(-RECENT_LINES)
+  store.save()
+}
+
+/** What someone said recently in one group or private chat (newest last). */
+export function recentMessages(scope: string, id: string): { t: number; text: string }[] {
+  return store.data[scope]?.find(p => p.id === id)?.recent ?? []
+}
+
 /** Name set in config: this group's `groups.<id>.names` first, then the global `names`. */
 export function configuredName(id: string, groupId?: string | number): string | undefined {
   const c = config.get()
@@ -69,6 +90,7 @@ export function rosterSnapshot() {
         id: p.id,
         seen: p.seen,
         observed: cachedName(event, p.id) ?? p.name,
+        messages: p.recent?.length ?? 0,
         group: groupId ? config.get().groups[groupId]?.names?.[p.id] : undefined,
         global: config.get().names[p.id],
       })),
