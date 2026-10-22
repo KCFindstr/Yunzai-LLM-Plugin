@@ -183,6 +183,12 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .sticker .img { aspect-ratio: 1; background: var(--panel-2); display: grid; place-items: center; }
 .sticker img { max-width: 100%; max-height: 100%; object-fit: contain; }
 .sticker .meta { padding: 8px 10px; font-size: 12px; }
+.sticker.sel { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.sticker .pick { position: absolute; top: 6px; left: 6px; background: var(--panel); border-radius: 6px; padding: 2px; display: flex; opacity: .85; }
+.sticker:hover .pick, .sticker.sel .pick { opacity: 1; }
+.drop-zone { border: 2px dashed var(--line); border-radius: var(--radius); padding: 18px; text-align: center; background: var(--panel); transition: border-color .15s, background .15s; }
+.drop-zone.over { border-color: var(--accent); background: var(--accent-soft); }
+.drop-zone + .card { margin-top: 12px; }
 
 /* logs */
 .log { background: #0c0e14; color: #cdd3e6; border-radius: 10px; padding: 10px 12px; height: calc(100vh - 200px); overflow-y: auto; font-family: var(--mono); font-size: 12px; line-height: 1.5; }

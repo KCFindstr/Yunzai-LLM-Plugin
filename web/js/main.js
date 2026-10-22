@@ -79,22 +79,34 @@ export function menuButton() {
   return h('button', { class: 'btn menu-btn', onclick: () => side?.classList.toggle('open') }, '☰')
 }
 
+let navSeq = 0
+
 async function route() {
   const page = document.getElementById('page')
   if (!page) return
+  const nav = ++navSeq
   const [, id = 'overview', ...rest] = location.hash.split('/')
   const entry = PAGES.find(p => p[0] === id) ?? PAGES[0]
   side?.classList.remove('open')
   for (const a of document.querySelectorAll('.nav a')) a.classList.toggle('on', a.dataset.id === entry[0])
   cleanup?.()
   cleanup = undefined
-  mount(page, h('div', { class: 'empty' }, h('span', { class: 'spin' })))
+  // each navigation renders into its own container; a slower, superseded page must not overwrite a newer one
+  // the spinner lives inside the view: pages replace it when they mount their content
+  const view = h('div', h('div', { class: 'empty' }, h('span', { class: 'spin' })))
+  mount(page, view.cloneNode(true))
+  const attach = () => { if (nav === navSeq && view.parentNode !== page) mount(page, view) }
   try {
     const mod = await entry[3]()
-    const c = await mod.render(page, rest.map(decodeURIComponent))
+    if (nav !== navSeq) return
+    // pages that draw before their first await (canvas sizing, live logs) need to be in the DOM already
+    attach()
+    const c = await mod.render(view, rest.map(decodeURIComponent))
+    if (nav !== navSeq) { if (typeof c === 'function') c(); return }
+    attach()
     cleanup = typeof c === 'function' ? c : undefined
   } catch (err) {
-    if (err.message !== '登录已失效') {
+    if (nav === navSeq && err.message !== '登录已失效') {
       mount(page, h('div', { class: 'card' }, h('h2', '加载失败'), h('pre', err.message)))
       toast(err.message, 'bad')
     }

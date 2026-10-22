@@ -75,12 +75,12 @@ function send(res: http.ServerResponse, status: number, body: any, headers: Reco
   res.end(JSON.stringify(body))
 }
 
-async function readBody(req: http.IncomingMessage): Promise<any> {
+async function readBody(req: http.IncomingMessage, limit = MAX_BODY): Promise<any> {
   let size = 0
   const chunks: Buffer[] = []
   for await (const c of req) {
     size += c.length
-    if (size > MAX_BODY) throw Object.assign(new Error('请求过大'), { status: 413 })
+    if (size > limit) throw Object.assign(new Error(`请求过大（上限 ${Math.round(limit / 1048576)} MB）`), { status: 413 })
     chunks.push(c)
   }
   if (!size) return {}
@@ -145,7 +145,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse) {
     const m = r.pattern.exec(url.pathname)
     if (!m) continue
     const params = (m.slice(1) as string[]).map(decodeURIComponent)
-    const body = method === 'GET' ? {} : await readBody(req)
+    const body = method === 'GET' ? {} : await readBody(req, r.maxBody)
     const out: Reply = await r.run({ params, query: url.searchParams, body })
     if (out && typeof out === 'object' && 'raw' in out && Buffer.isBuffer((out as any).raw))
       return send(res, 200, (out as any).raw, { 'content-type': (out as any).type, 'x-content-type-options': 'nosniff' })

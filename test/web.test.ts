@@ -101,6 +101,33 @@ describe('web panel', () => {
     assert.equal(mem.users.find((u: any) => u.key === '77001').entries[0].text, '喜欢三花猫')
   })
 
+  it('uploads, dedupes, edits and deletes stickers', async () => {
+    const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg=='
+    const first = await (await call('POST', '/api/stickers', { data: `data:image/png;base64,${png}`, index: false })).json()
+    assert.equal(first.isNew, true)
+    assert.equal(first.sticker.indexed, false)
+    const again = await (await call('POST', '/api/stickers', { data: png, index: false })).json()
+    assert.equal(again.isNew, false)
+    assert.equal(again.sticker.id, first.sticker.id)
+
+    const bad = await call('POST', '/api/stickers', { data: Buffer.from('not an image at all').toString('base64') })
+    assert.equal(bad.status, 400)
+    assert.match((await bad.json()).error, /不支持的图片格式/)
+
+    const id = first.sticker.id
+    assert.equal((await call('PUT', `/api/stickers/${id}`, { name: '红点', desc: '一个红色像素', tags: '测试、红色, 像素' })).status, 200)
+    const s = (await (await call('GET', '/api/stickers')).json()).find((x: any) => x.id === id)
+    assert.deepEqual([s.name, s.indexed, s.tags], ['红点', true, ['测试', '红色', '像素']])
+    assert.equal(s.mface, undefined)
+
+    const img = await call('GET', `/api/stickers/${id}/image`)
+    assert.equal(img.headers.get('content-type'), 'image/png')
+    assert.deepEqual(Buffer.from(await img.arrayBuffer()), Buffer.from(png, 'base64'))
+
+    assert.equal((await call('DELETE', `/api/stickers/${id}`)).status, 200)
+    assert.equal((await call('GET', `/api/stickers/${id}/image`)).status, 404)
+  })
+
   it('reports an empty vector space without an embedding key', async () => {
     const v = await (await call('GET', '/api/vectors')).json()
     assert.equal(v.ready, false)

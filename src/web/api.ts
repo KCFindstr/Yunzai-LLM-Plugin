@@ -10,23 +10,31 @@ import { catalogEntries, catalogInfo, scanCatalog } from '../commands/catalog.ts
 import { config, normalize, personaText, resolveKeys } from '../core/config.ts'
 import { recentLogs } from '../core/log.ts'
 import { CONFIG_DIR, DEFAULT_CONFIG_FILE } from '../core/paths.ts'
-import { deepMerge, formatDuration, isPlainObject, maskSecret, truncate } from '../core/util.ts'
+import { deepMerge, detectImageMime, formatDuration, isPlainObject, maskSecret, truncate } from '../core/util.ts'
 import { allVectors, archiveInfo, clearSession, deleteArchiveEntry, listSessions, peekSession } from '../chat/session.ts'
 import { recentTurns } from '../chat/turnLog.ts'
 import { utilityChat } from '../chat/utility.ts'
 import { partsToText } from '../llm/types.ts'
 import { dot, embed, embeddingReady, embeddingTag } from '../memory/embed.ts'
 import { addMemory, clearMemory, deleteMemory, listMemory, memoryOwners, memoryStats, updateMemory, usage as memUsage, type MemScope } from '../memory/store.ts'
-import { listStickers, removeSticker, stickerFile, updateSticker } from '../stickers/store.ts'
+import { indexSticker } from '../stickers/indexer.ts'
+import { addImageSticker, listStickers, removeSticker, stickerFile, updateSticker, type Sticker } from '../stickers/store.ts'
 import { computerQueue } from '../tools/computer.ts'
 import { registry } from '../tools/registry.ts'
 import { deleteSkill, listSkills, parseSkillMarkdown, saveSkill } from '../tools/skills.ts'
 
 export type Reply = any
 interface Req { params: string[]; query: URLSearchParams; body: any }
-interface Route { method: string; pattern: RegExp; run: (r: Req) => Promise<Reply> | Reply }
+interface Route { method: string; pattern: RegExp; run: (r: Req) => Promise<Reply> | Reply; maxBody?: number }
 
 const startedAt = Date.now()
+const MAX_STICKER_BYTES = 10 * 1024 * 1024
+
+/** Sticker as the UI sees it: no mface payload, plus whether a preview file exists. */
+function stickerView({ mface, ...s }: Sticker) {
+  const f = stickerFile(s as Sticker)
+  return { ...s, hasImage: Boolean(f && fs.existsSync(f)) }
+}
 const fail = (message: string, status = 400) => Object.assign(new Error(message), { status })
 
 // ---------- bot / names ----------
@@ -242,8 +250,9 @@ async function vectorSpace(q: URLSearchParams) {
 
 // ---------- routes ----------
 
-const R = (method: string, pattern: string, run: Route['run']): Route => ({
+const R = (method: string, pattern: string, run: Route['run'], maxBody?: number): Route => ({
   method,
+  maxBody,
   pattern: new RegExp(`^${pattern.replace(/:(\w+)/g, '([^/]+)')}$`),
   run,
 })
@@ -442,18 +451,48 @@ export const routes: Route[] = [
   }),
   R('DELETE', '/api/memory/:scope/:key', ({ params }) => ({ removed: clearMemory(params[0] as MemScope, params[1]) })),
 
-  R('GET', '/api/stickers', () => listStickers().map(({ mface, ...s }) => ({ ...s, hasImage: Boolean(stickerFile(s as any)) }))),
+  R('GET', '/api/stickers', () => listStickers().map(stickerView)),
   R('GET', '/api/stickers/:id/image', ({ params }) => {
     const s = listStickers().find(x => x.id === params[0])
     const f = s && stickerFile(s)
     if (!f || !fs.existsSync(f)) throw fail('没有图片', 404)
     return { raw: fs.readFileSync(f), type: s!.mime ?? 'image/png' }
   }),
+  R('POST', '/api/stickers', async ({ body }) => {
+    const buf = Buffer.from(String(body.data ?? '').replace(/^data:[^,]*,/, ''), 'base64')
+    if (!buf.length) throw fail('没有图片数据')
+    if (buf.length > MAX_STICKER_BYTES) throw fail(`图片超过 ${MAX_STICKER_BYTES >> 20} MB`)
+    if (!detectImageMime(buf)) throw fail('不支持的图片格式（支持 PNG / JPEG / GIF / WebP / BMP）')
+    const name = typeof body.name === 'string' && body.name.trim() ? body.name.trim().slice(0, 20) : undefined
+    const desc = typeof body.desc === 'string' && body.desc.trim() ? body.desc.trim().slice(0, 40) : undefined
+    const [s, isNew] = addImageSticker(buf, { addedBy: 'web', name, desc })
+    // same rule as #llm添加表情: a full manual name+desc skips vision naming
+    if (!isNew || body.index === false || (name && desc)) return { sticker: stickerView(s), isNew }
+    try {
+      return { sticker: stickerView(await indexSticker(s, { hint: typeof body.hint === 'string' ? body.hint.trim() || name : name })), isNew }
+    } catch (err: any) {
+      return { sticker: stickerView(s), isNew, indexError: truncate(err?.message ?? String(err), 200) }
+    }
+  }, MAX_STICKER_BYTES * 1.4 + 64 * 1024),
+  R('POST', '/api/stickers/:id/index', async ({ params, body }) => {
+    const s = listStickers().find(x => x.id === params[0])
+    if (!s) throw fail('没有这个表情', 404)
+    try {
+      return stickerView(await indexSticker(s, { hint: typeof body.hint === 'string' ? body.hint.trim() || undefined : undefined }))
+    } catch (err: any) {
+      throw fail(`识别失败：${truncate(err?.message ?? String(err), 200)}`, 502)
+    }
+  }),
   R('PUT', '/api/stickers/:id', ({ params, body }) => {
+    if (!listStickers().some(s => s.id === params[0])) throw fail('没有这个表情', 404)
     const patch: any = {}
-    for (const k of ['name', 'desc', 'use'] as const) if (typeof body[k] === 'string') patch[k] = body[k].trim()
+    for (const k of ['name', 'desc', 'use', 'text'] as const) if (typeof body[k] === 'string') patch[k] = body[k].trim()
+    if (body.tags !== undefined)
+      patch.tags = (Array.isArray(body.tags) ? body.tags : String(body.tags).split(/[,，、\s]+/)).map((t: any) => String(t).trim()).filter(Boolean).slice(0, 8)
     if (patch.name === '') throw fail('名称不能为空')
     if (patch.name && listStickers().some(s => s.name === patch.name && s.id !== params[0])) throw fail('已有同名表情')
+    // a hand-filled name + description counts as recognised
+    if (patch.name && patch.desc) patch.indexed = true
     updateSticker(params[0], patch)
   }),
   R('DELETE', '/api/stickers/:id', ({ params }) => {

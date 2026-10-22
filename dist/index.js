@@ -7711,6 +7711,11 @@ init_store3();
 init_registry();
 init_skills();
 var startedAt = Date.now();
+var MAX_STICKER_BYTES = 10 * 1024 * 1024;
+function stickerView({ mface, ...s }) {
+  const f = stickerFile(s);
+  return { ...s, hasImage: Boolean(f && fs12.existsSync(f)) };
+}
 var fail = (message, status = 400) => Object.assign(new Error(message), { status });
 function bots() {
   const B = globalThis.Bot;
@@ -7899,8 +7904,9 @@ async function vectorSpace(q) {
     query
   };
 }
-var R = (method, pattern, run) => ({
+var R = (method, pattern, run, maxBody) => ({
   method,
+  maxBody,
   pattern: new RegExp(`^${pattern.replace(/:(\w+)/g, "([^/]+)")}$`),
   run
 });
@@ -8098,18 +8104,46 @@ var routes = [
     if (!deleteMemory(params[0], params[1], params[2])) throw fail("\u6CA1\u6709\u8FD9\u6761\u8BB0\u5FC6", 404);
   }),
   R("DELETE", "/api/memory/:scope/:key", ({ params }) => ({ removed: clearMemory(params[0], params[1]) })),
-  R("GET", "/api/stickers", () => listStickers().map(({ mface, ...s }) => ({ ...s, hasImage: Boolean(stickerFile(s)) }))),
+  R("GET", "/api/stickers", () => listStickers().map(stickerView)),
   R("GET", "/api/stickers/:id/image", ({ params }) => {
     const s = listStickers().find((x) => x.id === params[0]);
     const f = s && stickerFile(s);
     if (!f || !fs12.existsSync(f)) throw fail("\u6CA1\u6709\u56FE\u7247", 404);
     return { raw: fs12.readFileSync(f), type: s.mime ?? "image/png" };
   }),
+  R("POST", "/api/stickers", async ({ body }) => {
+    const buf = Buffer.from(String(body.data ?? "").replace(/^data:[^,]*,/, ""), "base64");
+    if (!buf.length) throw fail("\u6CA1\u6709\u56FE\u7247\u6570\u636E");
+    if (buf.length > MAX_STICKER_BYTES) throw fail(`\u56FE\u7247\u8D85\u8FC7 ${MAX_STICKER_BYTES >> 20} MB`);
+    if (!detectImageMime(buf)) throw fail("\u4E0D\u652F\u6301\u7684\u56FE\u7247\u683C\u5F0F\uFF08\u652F\u6301 PNG / JPEG / GIF / WebP / BMP\uFF09");
+    const name = typeof body.name === "string" && body.name.trim() ? body.name.trim().slice(0, 20) : void 0;
+    const desc = typeof body.desc === "string" && body.desc.trim() ? body.desc.trim().slice(0, 40) : void 0;
+    const [s, isNew] = addImageSticker(buf, { addedBy: "web", name, desc });
+    if (!isNew || body.index === false || name && desc) return { sticker: stickerView(s), isNew };
+    try {
+      return { sticker: stickerView(await indexSticker(s, { hint: typeof body.hint === "string" ? body.hint.trim() || name : name })), isNew };
+    } catch (err) {
+      return { sticker: stickerView(s), isNew, indexError: truncate(err?.message ?? String(err), 200) };
+    }
+  }, MAX_STICKER_BYTES * 1.4 + 64 * 1024),
+  R("POST", "/api/stickers/:id/index", async ({ params, body }) => {
+    const s = listStickers().find((x) => x.id === params[0]);
+    if (!s) throw fail("\u6CA1\u6709\u8FD9\u4E2A\u8868\u60C5", 404);
+    try {
+      return stickerView(await indexSticker(s, { hint: typeof body.hint === "string" ? body.hint.trim() || void 0 : void 0 }));
+    } catch (err) {
+      throw fail(`\u8BC6\u522B\u5931\u8D25\uFF1A${truncate(err?.message ?? String(err), 200)}`, 502);
+    }
+  }),
   R("PUT", "/api/stickers/:id", ({ params, body }) => {
+    if (!listStickers().some((s) => s.id === params[0])) throw fail("\u6CA1\u6709\u8FD9\u4E2A\u8868\u60C5", 404);
     const patch = {};
-    for (const k of ["name", "desc", "use"]) if (typeof body[k] === "string") patch[k] = body[k].trim();
+    for (const k of ["name", "desc", "use", "text"]) if (typeof body[k] === "string") patch[k] = body[k].trim();
+    if (body.tags !== void 0)
+      patch.tags = (Array.isArray(body.tags) ? body.tags : String(body.tags).split(/[,，、\s]+/)).map((t) => String(t).trim()).filter(Boolean).slice(0, 8);
     if (patch.name === "") throw fail("\u540D\u79F0\u4E0D\u80FD\u4E3A\u7A7A");
     if (patch.name && listStickers().some((s) => s.name === patch.name && s.id !== params[0])) throw fail("\u5DF2\u6709\u540C\u540D\u8868\u60C5");
+    if (patch.name && patch.desc) patch.indexed = true;
     updateSticker(params[0], patch);
   }),
   R("DELETE", "/api/stickers/:id", ({ params }) => {
@@ -8233,12 +8267,12 @@ function send(res, status, body, headers = {}) {
   res.writeHead(status, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", ...headers });
   res.end(JSON.stringify(body));
 }
-async function readBody(req) {
+async function readBody(req, limit = MAX_BODY) {
   let size = 0;
   const chunks = [];
   for await (const c of req) {
     size += c.length;
-    if (size > MAX_BODY) throw Object.assign(new Error("\u8BF7\u6C42\u8FC7\u5927"), { status: 413 });
+    if (size > limit) throw Object.assign(new Error(`\u8BF7\u6C42\u8FC7\u5927\uFF08\u4E0A\u9650 ${Math.round(limit / 1048576)} MB\uFF09`), { status: 413 });
     chunks.push(c);
   }
   if (!size) return {};
@@ -8297,7 +8331,7 @@ async function handle(req, res) {
     const m = r.pattern.exec(url.pathname);
     if (!m) continue;
     const params = m.slice(1).map(decodeURIComponent);
-    const body = method === "GET" ? {} : await readBody(req);
+    const body = method === "GET" ? {} : await readBody(req, r.maxBody);
     const out = await r.run({ params, query: url.searchParams, body });
     if (out && typeof out === "object" && "raw" in out && Buffer.isBuffer(out.raw))
       return send(res, 200, out.raw, { "content-type": out.type, "x-content-type-options": "nosniff" });
