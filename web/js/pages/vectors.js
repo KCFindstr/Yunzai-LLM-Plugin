@@ -42,6 +42,13 @@ export async function render(root, [keyArg]) {
   // ---------- scene state ----------
   const sessionKeys = [...new Set(data.points.map(p => p.key))]
   const colorOf = Object.fromEntries(sessionKeys.map((k, i) => [k, PALETTE[i % PALETTE.length]]))
+  // colour by session, or by date (oldest blue → newest pink)
+  let colorMode = 'session'
+  const days = data.points.map(p => p.day).sort()
+  const dayRank = Object.fromEntries([...new Set(days)].map((d, i, all) => [d, all.length > 1 ? i / (all.length - 1) : 1]))
+  const lerpHex = (a, b, t) => '#' + [0, 2, 4].map(i => Math.round(parseInt(a.slice(1 + i, 3 + i), 16) * (1 - t) + parseInt(b.slice(1 + i, 3 + i), 16) * t).toString(16).padStart(2, '0')).join('')
+  const colorFor = p => (colorMode === 'date' ? lerpHex('#4cc9f0', '#f72585', dayRank[p.day] ?? 1) : colorOf[p.key])
+  const kindLabel = p => (p.kind === 'day' ? `${p.day} 当日概要` : fmt.time(p.at))
   const labelOf = Object.fromEntries(data.sessions.map(s => [s.key, s.label]))
   const hidden = new Set()
   const cam = { yaw: 0.7, pitch: 0.35, dist: 2.6, target: [0, 0, 0], goal: null }
@@ -77,7 +84,9 @@ export async function render(root, [keyArg]) {
         if (query) { selected = -1; showQuery() } else detail.style.display = 'none'
       } catch (err) { toast(err.message, 'bad') }
     } }, qInput, h('button', { class: 'btn sm', type: 'submit' }, '定位')),
-    sessionSel, autoBtn,
+    sessionSel,
+    h('select', { onchange: e => { colorMode = e.target.value; legend.style.opacity = colorMode === 'date' ? '.5' : '1' } }, h('option', { value: 'session' }, '按会话着色'), h('option', { value: 'date' }, `按日期着色（${days[0] ?? ''} → ${days.at(-1) ?? ''}）`)),
+    autoBtn,
     h('button', { class: 'btn sm', onclick: () => { Object.assign(cam, { yaw: 0.7, pitch: 0.35, dist: 2.6, goal: [0, 0, 0] }); selected = -1; detail.style.display = 'none' } }, '⟲ 复位'),
   )
   mount(space, canvas, hud, legend, tip, detail,
@@ -176,15 +185,21 @@ export async function render(root, [keyArg]) {
 
     for (const s of screen) {
       const p = data.points[s.i]
-      const r = Math.max(2.5, Math.min(14, s.f * 0.028))
-      const color = colorOf[p.key]
+      const isDay = p.kind === 'day'
+      const r = Math.max(2.5, Math.min(14, s.f * 0.028)) * (isDay ? 1.5 : 1)
+      const color = colorFor(p)
       const lit = s.i === hover || s.i === selected || near.has(s.i)
       const fade = Math.max(0.35, Math.min(1, 2.6 / s.depth))
       ctx.globalAlpha = fade
       ctx.fillStyle = color + '33'
       ctx.beginPath(); ctx.arc(s.x, s.y, r * (lit ? 3.4 : 2.4), 0, Math.PI * 2); ctx.fill()
       ctx.fillStyle = color
-      ctx.beginPath(); ctx.arc(s.x, s.y, r, 0, Math.PI * 2); ctx.fill()
+      ctx.beginPath()
+      // daily digests are diamonds, detailed archive entries are dots
+      if (isDay) { ctx.moveTo(s.x, s.y - r * 1.3); ctx.lineTo(s.x + r * 1.3, s.y); ctx.lineTo(s.x, s.y + r * 1.3); ctx.lineTo(s.x - r * 1.3, s.y); ctx.closePath() }
+      else ctx.arc(s.x, s.y, r, 0, Math.PI * 2)
+      ctx.fill()
+      if (isDay) { ctx.strokeStyle = '#ffffffaa'; ctx.lineWidth = 1; ctx.stroke() }
       if (lit) {
         ctx.strokeStyle = '#fff'
         ctx.lineWidth = s.i === selected ? 2 : 1.2
@@ -258,7 +273,7 @@ export async function render(root, [keyArg]) {
     hover = pick(x, y)
     if (hover >= 0) {
       const p = data.points[hover]
-      tip.replaceChildren(h('div', { style: { color: colorOf[p.key], fontWeight: 600 } }, labelOf[p.key] ?? p.key), h('div', { style: { color: '#8b91a8' } }, fmt.time(p.at)), p.text.slice(0, 220) + (p.text.length > 220 ? '…' : ''))
+      tip.replaceChildren(h('div', { style: { color: colorFor(p), fontWeight: 600 } }, labelOf[p.key] ?? p.key), h('div', { style: { color: '#8b91a8' } }, kindLabel(p)), p.text.slice(0, 220) + (p.text.length > 220 ? '…' : ''))
       tip.style.display = 'block'
       tip.style.left = `${Math.min(x + 14, W - 330)}px`
       tip.style.top = `${Math.min(y + 14, H - tip.offsetHeight - 8)}px`
@@ -306,7 +321,7 @@ export async function render(root, [keyArg]) {
         h('span', { class: 'sw', style: { background: colorOf[p.key], width: '10px', height: '10px', borderRadius: '50%', display: 'inline-block' } }),
         h('b', labelOf[p.key] ?? p.key),
         h('button', { class: 'btn sm ghost right', style: { color: '#e6e8f0' }, onclick: () => { selected = -1; detail.style.display = 'none' } }, '✕')),
-      h('div', { class: 'muted small', style: { margin: '4px 0 8px' } }, `${fmt.time(p.at)} · 第 ${pos + 1}/${order.length} 段`),
+      h('div', { class: 'muted small', style: { margin: '4px 0 8px' } }, `${kindLabel(p)} · 第 ${pos + 1}/${order.length} 个`),
       h('pre', { style: { fontFamily: 'inherit', fontSize: '13px' } }, p.text),
       h('div', { class: 'row', style: { margin: '10px 0' } },
         h('button', { class: 'btn sm', onclick: () => select(order[(pos - 1 + order.length) % order.length], true) }, '← 上一段'),

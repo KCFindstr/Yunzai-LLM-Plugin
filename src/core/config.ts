@@ -380,6 +380,9 @@ export function normalize(raw: any): PluginConfig {
     groupWrite: ['all', 'admin', 'off'].includes(m.groupWrite) ? m.groupWrite : 'all',
     autoCompact: m.autoCompact !== false,
     maxWritesPerTurn: n(m.maxWritesPerTurn, 3),
+    dailyDays: Math.min(3650, Math.floor(n(m.dailyDays, 365))),
+    crossChatRecall: m.crossChatRecall === true,
+    groupChatArchive: m.groupChatArchive !== false,
     embedding: (() => {
       const em = isPlainObject(m.embedding) ? m.embedding : {}
       const type = em.type === 'openai' ? 'openai' : 'voyage'

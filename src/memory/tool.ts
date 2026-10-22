@@ -1,7 +1,31 @@
 import { config } from '../core/config.ts'
 import { registry } from '../tools/registry.ts'
 import { addMemory, deleteMemory, renderMemory, updateMemory, usage, type MemScope, type WriteResult } from './store.ts'
-import { recallSession, sessionKey } from '../chat/session.ts'
+import { groupSessionsFor, recallSession, sessionKey } from '../chat/session.ts'
+import { localDay, parseDateHints, type DayRange } from '../chat/dates.ts'
+import { groupsWithUser } from '../chat/roster.ts'
+
+/**
+ * Extra sessions a conversation may recall from, beyond its own:
+ * - a per-member group conversation also searches the group-wide archive (where the group's chatter is kept);
+ * - with `memory.crossChatRecall`, a private chat searches the groups the person is in (content already visible
+ *   to them there). Groups never see private chats.
+ */
+export function recallSources(e: any, scope: string): { key: string; label: string }[] {
+  if (e?.self_id == null) return []
+  if (e.group_id) return scope === 'group' ? [] : [{ key: `${e.self_id}:g${e.group_id}`, label: '群聊' }]
+  if (!config.get().memory.crossChatRecall || e.user_id == null) return []
+  return groupSessionsFor(e.self_id, e.user_id, groupsWithUser(e.self_id, e.user_id))
+}
+
+/** Day range from tool arguments: explicit from/to or date ("2026-10-20" or a phrase like "上周六"), else the query. */
+function rangeOf(args: Record<string, any>): DayRange | undefined {
+  const iso = (v: any) => (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v.trim()) ? v.trim() : undefined)
+  const from = iso(args.from), to = iso(args.to)
+  if (from || to) return { from: from ?? '0000-01-01', to: to ?? localDay() }
+  if (typeof args.date === 'string' && args.date.trim()) return iso(args.date) ? { from: iso(args.date)!, to: iso(args.date)! } : parseDateHints(args.date)
+  return parseDateHints(String(args.query ?? ''))
+}
 
 export function memoryKey(scope: MemScope, e: any): string | undefined {
   if (scope === 'user') return e?.user_id != null ? String(e.user_id) : undefined
@@ -16,17 +40,23 @@ function groupWritable(ctx: { e: any; isAdmin: boolean }) {
 export function registerMemoryTool() {
   registry.register({
     name: 'recall', source: 'builtin',
-    description: '按话题检索当前会话更早的聊天（每段为摘要，尚未整理的为原文），按语义和关键词综合匹配。需要之前的约定、称呼、话题细节而【之前对话的摘要】不够时先查再答；仅当前会话，最多返回5条。',
+    description:
+      '检索当前会话更早的聊天：每段聊天摘要（保留30天）和每天一条的「当日概要」（保留更久），按语义和关键词综合匹配。' +
+      '需要之前的约定、称呼、话题细节，或被问到某天/某段时间聊过什么时，先查再答；可按日期筛选。仅当前会话，最多返回5条。',
     parameters: {
       type: 'object',
       properties: {
-        query: { type: 'string', description: '要找的事或话题的简短描述，尽量带上当时可能出现的人名、游戏名等关键词，如「阿明 周六 看猫的约定」' },
+        query: { type: 'string', description: '要找的事或话题的简短描述，尽量带上当时可能出现的人名、游戏名等关键词，如「阿明 周六 看猫的约定」；只按日期查时可留空' },
+        date: { type: 'string', description: '只看某一天：YYYY-MM-DD，或「昨天」「上周六」「10月20日」这类说法' },
+        from: { type: 'string', description: '日期范围起点 YYYY-MM-DD（含）' },
+        to: { type: 'string', description: '日期范围终点 YYYY-MM-DD（含）' },
         count: { type: 'integer', description: '返回条数，1-5，默认3' },
       },
-      required: ['query'],
     },
     async run(args, ctx) {
-      return (await recallSession(sessionKey(ctx.e, ctx.eff.chat.sessionScope), String(args.query ?? ''), Number(args.count) || 3)).join('\n\n') || '没有匹配的旧聊天片段'
+      const range = rangeOf(args)
+      const hits = await recallSession(sessionKey(ctx.e, ctx.eff.chat.sessionScope), String(args.query ?? ''), Number(args.count) || 3, { range, extra: recallSources(ctx.e, ctx.eff.chat.sessionScope) })
+      return hits.join('\n\n') || (range ? `${range.from === range.to ? range.from : `${range.from} 至 ${range.to}`} 没有找到旧聊天记录` : '没有匹配的旧聊天片段')
     },
   })
   registry.register({

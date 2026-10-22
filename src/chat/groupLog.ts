@@ -1,5 +1,6 @@
 import { truncate } from '../core/util.ts'
 import { observeUsers, knownName } from './roster.ts'
+import { markChatterHandled, recordChatter } from './chatter.ts'
 
 interface Line {
   t: number
@@ -65,10 +66,12 @@ export function recordGroupMessage(e: any) {
   if (!text) return
   const key = keyOf(e)
   const list = logs.get(key) ?? []
+  const name = `${knownName(e) || '群友'}(平台ID ${e.user_id})`
+  recordChatter(e, name, text)
   list.push({
     t: Date.now(),
     uid: String(e.user_id),
-    name: `${knownName(e) || '群友'}(平台ID ${e.user_id})`,
+    name,
     text: truncate(text, 200),
     mid: e.message_id != null ? String(e.message_id) : undefined,
   })
@@ -89,6 +92,7 @@ export function recordBotMessage(e: any, text: string, conv?: string) {
 /** Mark the triggering message as part of conversation `conv` (it is now in that session's history). */
 export function markHandled(e: any, conv: string) {
   if (!e?.group_id || e.message_id == null) return
+  markChatterHandled(e)
   const l = (logs.get(keyOf(e)) ?? []).find(x => x.mid === String(e.message_id))
   if (l) l.conv = conv
 }

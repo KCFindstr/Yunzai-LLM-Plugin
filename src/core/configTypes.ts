@@ -253,6 +253,12 @@ export interface MemorySection {
   groupWrite: 'all' | 'admin' | 'off'
   autoCompact: boolean
   maxWritesPerTurn: number
+  /** Days to keep per-conversation daily digests (archive detail is kept 30 days). */
+  dailyDays: number
+  /** Private chats may also recall the archives of groups the person is in (never the other way round). */
+  crossChatRecall: boolean
+  /** Keep and summarize group messages that don't involve the bot, so recall and daily digests cover them. */
+  groupChatArchive: boolean
   embedding: EmbeddingSection
 }
 

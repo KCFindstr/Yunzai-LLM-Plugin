@@ -54,3 +54,16 @@ export function rosterLines(event: any, max: number, memory = false): string[] {
     return `${name || '称呼未知'} [at:${profile.id}]${facts ? `：${facts}` : ''}`
   })
 }
+
+/** Groups (on this bot account) where the user was seen in the last 30 days, with names when cached. */
+export function groupsWithUser(selfId: string | number, userId: string | number): { id: string; name?: string }[] {
+  const prefix = `${selfId}:g`
+  const bot = (globalThis as any).Bot?.[selfId]
+  return Object.entries(store.data)
+    .filter(([key, profiles]) => key.startsWith(prefix) && profiles.some(p => p.id === String(userId) && Date.now() - p.seen < 30 * 86400_000))
+    .map(([key]) => {
+      const id = key.slice(prefix.length)
+      const g = bot?.gl?.get?.(Number(id)) ?? bot?.gl?.get?.(id)
+      return { id, name: g?.group_name ? String(g.group_name) : undefined }
+    })
+}

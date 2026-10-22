@@ -11,7 +11,7 @@ import { config, normalize, personaText, resolveKeys } from '../core/config.ts'
 import { recentLogs } from '../core/log.ts'
 import { CONFIG_DIR, DEFAULT_CONFIG_FILE } from '../core/paths.ts'
 import { deepMerge, detectImageMime, formatDuration, isPlainObject, maskSecret, truncate } from '../core/util.ts'
-import { allVectors, archiveInfo, clearSession, deleteArchiveEntry, listSessions, peekSession } from '../chat/session.ts'
+import { allVectors, archiveInfo, clearSession, dayInfo, deleteArchiveEntry, listSessions, peekSession } from '../chat/session.ts'
 import { recentTurns } from '../chat/turnLog.ts'
 import { utilityChat } from '../chat/utility.ts'
 import { partsToText } from '../llm/types.ts'
@@ -243,7 +243,7 @@ async function vectorSpace(q: URLSearchParams) {
   return {
     ...base,
     variance,
-    points: points.map((p, i) => ({ key: p.key, id: p.id, at: p.at, text: p.text, xyz: coords[i].map(x => x / scale) })),
+    points: points.map((p, i) => ({ key: p.key, id: p.id, at: p.at, day: p.day, kind: p.kind, text: p.text, xyz: coords[i].map(x => x / scale) })),
     query,
   }
 }
@@ -281,7 +281,7 @@ export const routes: Route[] = [
       persona: c.persona.active,
       counts: {
         models: c.models.length, providers: Object.keys(c.providers).length, sessions: sessions.length,
-        archive: sessions.reduce((a, s) => a + s.archive, 0), vectors: sessions.reduce((a, s) => a + s.vectors, 0),
+        archive: sessions.reduce((a, s) => a + s.archive, 0), days: sessions.reduce((a, s) => a + s.days, 0), vectors: sessions.reduce((a, s) => a + s.vectors, 0),
         memoryEntries: mem.entries, memoryUsers: mem.users, memoryGroups: mem.groups,
         stickers: stickers.length, skills: listSkills().length, tools: registry.all().length, groups: Object.keys(c.groups).length,
       },
@@ -421,6 +421,7 @@ export const routes: Route[] = [
       summary: s.summary,
       messages: s.messages.map(m => ({ role: m.role, text: m.role === 'user' ? partsToText(m.content) : m.role === 'assistant' ? m.content : '' })),
       archive: archiveInfo(params[0]),
+      days: dayInfo(params[0]),
       turns: recentTurns({ conv: params[0], limit: 50 }),
     }
   }),

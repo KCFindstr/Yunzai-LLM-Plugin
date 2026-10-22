@@ -18,6 +18,7 @@ import { closeOwnBrowser } from './render/browser.ts'
 import { registerComputerTool, computerQueue } from './tools/computer.ts'
 import { refreshComputerKeepalive, stopComputerKeepalive } from './computer/keepalive.ts'
 import { startWeb, stopWeb } from './web/server.ts'
+import { startArchiveJobs, stopArchiveJobs } from './chat/archiveJobs.ts'
 
 ownClasses.add(LLMChat)
 ownClasses.add(LLMAdmin)
@@ -42,6 +43,8 @@ function startup() {
   loadSkills()
   loadCustomTools().catch(err => log.warn('加载自定义工具失败', err))
   startPriceRefresh()
+  // group chatter summaries and daily digests, independent of anyone talking to the bot
+  startArchiveJobs()
   try {
     startWeb()
   } catch (err: any) {
@@ -56,6 +59,7 @@ function startup() {
   else B?.once?.('online', scan)
   B?.once?.('exit', () => {
     computerQueue.stop()
+    stopArchiveJobs()
     stopWeb()
     stopComputerKeepalive()
     flushAllStores()
@@ -64,6 +68,7 @@ function startup() {
   })
   process.once('exit', () => {
     computerQueue.stop()
+    stopArchiveJobs()
     stopComputerKeepalive()
     flushAllStores()
     stopKeepalive()

@@ -19,6 +19,9 @@ import { memoryHash } from '../memory/store.ts'
 import { appendTurn, getSession, peekSession, indexArchive, pendingArchive, recallSession, setEpisode, setServerState, setSummary, truncateIfNeeded } from './session.ts'
 import { pickModel, utilityCandidates, utilityChat, type Picked } from './utility.ts'
 import { recordTurn } from './turnLog.ts'
+import { localDay, parseDateHints } from './dates.ts'
+import { maintainArchive } from './archiveJobs.ts'
+import { recallSources } from '../memory/tool.ts'
 
 const NATIVE_SEARCH_TYPES = new Set(['anthropic', 'openai-responses', 'gemini'])
 const semaphore = new Semaphore(3)
@@ -137,7 +140,14 @@ async function runTurnInner(req: TurnRequest, ref: { turn?: TurnState }): Promis
   const memPrefix = memOn ? buildMemoryBlock(e, { user: !shared, group: true, nudge }) : ''
   const memTurn = memOn && shared ? buildMemoryBlock(e, { user: true, group: false, nudge }) : ''
   // bounded so a slow embedding API can't hold up the reply; recallSession falls back to keyword matching
-  const recalled = (await recallSession(convKey, input.text, 2, AbortSignal.timeout(2500))).map(text => text.slice(0, 350))
+  // a date in the message ("昨天…", "上周六…") narrows recall to those days; today's chat is already in context
+  const range = parseDateHints(input.text)
+  const dated = range && !(range.from === localDay() && range.to === localDay()) ? range : undefined
+  const recalled = (await recallSession(convKey, input.text, dated ? 3 : 2, {
+    range: dated,
+    extra: recallSources(e, eff.chat.sessionScope),
+    signal: AbortSignal.timeout(2500),
+  })).map(text => text.slice(0, dated ? 500 : 350))
   const context = [memTurn, recalled.length ? `【相关旧聊天·参考】\n${recalled.join('\n')}` : ''].filter(Boolean).join('\n')
   const header = buildHeader(e, eff, input, isAdmin, { conv: convKey, memory: context })
   // from now on this message lives in the session history; keep it out of future ambient-chat windows
@@ -285,7 +295,12 @@ export async function compactSession(convKey: string, eff: EffectiveConfig, ctx:
   }
   // includes chunks archived at idle expiry, which had no chance to be summarized then
   const pending = pendingArchive(convKey).slice(-3)
-  if (!pending.length) return
+  if (pending.length) await summarizePending(convKey, session, prev, pending, ctx)
+  // chatter summaries and daily digests for this conversation (also done every few minutes in the background)
+  await maintainArchive(convKey, ctx)
+}
+
+async function summarizePending(convKey: string, session: ReturnType<typeof peekSession>, prev: string | undefined, pending: ReturnType<typeof pendingArchive>, ctx: QuotaCtx) {
   try {
     const { text } = await utilityChat({
       candidates: utilityCandidates(),
