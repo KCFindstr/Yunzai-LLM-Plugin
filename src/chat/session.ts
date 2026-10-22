@@ -1,12 +1,15 @@
 import type { ChatSection } from '../core/configTypes.ts'
 import { JsonStore } from '../core/store.ts'
 import { estimateTokens, similarity, truncate } from '../core/util.ts'
+import { config } from '../core/config.ts'
+import { log } from '../core/log.ts'
 import { isSensitive } from '../memory/store.ts'
+import { decodeVector, dot, embed, embeddingReady, embeddingTag, encodeVector } from '../memory/embed.ts'
 import type { AssistantMsg, Msg, UserMsg } from '../llm/types.ts'
 import { partsToText } from '../llm/types.ts'
 
 /** Persisted history contains only plain user/assistant text — no tool transcripts, images or provider-raw data. */
-export interface ArchiveEntry { at: number; text: string; raw?: boolean }
+export interface ArchiveEntry { id?: string; at: number; text: string; raw?: boolean }
 
 export interface StoredSession {
   messages: Msg[]
@@ -19,6 +22,16 @@ export interface StoredSession {
 }
 
 const store = new JsonStore<Record<string, StoredSession>>('sessions.json', {})
+/** Archive embeddings, kept out of sessions.json (rewritten every turn). Per session: vector space tag + id → base64 float32. */
+const vectors = new JsonStore<Record<string, { tag: string; v: Record<string, string> }>>('recall-vectors.json', {})
+
+const newId = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`
+
+function dropVectors(key: string) {
+  if (!vectors.data[key]) return
+  delete vectors.data[key]
+  vectors.save()
+}
 
 export function sessionKey(e: any, scope: ChatSection['sessionScope']): string {
   if (e.group_id) return scope === 'group' ? `${e.self_id}:g${e.group_id}` : `${e.self_id}:g${e.group_id}:u${e.user_id}`
@@ -36,6 +49,7 @@ function pruneIdle() {
   for (const [k, s] of Object.entries(store.data))
     if (Date.now() - (s?.updatedAt ?? 0) > PRUNE_AFTER) {
       delete store.data[k]
+      dropVectors(k)
       n++
     }
   if (n) store.save()
@@ -78,6 +92,7 @@ export function setServerState(key: string, state: StoredSession['state']) {
 export function clearSession(key: string): boolean {
   const had = Boolean(store.data[key]?.messages.length)
   delete store.data[key]
+  dropVectors(key)
   store.save()
   return had
 }
@@ -87,6 +102,7 @@ export function clearSessionsWhere(pred: (key: string) => boolean): number {
   for (const k of Object.keys(store.data))
     if (pred(k)) {
       delete store.data[k]
+      dropVectors(k)
       n++
     }
   store.save()
@@ -135,7 +151,7 @@ function archiveMessages(session: StoredSession, messages: Msg[]) {
     if (text && !isSensitive(text)) pairs.push(text)
   }
   const archive = session.archive ??= []
-  if (pairs.length) archive.push({ at: session.updatedAt, text: truncate(pairs.join('\n'), 4000), raw: true })
+  if (pairs.length) archive.push({ id: newId(), at: session.updatedAt, text: truncate(pairs.join('\n'), 4000), raw: true })
   session.archive = archive.filter(entry => Date.now() - entry.at < PRUNE_AFTER).slice(-60)
 }
 
@@ -154,16 +170,60 @@ export function setEpisode(key: string, pending: ArchiveEntry[], text?: string) 
   if (text) {
     const index = s.archive.indexOf(pending[0])
     s.archive = s.archive.filter(entry => !pending.includes(entry))
-    s.archive.splice(index, 0, { at: pending.at(-1)!.at, text })
+    s.archive.splice(index, 0, { id: newId(), at: pending.at(-1)!.at, text })
   } else for (const entry of pending) delete entry.raw
   store.save()
 }
 
-export function recallSession(key: string, query: string, count = 3): string[] {
+/**
+ * Embed archive entries that have no vector yet and drop vectors of entries that are gone.
+ * No-op without a configured embedding model. Throws on API errors.
+ */
+export async function indexArchive(key: string, signal?: AbortSignal) {
+  const archive = store.data[key]?.archive
+  if (!archive?.length || !embeddingReady()) return
+  const tag = embeddingTag()
+  for (const entry of archive) if (!entry.id) { entry.id = newId(); store.save() }
+  const current = () => (vectors.data[key]?.tag === tag ? vectors.data[key].v : {})
+  const missing = archive.filter(entry => !current()[entry.id!])
+  const embedded = await embed(missing.map(entry => entry.text), 'document', signal)
+  // the archive may have changed (or been cleared) while waiting; keep only vectors of entries still there
+  if (!store.data[key]) return
+  const live = new Set((store.data[key].archive ?? []).map(entry => entry.id))
+  const v: Record<string, string> = {}
+  for (const [id, vec] of Object.entries(current())) if (live.has(id)) v[id] = vec
+  missing.forEach((entry, i) => { if (live.has(entry.id)) v[entry.id!] = encodeVector(embedded[i]) })
+  if (!missing.length && Object.keys(v).length === Object.keys(current()).length) return
+  vectors.data[key] = { tag, v }
+  vectors.save()
+}
+
+/**
+ * Search this session's archive. Lexical (bigram + keyword) scoring always runs; with an embedding model
+ * configured, cosine similarity is added and also admits hits that share no words with the query.
+ * Embedding failures (or `signal` timing out) fall back to lexical-only results.
+ */
+export async function recallSession(key: string, query: string, count = 3, signal?: AbortSignal): Promise<string[]> {
   const entries = (store.data[key]?.archive ?? []).filter(entry => Date.now() - entry.at < PRUNE_AFTER)
+  if (!entries.length) return []
   const terms = query.toLowerCase().match(/[a-z0-9_-]{3,}|[\p{Script=Han}]{2,}/gu) ?? []
-  return entries.map((entry, index) => ({ entry, index, score: similarity(query, entry.text) + terms.reduce((score, term) => score + (entry.text.toLowerCase().includes(term) ? 0.2 : 0), 0) }))
-    .filter(hit => !query.trim() || hit.score >= 0.06)
+  const cosine = new Map<ArchiveEntry, number>()
+  if (query.trim().length >= 2 && embeddingReady()) {
+    try {
+      await indexArchive(key, signal)
+      const [q] = await embed([query], 'query', signal)
+      const v = vectors.data[key]?.v ?? {}
+      for (const entry of entries) if (entry.id && v[entry.id]) cosine.set(entry, dot(q, decodeVector(v[entry.id])))
+    } catch (err: any) {
+      log.warn(`旧聊天向量检索失败，改用关键词: ${err?.message ?? err}`)
+    }
+  }
+  const minScore = config.get().memory.embedding.minScore
+  return entries.map((entry, index) => {
+    const lexical = similarity(query, entry.text) + terms.reduce((score, term) => score + (entry.text.toLowerCase().includes(term) ? 0.2 : 0), 0)
+    return { entry, index, lexical, cos: cosine.get(entry), score: lexical + (cosine.get(entry) ?? 0) }
+  })
+    .filter(hit => !query.trim() || hit.lexical >= 0.06 || (hit.cos ?? -1) >= minScore)
     .sort((left, right) => right.score - left.score || right.index - left.index)
     .slice(0, Math.min(5, Math.max(1, count)))
     .map(hit => `${new Date(hit.entry.at).toISOString().slice(0, 10)} ${truncate(hit.entry.text, 600)}`)

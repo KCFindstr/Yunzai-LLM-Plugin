@@ -387,7 +387,21 @@ function normalize(raw) {
     entryMaxChars: n(m.entryMaxChars, 100),
     groupWrite: ["all", "admin", "off"].includes(m.groupWrite) ? m.groupWrite : "all",
     autoCompact: m.autoCompact !== false,
-    maxWritesPerTurn: n(m.maxWritesPerTurn, 3)
+    maxWritesPerTurn: n(m.maxWritesPerTurn, 3),
+    embedding: (() => {
+      const em = isPlainObject(m.embedding) ? m.embedding : {};
+      const type = em.type === "openai" ? "openai" : "voyage";
+      return {
+        enable: em.enable === true,
+        type,
+        baseUrl: String(em.baseUrl || (type === "voyage" ? "https://api.voyageai.com/v1" : "https://api.openai.com/v1")),
+        apiKey: em.apiKey,
+        model: String(em.model || (type === "voyage" ? "voyage-4-lite" : "text-embedding-3-small")),
+        dimensions: Math.floor(n(em.dimensions, 512)),
+        timeout: n(em.timeout, 10),
+        minScore: Number.isFinite(Number(em.minScore)) ? Number(em.minScore) : 0.5
+      };
+    })()
   };
   c.pricing = isPlainObject(c.pricing) ? c.pricing : {};
   c.pricing.sources = asArray(c.pricing.sources ?? ["openrouter", "litellm"]);
@@ -1669,7 +1683,64 @@ var init_catalog = __esm({
   }
 });
 
+// src/memory/embed.ts
+function embeddingReady() {
+  const c = config.get().memory.embedding;
+  return c.enable && resolveKeys(c.apiKey).length > 0;
+}
+function embeddingTag() {
+  const c = config.get().memory.embedding;
+  return `${c.type}:${c.model}:${c.dimensions}`;
+}
+async function embed(texts, kind, signal) {
+  if (!texts.length) return [];
+  const c = config.get().memory.embedding;
+  const provider = { type: c.type, baseUrl: c.baseUrl, apiKey: c.apiKey, timeout: c.timeout, maxRetries: 1 };
+  const body = c.type === "voyage" ? { input: texts, model: c.model, input_type: kind, output_dimension: c.dimensions } : { input: texts, model: c.model, dimensions: c.dimensions };
+  const json = await requestJson(
+    provider,
+    (key) => ({ url: `${c.baseUrl.replace(/\/+$/, "")}/embeddings`, headers: { authorization: `Bearer ${key}` }, body }),
+    signal
+  );
+  const data = Array.isArray(json?.data) ? [...json.data].sort((a, b) => a.index - b.index) : [];
+  if (data.length !== texts.length) throw new Error(`embedding \u8FD4\u56DE ${data.length} \u6761\uFF0C\u5E94\u4E3A ${texts.length} \u6761`);
+  log.debug(`embedding ${c.model} ${kind} ${texts.length}\u6761 tokens=${json?.usage?.total_tokens ?? "?"}`);
+  return data.map((d) => normalize2(Float32Array.from(d.embedding)));
+}
+function normalize2(v) {
+  let n = 0;
+  for (const x of v) n += x * x;
+  n = Math.sqrt(n) || 1;
+  for (let i = 0; i < v.length; i++) v[i] /= n;
+  return v;
+}
+function dot(a, b) {
+  if (a.length !== b.length) return 0;
+  let s = 0;
+  for (let i = 0; i < a.length; i++) s += a[i] * b[i];
+  return s;
+}
+function decodeVector(s) {
+  const b = Buffer.from(s, "base64");
+  return new Float32Array(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength));
+}
+var encodeVector;
+var init_embed = __esm({
+  "src/memory/embed.ts"() {
+    "use strict";
+    init_config();
+    init_log();
+    init_http();
+    encodeVector = (v) => Buffer.from(v.buffer, v.byteOffset, v.byteLength).toString("base64");
+  }
+});
+
 // src/chat/session.ts
+function dropVectors(key) {
+  if (!vectors.data[key]) return;
+  delete vectors.data[key];
+  vectors.save();
+}
 function sessionKey(e, scope) {
   if (e.group_id) return scope === "group" ? `${e.self_id}:g${e.group_id}` : `${e.self_id}:g${e.group_id}:u${e.user_id}`;
   return `${e.self_id}:p${e.user_id}`;
@@ -1681,6 +1752,7 @@ function pruneIdle() {
   for (const [k, s] of Object.entries(store4.data))
     if (Date.now() - (s?.updatedAt ?? 0) > PRUNE_AFTER) {
       delete store4.data[k];
+      dropVectors(k);
       n++;
     }
   if (n) store4.save();
@@ -1717,6 +1789,7 @@ function setServerState(key, state) {
 function clearSession(key) {
   const had = Boolean(store4.data[key]?.messages.length);
   delete store4.data[key];
+  dropVectors(key);
   store4.save();
   return had;
 }
@@ -1725,6 +1798,7 @@ function clearSessionsWhere(pred) {
   for (const k of Object.keys(store4.data))
     if (pred(k)) {
       delete store4.data[k];
+      dropVectors(k);
       n++;
     }
   store4.save();
@@ -1764,7 +1838,7 @@ function archiveMessages(session, messages) {
     if (text && !isSensitive(text)) pairs.push(text);
   }
   const archive = session.archive ??= [];
-  if (pairs.length) archive.push({ at: session.updatedAt, text: truncate(pairs.join("\n"), 4e3), raw: true });
+  if (pairs.length) archive.push({ id: newId(), at: session.updatedAt, text: truncate(pairs.join("\n"), 4e3), raw: true });
   session.archive = archive.filter((entry) => Date.now() - entry.at < PRUNE_AFTER).slice(-60);
 }
 function pendingArchive(key) {
@@ -1776,14 +1850,52 @@ function setEpisode(key, pending, text) {
   if (text) {
     const index = s.archive.indexOf(pending[0]);
     s.archive = s.archive.filter((entry) => !pending.includes(entry));
-    s.archive.splice(index, 0, { at: pending.at(-1).at, text });
+    s.archive.splice(index, 0, { id: newId(), at: pending.at(-1).at, text });
   } else for (const entry of pending) delete entry.raw;
   store4.save();
 }
-function recallSession(key, query, count = 3) {
+async function indexArchive(key, signal) {
+  const archive = store4.data[key]?.archive;
+  if (!archive?.length || !embeddingReady()) return;
+  const tag = embeddingTag();
+  for (const entry of archive) if (!entry.id) {
+    entry.id = newId();
+    store4.save();
+  }
+  const current = () => vectors.data[key]?.tag === tag ? vectors.data[key].v : {};
+  const missing = archive.filter((entry) => !current()[entry.id]);
+  const embedded = await embed(missing.map((entry) => entry.text), "document", signal);
+  if (!store4.data[key]) return;
+  const live = new Set((store4.data[key].archive ?? []).map((entry) => entry.id));
+  const v = {};
+  for (const [id, vec] of Object.entries(current())) if (live.has(id)) v[id] = vec;
+  missing.forEach((entry, i) => {
+    if (live.has(entry.id)) v[entry.id] = encodeVector(embedded[i]);
+  });
+  if (!missing.length && Object.keys(v).length === Object.keys(current()).length) return;
+  vectors.data[key] = { tag, v };
+  vectors.save();
+}
+async function recallSession(key, query, count = 3, signal) {
   const entries2 = (store4.data[key]?.archive ?? []).filter((entry) => Date.now() - entry.at < PRUNE_AFTER);
+  if (!entries2.length) return [];
   const terms = query.toLowerCase().match(/[a-z0-9_-]{3,}|[\p{Script=Han}]{2,}/gu) ?? [];
-  return entries2.map((entry, index) => ({ entry, index, score: similarity(query, entry.text) + terms.reduce((score, term) => score + (entry.text.toLowerCase().includes(term) ? 0.2 : 0), 0) })).filter((hit) => !query.trim() || hit.score >= 0.06).sort((left, right) => right.score - left.score || right.index - left.index).slice(0, Math.min(5, Math.max(1, count))).map((hit) => `${new Date(hit.entry.at).toISOString().slice(0, 10)} ${truncate(hit.entry.text, 600)}`);
+  const cosine = /* @__PURE__ */ new Map();
+  if (query.trim().length >= 2 && embeddingReady()) {
+    try {
+      await indexArchive(key, signal);
+      const [q] = await embed([query], "query", signal);
+      const v = vectors.data[key]?.v ?? {};
+      for (const entry of entries2) if (entry.id && v[entry.id]) cosine.set(entry, dot(q, decodeVector(v[entry.id])));
+    } catch (err) {
+      log.warn(`\u65E7\u804A\u5929\u5411\u91CF\u68C0\u7D22\u5931\u8D25\uFF0C\u6539\u7528\u5173\u952E\u8BCD: ${err?.message ?? err}`);
+    }
+  }
+  const minScore = config.get().memory.embedding.minScore;
+  return entries2.map((entry, index) => {
+    const lexical = similarity(query, entry.text) + terms.reduce((score, term) => score + (entry.text.toLowerCase().includes(term) ? 0.2 : 0), 0);
+    return { entry, index, lexical, cos: cosine.get(entry), score: lexical + (cosine.get(entry) ?? 0) };
+  }).filter((hit) => !query.trim() || hit.lexical >= 0.06 || (hit.cos ?? -1) >= minScore).sort((left, right) => right.score - left.score || right.index - left.index).slice(0, Math.min(5, Math.max(1, count))).map((hit) => `${new Date(hit.entry.at).toISOString().slice(0, 10)} ${truncate(hit.entry.text, 600)}`);
 }
 function setSummary(key, summary) {
   const s = store4.data[key];
@@ -1796,15 +1908,20 @@ function sessionStats() {
   const keys = Object.keys(store4.data);
   return { count: keys.length, messages: keys.reduce((a, k) => a + store4.data[k].messages.length, 0) };
 }
-var store4, PRUNE_AFTER, lastPrune2;
+var store4, vectors, newId, PRUNE_AFTER, lastPrune2;
 var init_session = __esm({
   "src/chat/session.ts"() {
     "use strict";
     init_store();
     init_util();
+    init_config();
+    init_log();
     init_store2();
+    init_embed();
     init_types();
     store4 = new JsonStore("sessions.json", {});
+    vectors = new JsonStore("recall-vectors.json", {});
+    newId = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
     PRUNE_AFTER = 30 * 864e5;
     lastPrune2 = 0;
   }
@@ -3511,7 +3628,7 @@ function buildSystemPrompt(p) {
       "- \u7FA4\u89C4\u3001\u7FA4\u6897\u3001\u56FA\u5B9A\u6D3B\u52A8\u3001\u7FA4\u53CB\u4E4B\u95F4\u7684\u5173\u7CFB\uFF08scope=group\uFF09\u3002",
       "\u5DF2\u6709\u76F8\u8FD1\u6761\u76EE\u7528 update \u6539\u5199\uFF0C\u8FC7\u65F6\u6216\u9519\u8BEF\u7528 delete\u3002\u6BCF\u6761\u4E00\u53E5\u8BDD\u5E76\u5199\u660E\u4E3B\u8BED\uFF1B\u4E0D\u8BB0\u4E00\u6B21\u6027\u95F2\u804A\u3001\u4F60\u7684\u731C\u6D4B\uFF0C\u7EDD\u4E0D\u8BB0\u5BC6\u7801\u3001\u8BC1\u4EF6\u53F7\u3001\u624B\u673A\u53F7\u7B49\u654F\u611F\u4FE1\u606F\u3002"
     ].join("\n"));
-  if (tools.has("recall")) parts.push("\u3010\u4E4B\u524D\u5BF9\u8BDD\u7684\u6458\u8981\u3011\u53EA\u662F\u6897\u6982\uFF1B\u9700\u8981\u65E9\u5148\u804A\u8FC7\u7684\u7EC6\u8282\u3001\u7EA6\u5B9A\u6216\u7ED3\u8BBA\u65F6\u5148 recall \u68C0\u7D22\u65E7\u804A\u5929\u6458\u8981\uFF0C\u4E0D\u8981\u51ED\u5370\u8C61\u7F16\u3002");
+  if (tools.has("recall")) parts.push("\u3010\u4E4B\u524D\u5BF9\u8BDD\u7684\u6458\u8981\u3011\u53EA\u662F\u6897\u6982\uFF1B\u9700\u8981\u65E9\u5148\u804A\u8FC7\u7684\u7EC6\u8282\u3001\u7EA6\u5B9A\u6216\u7ED3\u8BBA\u65F6\u5148 recall \u68C0\u7D22\u65E7\u804A\u5929\uFF08\u6309\u8BDD\u9898\u63CF\u8FF0\u5373\u53EF\uFF09\uFF0C\u4E0D\u8981\u51ED\u5370\u8C61\u7F16\u3002");
   if (tools.has("load_skill")) {
     const skills2 = listSkills();
     if (skills2.length) parts.push(["# \u6280\u80FD", "\u4F7F\u7528\u524D load_skill \u8BFB\u53D6\uFF1A", ...skills2.map((skill) => `${skill.name}\uFF1A${skill.description}`)].join("\n"));
@@ -3711,7 +3828,7 @@ async function runTurnInner(req, ref) {
   const nudge = offered.some((t) => t.name === "memory");
   const memPrefix = memOn ? buildMemoryBlock(e, { user: !shared, group: true, nudge }) : "";
   const memTurn = memOn && shared ? buildMemoryBlock(e, { user: true, group: false, nudge }) : "";
-  const recalled = recallSession(convKey, input.text, 2).map((text2) => text2.slice(0, 350));
+  const recalled = (await recallSession(convKey, input.text, 2, AbortSignal.timeout(2500))).map((text2) => text2.slice(0, 350));
   const context = [memTurn, recalled.length ? `\u3010\u76F8\u5173\u65E7\u804A\u5929\xB7\u53C2\u8003\u3011
 ${recalled.join("\n")}` : ""].filter(Boolean).join("\n");
   const header = buildHeader(e, eff, input, isAdmin, { conv: convKey, memory: context });
@@ -3847,6 +3964,7 @@ ${pending.map((entry) => entry.text).join("\n")}` }],
     const parsed = parseSummary(text);
     if (parsed.summary) setSummary(convKey, parsed.summary.slice(0, 800));
     setEpisode(convKey, pending, parsed.episode?.slice(0, 400));
+    await indexArchive(convKey).catch((err) => log.warn(`\u65E7\u804A\u5929\u5411\u91CF\u7D22\u5F15\u5931\u8D25: ${err?.message ?? err}`));
   } catch (err) {
     log.warn(`\u751F\u6210\u5BF9\u8BDD\u6458\u8981\u5931\u8D25: ${err?.message ?? err}`);
   }
@@ -6711,10 +6829,17 @@ function registerMemoryTool() {
   registry.register({
     name: "recall",
     source: "builtin",
-    description: "\u6309\u5173\u952E\u8BCD\u68C0\u7D22\u5F53\u524D\u4F1A\u8BDD\u66F4\u65E9\u7684\u804A\u5929\uFF08\u6BCF\u6BB5\u4E3A\u6458\u8981\uFF0C\u5C1A\u672A\u6574\u7406\u7684\u4E3A\u539F\u6587\uFF09\u3002\u9700\u8981\u4E4B\u524D\u7684\u7EA6\u5B9A\u3001\u79F0\u547C\u3001\u8BDD\u9898\u7EC6\u8282\u800C\u3010\u4E4B\u524D\u5BF9\u8BDD\u7684\u6458\u8981\u3011\u4E0D\u591F\u65F6\u5148\u67E5\u518D\u7B54\uFF1B\u4EC5\u5F53\u524D\u4F1A\u8BDD\uFF0C\u6700\u591A\u8FD4\u56DE5\u6761\u3002",
-    parameters: { type: "object", properties: { query: { type: "string" }, count: { type: "integer" } }, required: ["query"] },
+    description: "\u6309\u8BDD\u9898\u68C0\u7D22\u5F53\u524D\u4F1A\u8BDD\u66F4\u65E9\u7684\u804A\u5929\uFF08\u6BCF\u6BB5\u4E3A\u6458\u8981\uFF0C\u5C1A\u672A\u6574\u7406\u7684\u4E3A\u539F\u6587\uFF09\uFF0C\u6309\u8BED\u4E49\u548C\u5173\u952E\u8BCD\u7EFC\u5408\u5339\u914D\u3002\u9700\u8981\u4E4B\u524D\u7684\u7EA6\u5B9A\u3001\u79F0\u547C\u3001\u8BDD\u9898\u7EC6\u8282\u800C\u3010\u4E4B\u524D\u5BF9\u8BDD\u7684\u6458\u8981\u3011\u4E0D\u591F\u65F6\u5148\u67E5\u518D\u7B54\uFF1B\u4EC5\u5F53\u524D\u4F1A\u8BDD\uFF0C\u6700\u591A\u8FD4\u56DE5\u6761\u3002",
+    parameters: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "\u8981\u627E\u7684\u4E8B\u6216\u8BDD\u9898\u7684\u7B80\u77ED\u63CF\u8FF0\uFF0C\u5C3D\u91CF\u5E26\u4E0A\u5F53\u65F6\u53EF\u80FD\u51FA\u73B0\u7684\u4EBA\u540D\u3001\u6E38\u620F\u540D\u7B49\u5173\u952E\u8BCD\uFF0C\u5982\u300C\u963F\u660E \u5468\u516D \u770B\u732B\u7684\u7EA6\u5B9A\u300D" },
+        count: { type: "integer", description: "\u8FD4\u56DE\u6761\u6570\uFF0C1-5\uFF0C\u9ED8\u8BA43" }
+      },
+      required: ["query"]
+    },
     async run(args, ctx) {
-      return recallSession(sessionKey(ctx.e, ctx.eff.chat.sessionScope), String(args.query ?? ""), Number(args.count) || 3).join("\n\n") || "\u6CA1\u6709\u5339\u914D\u7684\u65E7\u804A\u5929\u7247\u6BB5";
+      return (await recallSession(sessionKey(ctx.e, ctx.eff.chat.sessionScope), String(args.query ?? ""), Number(args.count) || 3)).join("\n\n") || "\u6CA1\u6709\u5339\u914D\u7684\u65E7\u804A\u5929\u7247\u6BB5";
     }
   });
   registry.register({

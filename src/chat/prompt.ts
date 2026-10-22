@@ -54,7 +54,7 @@ export function buildSystemPrompt(p: SystemPromptInput): string {
       '- 群规、群梗、固定活动、群友之间的关系（scope=group）。',
       '已有相近条目用 update 改写，过时或错误用 delete。每条一句话并写明主语；不记一次性闲聊、你的猜测，绝不记密码、证件号、手机号等敏感信息。',
     ].join('\n'))
-  if (tools.has('recall')) parts.push('【之前对话的摘要】只是梗概；需要早先聊过的细节、约定或结论时先 recall 检索旧聊天摘要，不要凭印象编。')
+  if (tools.has('recall')) parts.push('【之前对话的摘要】只是梗概；需要早先聊过的细节、约定或结论时先 recall 检索旧聊天（按话题描述即可），不要凭印象编。')
   if (tools.has('load_skill')) {
     const skills = listSkills()
     if (skills.length) parts.push(['# 技能', '使用前 load_skill 读取：', ...skills.map(skill => `${skill.name}：${skill.description}`)].join('\n'))

@@ -16,7 +16,7 @@ import { markdownEnabled } from './format.ts'
 import { buildHeader, buildMemoryBlock, buildSystemPrompt, SUMMARY_PROMPT } from './prompt.ts'
 import { maybeCompact } from '../memory/compact.ts'
 import { memoryHash } from '../memory/store.ts'
-import { appendTurn, getSession, peekSession, pendingArchive, recallSession, setEpisode, setServerState, setSummary, truncateIfNeeded } from './session.ts'
+import { appendTurn, getSession, peekSession, indexArchive, pendingArchive, recallSession, setEpisode, setServerState, setSummary, truncateIfNeeded } from './session.ts'
 import { pickModel, utilityCandidates, utilityChat, type Picked } from './utility.ts'
 
 const NATIVE_SEARCH_TYPES = new Set(['anthropic', 'openai-responses', 'gemini'])
@@ -135,7 +135,8 @@ async function runTurnInner(req: TurnRequest, ref: { turn?: TurnState }): Promis
   const nudge = offered.some(t => t.name === 'memory')
   const memPrefix = memOn ? buildMemoryBlock(e, { user: !shared, group: true, nudge }) : ''
   const memTurn = memOn && shared ? buildMemoryBlock(e, { user: true, group: false, nudge }) : ''
-  const recalled = recallSession(convKey, input.text, 2).map(text => text.slice(0, 350))
+  // bounded so a slow embedding API can't hold up the reply; recallSession falls back to keyword matching
+  const recalled = (await recallSession(convKey, input.text, 2, AbortSignal.timeout(2500))).map(text => text.slice(0, 350))
   const context = [memTurn, recalled.length ? `【相关旧聊天·参考】\n${recalled.join('\n')}` : ''].filter(Boolean).join('\n')
   const header = buildHeader(e, eff, input, isAdmin, { conv: convKey, memory: context })
   // from now on this message lives in the session history; keep it out of future ambient-chat windows
@@ -287,6 +288,8 @@ export async function compactSession(convKey: string, eff: EffectiveConfig, ctx:
     if (parsed.summary) setSummary(convKey, parsed.summary.slice(0, 800))
     // an unparseable reply still settles the chunks (kept raw) so they aren't re-merged into the summary every turn
     setEpisode(convKey, pending, parsed.episode?.slice(0, 400))
+    // embed the new episode now, off the reply path, so the next recall needn't
+    await indexArchive(convKey).catch(err => log.warn(`旧聊天向量索引失败: ${err?.message ?? err}`))
   } catch (err: any) {
     log.warn(`生成对话摘要失败: ${err?.message ?? err}`)
   }

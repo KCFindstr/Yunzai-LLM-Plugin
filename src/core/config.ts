@@ -366,6 +366,20 @@ export function normalize(raw: any): PluginConfig {
     groupWrite: ['all', 'admin', 'off'].includes(m.groupWrite) ? m.groupWrite : 'all',
     autoCompact: m.autoCompact !== false,
     maxWritesPerTurn: n(m.maxWritesPerTurn, 3),
+    embedding: (() => {
+      const em = isPlainObject(m.embedding) ? m.embedding : {}
+      const type = em.type === 'openai' ? 'openai' : 'voyage'
+      return {
+        enable: em.enable === true,
+        type,
+        baseUrl: String(em.baseUrl || (type === 'voyage' ? 'https://api.voyageai.com/v1' : 'https://api.openai.com/v1')),
+        apiKey: em.apiKey,
+        model: String(em.model || (type === 'voyage' ? 'voyage-4-lite' : 'text-embedding-3-small')),
+        dimensions: Math.floor(n(em.dimensions, 512)),
+        timeout: n(em.timeout, 10),
+        minScore: Number.isFinite(Number(em.minScore)) ? Number(em.minScore) : 0.5,
+      }
+    })(),
   }
   c.pricing = isPlainObject(c.pricing) ? c.pricing : {}
   c.pricing.sources = asArray(c.pricing.sources ?? ['openrouter', 'litellm'])

@@ -292,6 +292,19 @@ const memory = obj(
     groupWrite: oneOf(['all', 'admin', 'off'], '群记忆写入'),
     autoCompact: bool('自动整理'),
     maxWritesPerTurn: int('每次回复最多修改次数', { min: 0, max: 100 }),
+    embedding: obj(
+      {
+        enable: bool('旧聊天向量检索（需 API Key）'),
+        type: oneOf(['voyage', 'openai'], '接口类型'),
+        baseUrl: str('接口地址', { pattern: /^https?:\/\/\S+$/ }),
+        apiKey: secret('API Key（env:变量名 读取环境变量）'),
+        model: str('向量模型'),
+        dimensions: int('向量维度', { min: 64, max: 4096 }),
+        timeout: int('超时（秒）', { min: 1, max: 120 }),
+        minScore: num('相似度阈值', { min: 0, max: 1 }),
+      },
+      '向量检索',
+    ),
   },
   '长期记忆',
 )

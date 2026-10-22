@@ -373,6 +373,20 @@ memory:
   autoCompact: true
   # 每次回复最多修改几次记忆
   maxWritesPerTurn: 3
+  # 旧聊天档案的向量检索（与关键词检索混合）。没有 API Key 时自动只用关键词，不报错
+  embedding:
+    enable: true
+    # voyage = Voyage AI；openai = OpenAI 兼容的 /embeddings
+    type: voyage
+    baseUrl: https://api.voyageai.com/v1
+    # 可写 env:VOYAGE_API_KEY 从环境变量读取
+    apiKey: ''
+    model: voyage-4-lite
+    # voyage-4 系列支持 256 / 512 / 1024 / 2048；改模型或维度后旧向量会自动重建
+    dimensions: 512
+    timeout: 10
+    # 余弦相似度达到此值即视为相关（即使没有共同关键词）
+    minScore: 0.5
 
 # 技能：plugins/Yunzai-LLM-Plugin/skills/<名称>/SKILL.md
 skills:

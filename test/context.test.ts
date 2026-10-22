@@ -13,7 +13,15 @@ import { Cooldown } from '../src/chat/ratelimit.ts'
 let active = 0
 let summaryReply = ''
 let peak = 0
+let embedFail = false
+// fake semantic space: one axis per concept, so 周末 and 周六 land together without sharing characters
+const concepts = [/周六|周末|星期六/, /猫|喵/, /显卡|驱动/]
+const fakeVector = (text: string) => [...concepts.map(re => (re.test(text) ? 1 : 0)), 0.1]
 const server = await mockServer(async request => {
+  if (request.url.endsWith('/embeddings')) {
+    if (embedFail) return [500, { error: { message: 'boom' } }]
+    return [200, { data: request.body.input.map((text: string, index: number) => ({ index, embedding: fakeVector(text) })), usage: { total_tokens: 1 } }]
+  }
   active++
   peak = Math.max(peak, active)
   await sleep(30)
@@ -119,7 +127,7 @@ describe('recent identities and conversation layers', () => {
     assert.ok(!lines.some(line => line.includes('later')))
   })
 
-  it('archives dropped context for scoped recall, skips secrets and clears it on reset', () => {
+  it('archives dropped context for scoped recall, skips secrets and clears it on reset', async () => {
     const key = '10000:g64001'
     clearSession(key)
     const add = (text: string) => appendTurn(key, { role: 'user', content: [{ type: 'text', text }] }, { role: 'assistant', content: '记住了' })
@@ -128,14 +136,14 @@ describe('recent identities and conversation layers', () => {
     add('最新消息')
     const dropped = truncateIfNeeded(key, { ...config.effective().chat, historyMaxTurns: 1 })
     assert.equal(dropped.length, 4)
-    assert.match(recallSession(key, '薄荷猫').join(''), /阿明/)
-    assert.doesNotMatch(recallSession(key, '').join(''), /password/)
-    assert.deepEqual(recallSession('10000:g64002', ''), [])
+    assert.match((await recallSession(key, '薄荷猫')).join(''), /阿明/)
+    assert.doesNotMatch((await recallSession(key, '')).join(''), /password/)
+    assert.deepEqual(await recallSession('10000:g64002', ''), [])
     clearSession(key)
-    assert.deepEqual(recallSession(key, ''), [])
+    assert.deepEqual(await recallSession(key, ''), [])
   })
 
-  it('keeps summary and episodic context across idle expiry without reusing provider state', () => {
+  it('keeps summary and episodic context across idle expiry without reusing provider state', async () => {
     const key = '10000:p65001'
     appendTurn(key, { role: 'user', content: [{ type: 'text', text: '薄荷猫的约定' }] }, { role: 'assistant', content: '周末见' })
     setSummary(key, '周末看猫')
@@ -147,7 +155,7 @@ describe('recent identities and conversation layers', () => {
     assert.equal(fresh.summary, '周末看猫')
     assert.equal(fresh.state, undefined)
     assert.equal(fresh.messages.length, 0)
-    assert.match(recallSession(key, '薄荷猫').join(''), /周末见/)
+    assert.match((await recallSession(key, '薄荷猫')).join(''), /周末见/)
   })
 
   it('retains a fallback summary and archive if model compaction fails', async () => {
@@ -160,7 +168,7 @@ describe('recent identities and conversation layers', () => {
     config.get().models = []
     try { await compactSession(key, eff, {}) } finally { config.get().models = models }
     assert.match(peekSession(key)?.summary ?? '', /周六看猫/)
-    assert.match(recallSession(key, '周六看猫').join(''), /好的/)
+    assert.match((await recallSession(key, '周六看猫')).join(''), /好的/)
   })
 
   it('does not overwrite a reset conversation with an older in-flight summary', async () => {
@@ -172,7 +180,7 @@ describe('recent identities and conversation layers', () => {
     appendTurn(key, { role: 'user', content: [{ type: 'text', text: '新的开始' }] }, { role: 'assistant', content: '你好' })
     await pending
     assert.equal(peekSession(key)?.summary, undefined)
-    assert.deepEqual(recallSession(key, ''), [])
+    assert.deepEqual(await recallSession(key, ''), [])
   })
 
   it('replaces archived chunks with a summarized episode and merges the rolling summary', async () => {
@@ -185,7 +193,7 @@ describe('recent identities and conversation layers', () => {
     await compactSession(key, eff, {})
     assert.equal(peekSession(key)?.summary, '对方周六看薄荷猫，需要提醒')
     assert.deepEqual(peekSession(key)?.archive?.map(entry => [entry.text, entry.raw]), [['对方约周六看薄荷猫，要你提醒', undefined]])
-    assert.match(recallSession(key, '薄荷猫').join(''), /要你提醒/)
+    assert.match((await recallSession(key, '薄荷猫')).join(''), /要你提醒/)
   })
 
   it('settles chunks without re-summarizing when the reply ignores the format', async () => {
@@ -198,6 +206,57 @@ describe('recent identities and conversation layers', () => {
     assert.equal(peekSession(key)?.summary, '只有一段摘要')
     assert.equal(peekSession(key)?.archive?.length, 1)
     assert.equal(peekSession(key)?.archive?.[0].raw, undefined)
-    assert.match(recallSession(key, '旧话题').join(''), /旧话题/)
+    assert.match((await recallSession(key, '旧话题')).join(''), /旧话题/)
+  })
+})
+
+describe('vector recall', () => {
+  const embeddingConfig = () => ({ ...config.get().memory.embedding, enable: true, type: 'voyage' as const, baseUrl: server.url, apiKey: 'voyage-test', model: 'voyage-4-lite', dimensions: 512, minScore: 0.5 })
+  // two separate archive entries: one per truncation
+  const seed = (key: string) => {
+    clearSession(key)
+    for (const text of ['周六一起看薄荷猫', '显卡驱动怎么装', '现在的新消息']) {
+      appendTurn(key, { role: 'user', content: [{ type: 'text', text }] }, { role: 'assistant', content: '好' })
+      truncateIfNeeded(key, { ...config.effective().chat, historyMaxTurns: 1 })
+    }
+    assert.equal(peekSession(key)?.archive?.length, 2)
+  }
+  let saved: any
+  beforeEach(() => { saved = config.get().memory.embedding; embedFail = false })
+  after(() => { config.get().memory.embedding = saved })
+
+  it('finds an episode by meaning when no words are shared, and only with embeddings enabled', async () => {
+    const key = '10000:p70001'
+    seed(key)
+    config.get().memory.embedding = { ...embeddingConfig(), enable: false }
+    assert.deepEqual(await recallSession(key, '周末那个约定'), [])
+    config.get().memory.embedding = embeddingConfig()
+    const hits = await recallSession(key, '周末那个约定')
+    assert.equal(hits.length, 1)
+    assert.match(hits[0], /薄荷猫/)
+  })
+
+  it('sends Voyage request fields and embeds each archive entry only once', async () => {
+    const key = '10000:p70002'
+    seed(key)
+    config.get().memory.embedding = embeddingConfig()
+    const before = server.requests.length
+    await recallSession(key, '周末')
+    await recallSession(key, '显卡')
+    const calls = server.requests.slice(before).filter(request => request.url.endsWith('/embeddings'))
+    assert.deepEqual(calls.map(call => call.body.input_type), ['document', 'query', 'query'])
+    assert.equal(calls[0].body.model, 'voyage-4-lite')
+    assert.equal(calls[0].body.output_dimension, 512)
+    assert.equal(calls[0].headers.authorization, 'Bearer voyage-test')
+    assert.equal(calls[0].body.input.length, 2)
+  })
+
+  it('falls back to keyword matching when the embedding API fails', async () => {
+    const key = '10000:p70003'
+    seed(key)
+    config.get().memory.embedding = embeddingConfig()
+    embedFail = true
+    assert.match((await recallSession(key, '显卡驱动')).join(''), /显卡/)
+    assert.deepEqual(await recallSession(key, '周末那个约定'), [])
   })
 })

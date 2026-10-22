@@ -16,10 +16,17 @@ function groupWritable(ctx: { e: any; isAdmin: boolean }) {
 export function registerMemoryTool() {
   registry.register({
     name: 'recall', source: 'builtin',
-    description: '按关键词检索当前会话更早的聊天（每段为摘要，尚未整理的为原文）。需要之前的约定、称呼、话题细节而【之前对话的摘要】不够时先查再答；仅当前会话，最多返回5条。',
-    parameters: { type: 'object', properties: { query: { type: 'string' }, count: { type: 'integer' } }, required: ['query'] },
+    description: '按话题检索当前会话更早的聊天（每段为摘要，尚未整理的为原文），按语义和关键词综合匹配。需要之前的约定、称呼、话题细节而【之前对话的摘要】不够时先查再答；仅当前会话，最多返回5条。',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: '要找的事或话题的简短描述，尽量带上当时可能出现的人名、游戏名等关键词，如「阿明 周六 看猫的约定」' },
+        count: { type: 'integer', description: '返回条数，1-5，默认3' },
+      },
+      required: ['query'],
+    },
     async run(args, ctx) {
-      return recallSession(sessionKey(ctx.e, ctx.eff.chat.sessionScope), String(args.query ?? ''), Number(args.count) || 3).join('\n\n') || '没有匹配的旧聊天片段'
+      return (await recallSession(sessionKey(ctx.e, ctx.eff.chat.sessionScope), String(args.query ?? ''), Number(args.count) || 3)).join('\n\n') || '没有匹配的旧聊天片段'
     },
   })
   registry.register({

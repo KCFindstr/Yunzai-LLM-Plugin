@@ -253,6 +253,22 @@ export interface MemorySection {
   groupWrite: 'all' | 'admin' | 'off'
   autoCompact: boolean
   maxWritesPerTurn: number
+  embedding: EmbeddingSection
+}
+
+/** Embedding model for recall over the chat archive (independent of the chat providers). */
+export interface EmbeddingSection {
+  enable: boolean
+  type: 'voyage' | 'openai'
+  baseUrl: string
+  /** Same forms as a provider key: one, several, or `env:NAME`. */
+  apiKey?: string | string[]
+  model: string
+  dimensions: number
+  /** Seconds. */
+  timeout: number
+  /** Cosine similarity at which an archive entry counts as relevant even without shared keywords. */
+  minScore: number
 }
 
 export interface GroupOverride {
