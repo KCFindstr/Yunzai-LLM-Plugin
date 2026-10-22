@@ -6,6 +6,7 @@ const PAGES = [
   ['usage', '用量与额度', '＄', () => import('./pages/usage.js')],
   ['conversations', '对话', '☰', () => import('./pages/conversations.js')],
   ['memory', '长期记忆', '✎', () => import('./pages/memory.js')],
+  ['roster', '群友称呼', '◉', () => import('./pages/roster.js')],
   ['vectors', '向量空间', '✦', () => import('./pages/vectors.js')],
   ['personas', '人设', '☺', () => import('./pages/personas.js')],
   ['models', '模型', '⚙', () => import('./pages/models.js')],

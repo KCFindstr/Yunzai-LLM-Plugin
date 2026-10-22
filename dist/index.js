@@ -311,6 +311,9 @@ function normalize(raw) {
   c.persona.active = String(c.persona.active ?? "default");
   c.persona.presets = isPlainObject(c.persona.presets) ? c.persona.presets : {};
   c.groups = isPlainObject(c.groups) ? c.groups : {};
+  const nameMap = (m2) => Object.fromEntries(Object.entries(isPlainObject(m2) ? m2 : {}).map(([id, n2]) => [String(id), String(n2 ?? "").trim()]).filter(([, n2]) => n2));
+  c.names = nameMap(c.names);
+  for (const g of Object.values(c.groups)) if (isPlainObject(g) && g.names !== void 0) g.names = nameMap(g.names);
   c.trigger = isPlainObject(c.trigger) ? c.trigger : {};
   for (const k of ["prefixes", "groupWhitelist", "groupBlacklist", "userBlacklist"]) c.trigger[k] = asArray(c.trigger[k]);
   c.trigger.priority = Number(c.trigger.priority ?? 99999);
@@ -1304,8 +1307,31 @@ function observeUsers(event) {
   }
   store3.save();
 }
+function configuredName(id, groupId) {
+  const c = config.get();
+  return (groupId != null ? c.groups[String(groupId)]?.names?.[id] : void 0) || c.names[id] || void 0;
+}
 function knownName(event, id = String(event?.user_id)) {
-  return cachedName(event, id) ?? store3.data[scopeKey2(event)]?.find((profile) => profile.id === id)?.name;
+  return configuredName(id, event?.group_id) ?? cachedName(event, id) ?? store3.data[scopeKey2(event)]?.find((profile) => profile.id === id)?.name;
+}
+function rosterSnapshot() {
+  return Object.entries(store3.data).map(([key, profiles]) => {
+    const [selfId, scope] = key.split(":");
+    const groupId = scope.startsWith("g") ? scope.slice(1) : void 0;
+    const event = { self_id: selfId, group_id: groupId, user_id: groupId ? void 0 : scope.slice(1) };
+    return {
+      key,
+      selfId,
+      groupId,
+      people: profiles.map((p) => ({
+        id: p.id,
+        seen: p.seen,
+        observed: cachedName(event, p.id) ?? p.name,
+        group: groupId ? config.get().groups[groupId]?.names?.[p.id] : void 0,
+        global: config.get().names[p.id]
+      }))
+    };
+  });
 }
 function rosterLines(event, max, memory2 = false) {
   return (store3.data[scopeKey2(event)] ?? []).filter((profile) => Date.now() - profile.seen < 30 * 864e5).slice(0, max).map((profile) => {
@@ -1327,6 +1353,7 @@ var store3, scopeKey2;
 var init_roster = __esm({
   "src/chat/roster.ts"() {
     "use strict";
+    init_config();
     init_store();
     init_util();
     init_store2();
@@ -7934,7 +7961,8 @@ var groupOverride = obj(
     thinking: oneOf(THINKING_SETTING, "\u672C\u7FA4\u601D\u8003\u5F3A\u5EA6", { allowEmpty: true }),
     chat: { ...chat2, label: "\u5BF9\u8BDD\uFF08\u8986\u76D6\uFF09" },
     reply: { ...reply, label: "\u56DE\u590D\uFF08\u8986\u76D6\uFF09" },
-    sticker: { ...sticker, label: "\u8868\u60C5\u5305\uFF08\u8986\u76D6\uFF09" }
+    sticker: { ...sticker, label: "\u8868\u60C5\u5305\uFF08\u8986\u76D6\uFF09" },
+    names: map(str("\u79F0\u547C"), "\u672C\u7FA4\u79F0\u547C\uFF08\u8986\u76D6\u5168\u5C40\u79F0\u547C\uFF09", { keyLabel: "\u5E73\u53F0ID", keyPattern: /^[\w-]{1,64}$/ })
   },
   "\u7FA4\u8BBE\u7F6E"
 );
@@ -7953,6 +7981,7 @@ var SCHEMA = obj(
       "\u4EBA\u8BBE"
     ),
     groups: map(groupOverride, "\u5206\u7FA4\u8BBE\u7F6E", { keyLabel: "\u7FA4\u53F7", keyPattern: /^\d{5,}$/ }),
+    names: map(str("\u79F0\u547C"), "\u7FA4\u53CB\u79F0\u547C", { keyLabel: "\u5E73\u53F0ID\uFF08QQ\u53F7\uFF0C\u6216 QQBot \u7684\u7528\u6237ID\uFF09", keyPattern: /^[\w-]{1,64}$/ }),
     trigger: obj(
       {
         at: bool("@\u673A\u5668\u4EBA\u89E6\u53D1"),
@@ -8107,6 +8136,7 @@ init_paths();
 init_util();
 init_session();
 init_turnLog();
+init_roster();
 init_utility();
 init_types();
 init_embed();
@@ -8131,6 +8161,7 @@ function bots() {
   });
 }
 function nameOf(scope, id) {
+  if (scope === "user" && configuredName(id)) return configuredName(id);
   const B = globalThis.Bot;
   if (!B) return void 0;
   const uins = Array.isArray(B.uin) ? B.uin : [B.uin];
@@ -8490,6 +8521,7 @@ var routes = [
   R("DELETE", "/api/sessions/:key/archive/:id", ({ params }) => {
     if (!deleteArchiveEntry(params[0], params[1])) throw fail("\u6CA1\u6709\u8FD9\u6761\u6863\u6848", 404);
   }),
+  R("GET", "/api/roster", () => rosterSnapshot().map((r) => ({ ...r, label: r.groupId ? nameOf("group", r.groupId) ?? `\u7FA4 ${r.groupId}` : "\u79C1\u804A" })).sort((a, b) => Math.max(0, ...b.people.map((p) => p.seen)) - Math.max(0, ...a.people.map((p) => p.seen)))),
   R("GET", "/api/turns", ({ query }) => recentTurns({ limit: Math.min(300, Number(query.get("limit")) || 100) }).map((t) => ({ ...t, label: sessionLabel(t.conv).label }))),
   R("GET", "/api/vectors", ({ query }) => vectorSpace(query)),
   R("GET", "/api/memory", () => {

@@ -92,24 +92,24 @@ describe('config CLI subcommands', () => {
 })
 
 describe('config CLI interactive (arrow keys / radio / checkbox)', () => {
-  // Root order follows the schema: … groups(9) trigger(10) chat(11) quota(12). D99 = last item (返回);
+  // Root order follows the schema: … groups(9) names(10) trigger(11) chat(12) quota(13). D99 = last item (返回);
   // in the main menu, D99 U = 保存并退出.
   it('number field: browse -> quota.notifyCooldown -> 900 -> save', async () => {
     writeUserConfig('# 空\n')
-    await drive(['E', 'D12', 'E', 'D2', 'E', '900', 'E', 'D99', 'E', 'D99', 'E', 'D99', 'U', 'E'])
+    await drive(['E', 'D13', 'E', 'D2', 'E', '900', 'E', 'D99', 'E', 'D99', 'E', 'D99', 'U', 'E'])
     assert.deepEqual(YAML.parse(userYaml()), { quota: { notifyCooldown: 900 } })
   })
 
   it('enum field is a radio list: chat.sessionScope -> group', async () => {
     writeUserConfig('# 空\n')
-    await drive(['E', 'D11', 'E', 'E', 'D1', 'E', 'D99', 'E', 'D99', 'E', 'D99', 'U', 'E'])
+    await drive(['E', 'D12', 'E', 'E', 'D1', 'E', 'D99', 'E', 'D99', 'E', 'D99', 'U', 'E'])
     assert.deepEqual(YAML.parse(userYaml()), { chat: { sessionScope: 'group' } })
   })
 
   it('checkbox: batch-toggle the switches of a section', async () => {
     writeUserConfig('# 空\n')
     // trigger has 11 fields; ☑ 批量开关 follows them; 3rd box = alias
-    await drive(['E', 'D10', 'E', 'D11', 'E', 'D2', 'S', 'E', 'D99', 'E', 'D99', 'E', 'D99', 'U', 'E'])
+    await drive(['E', 'D11', 'E', 'D11', 'E', 'D2', 'S', 'E', 'D99', 'E', 'D99', 'E', 'D99', 'U', 'E'])
     assert.deepEqual(YAML.parse(userYaml()), { trigger: { alias: true } })
   })
 

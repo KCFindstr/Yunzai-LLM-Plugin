@@ -13,6 +13,7 @@ import { CONFIG_DIR, DEFAULT_CONFIG_FILE } from '../core/paths.ts'
 import { deepMerge, detectImageMime, formatDuration, isPlainObject, maskSecret, truncate } from '../core/util.ts'
 import { allVectors, archiveInfo, clearSession, dayInfo, deleteArchiveEntry, listSessions, peekSession } from '../chat/session.ts'
 import { recentTurns } from '../chat/turnLog.ts'
+import { configuredName, rosterSnapshot } from '../chat/roster.ts'
 import { utilityChat } from '../chat/utility.ts'
 import { partsToText } from '../llm/types.ts'
 import { dot, embed, embeddingReady, embeddingTag } from '../memory/embed.ts'
@@ -51,6 +52,7 @@ function bots(): { uin: string; nickname: string; adapter?: string; groups: numb
 
 /** Display name for a user or group id from any connected bot's caches. */
 function nameOf(scope: 'user' | 'group', id: string): string | undefined {
+  if (scope === 'user' && configuredName(id)) return configuredName(id)
   const B: any = globalThis.Bot
   if (!B) return undefined
   const uins: any[] = Array.isArray(B.uin) ? B.uin : [B.uin]
@@ -429,6 +431,9 @@ export const routes: Route[] = [
   R('DELETE', '/api/sessions/:key/archive/:id', ({ params }) => {
     if (!deleteArchiveEntry(params[0], params[1])) throw fail('没有这条档案', 404)
   }),
+  R('GET', '/api/roster', () => rosterSnapshot()
+    .map(r => ({ ...r, label: r.groupId ? (nameOf('group', r.groupId) ?? `群 ${r.groupId}`) : '私聊' }))
+    .sort((a, b) => Math.max(0, ...b.people.map(p => p.seen)) - Math.max(0, ...a.people.map(p => p.seen)))),
   R('GET', '/api/turns', ({ query }) => recentTurns({ limit: Math.min(300, Number(query.get('limit')) || 100) }).map(t => ({ ...t, label: sessionLabel(t.conv).label }))),
 
   R('GET', '/api/vectors', ({ query }) => vectorSpace(query)),

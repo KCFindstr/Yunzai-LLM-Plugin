@@ -285,6 +285,9 @@ export function normalize(raw: any): PluginConfig {
   c.persona.active = String(c.persona.active ?? 'default')
   c.persona.presets = isPlainObject(c.persona.presets) ? c.persona.presets : {}
   c.groups = isPlainObject(c.groups) ? c.groups : {}
+  const nameMap = (m: any) => Object.fromEntries(Object.entries(isPlainObject(m) ? m : {}).map(([id, n]) => [String(id), String(n ?? '').trim()]).filter(([, n]) => n))
+  c.names = nameMap(c.names)
+  for (const g of Object.values(c.groups) as any[]) if (isPlainObject(g) && g.names !== undefined) g.names = nameMap(g.names)
   c.trigger = isPlainObject(c.trigger) ? c.trigger : {}
   for (const k of ['prefixes', 'groupWhitelist', 'groupBlacklist', 'userBlacklist']) c.trigger[k] = asArray(c.trigger[k])
   c.trigger.priority = Number(c.trigger.priority ?? 99999)

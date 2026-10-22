@@ -321,6 +321,7 @@ const groupOverride = obj(
     chat: { ...chat, label: '对话（覆盖）' },
     reply: { ...reply, label: '回复（覆盖）' },
     sticker: { ...sticker, label: '表情包（覆盖）' },
+    names: map(str('称呼'), '本群称呼（覆盖全局称呼）', { keyLabel: '平台ID', keyPattern: /^[\w-]{1,64}$/ }),
   },
   '群设置',
 )
@@ -340,6 +341,7 @@ export const SCHEMA = obj(
       '人设',
     ),
     groups: map(groupOverride, '分群设置', { keyLabel: '群号', keyPattern: /^\d{5,}$/ }),
+    names: map(str('称呼'), '群友称呼', { keyLabel: '平台ID（QQ号，或 QQBot 的用户ID）', keyPattern: /^[\w-]{1,64}$/ }),
     trigger: obj(
       {
         at: bool('@机器人触发'),

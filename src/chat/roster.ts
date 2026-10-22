@@ -1,3 +1,4 @@
+import { config } from '../core/config.ts'
 import { JsonStore } from '../core/store.ts'
 import { truncate } from '../core/util.ts'
 import { renderMemory } from '../memory/store.ts'
@@ -43,8 +44,36 @@ export function observeUsers(event: any) {
   store.save()
 }
 
+/** Name set in config: this group's `groups.<id>.names` first, then the global `names`. */
+export function configuredName(id: string, groupId?: string | number): string | undefined {
+  const c = config.get()
+  return (groupId != null ? c.groups[String(groupId)]?.names?.[id] : undefined) || c.names[id] || undefined
+}
+
+/** Configured name, else the adapter's member/friend cache, else the last name seen in messages. */
 export function knownName(event: any, id = String(event?.user_id)): string | undefined {
-  return cachedName(event, id) ?? store.data[scopeKey(event)]?.find(profile => profile.id === id)?.name
+  return configuredName(id, event?.group_id) ?? cachedName(event, id) ?? store.data[scopeKey(event)]?.find(profile => profile.id === id)?.name
+}
+
+/** Everyone seen per group / private chat, for the web UI's name editor. */
+export function rosterSnapshot() {
+  return Object.entries(store.data).map(([key, profiles]) => {
+    const [selfId, scope] = key.split(':')
+    const groupId = scope.startsWith('g') ? scope.slice(1) : undefined
+    const event = { self_id: selfId, group_id: groupId, user_id: groupId ? undefined : scope.slice(1) }
+    return {
+      key,
+      selfId,
+      groupId,
+      people: profiles.map(p => ({
+        id: p.id,
+        seen: p.seen,
+        observed: cachedName(event, p.id) ?? p.name,
+        group: groupId ? config.get().groups[groupId]?.names?.[p.id] : undefined,
+        global: config.get().names[p.id],
+      })),
+    }
+  })
 }
 
 export function rosterLines(event: any, max: number, memory = false): string[] {

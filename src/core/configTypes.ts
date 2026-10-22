@@ -286,6 +286,8 @@ export interface GroupOverride {
   reply?: Partial<ReplySection>
   sticker?: Partial<StickerSection>
   tools?: Partial<ToolsSection>
+  /** Names in this group (platform ID -> name), overriding the global `names`. */
+  names?: Record<string, string>
 }
 
 export interface PluginConfig {
@@ -299,6 +301,8 @@ export interface PluginConfig {
   visionModel: string
   persona: PersonaSection
   groups: Record<string, GroupOverride>
+  /** Platform ID -> name, overriding whatever the adapter reports (QQBot often reports none). */
+  names: Record<string, string>
   trigger: TriggerSection
   chat: ChatSection
   quota: { defaultScope: QuotaScope; exemptAdmins: boolean; notifyCooldown: number }
