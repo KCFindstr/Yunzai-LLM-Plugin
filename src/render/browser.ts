@@ -39,6 +39,7 @@ export interface RenderOptions {
   allowNetwork?: boolean
   transparent?: boolean
   timeoutMs?: number
+  fit?: boolean
 }
 
 const BASE_CSS = `
@@ -75,6 +76,14 @@ export function wrapHtml(html: string, opts: { transparent?: boolean } = {}): st
  * hosts (or blocked entirely), so the page can't probe the LAN. Height is capped.
  */
 export async function renderHtml(html: string, opts: RenderOptions = {}): Promise<Buffer> {
+  return (await renderDocument(html, opts, false))[0]
+}
+
+export async function renderHtmlPages(html: string, opts: RenderOptions = {}): Promise<Buffer[]> {
+  return renderDocument(html, opts, true)
+}
+
+async function renderDocument(html: string, opts: RenderOptions, paginate: boolean): Promise<Buffer[]> {
   const width = Math.min(Math.max(opts.width ?? 720, 200), 1600)
   const maxHeight = Math.min(Math.max(opts.maxHeight ?? 6000, 100), 16000)
   const browser = await getBrowser()
@@ -96,17 +105,32 @@ export async function renderHtml(html: string, opts: RenderOptions = {}): Promis
     })
     await page.setContent(wrapHtml(html, { transparent: opts.transparent }), { waitUntil: 'load', timeout: opts.timeoutMs ?? 15000 })
     const cdp = await page.createCDPSession()
-    const { cssContentSize, contentSize } = await cdp.send('Page.getLayoutMetrics')
-    const size = cssContentSize ?? contentSize
-    const height = Math.min(Math.ceil(size?.height ?? 400), maxHeight)
+    let metrics = await cdp.send('Page.getLayoutMetrics')
+    let size = metrics.cssContentSize ?? metrics.contentSize
+    if (opts.fit) size.height = Math.max(1, await page.evaluate(() => Math.ceil(document.body.getBoundingClientRect().height)))
+    let zoom = 1
+    for (let attempt = 0; opts.fit && size?.height > maxHeight && attempt < 5; attempt++) {
+      zoom *= maxHeight / size.height * 0.95
+      await page.addStyleTag({ content: `body{zoom:${zoom}!important}` })
+      metrics = await cdp.send('Page.getLayoutMetrics')
+      size = metrics.cssContentSize ?? metrics.contentSize
+      size.height = Math.max(1, await page.evaluate(() => Math.ceil(document.body.getBoundingClientRect().height)))
+    }
+    if (opts.fit && size?.height > maxHeight) throw new Error('内容过多，无法完整排入一张图片')
+    const totalHeight = Math.ceil(size?.height ?? 400)
+    const height = Math.min(totalHeight, maxHeight)
     const shotWidth = Math.min(Math.ceil(size?.width ?? width), width)
-    const buf = await page.screenshot({
-      type: 'png',
-      omitBackground: Boolean(opts.transparent),
-      clip: { x: 0, y: 0, width: shotWidth, height },
-      captureBeyondViewport: true,
-    })
-    return Buffer.from(buf)
+    const pages = paginate ? Math.ceil(totalHeight / maxHeight) : 1
+    if (pages > 12) throw new Error('内容超过12页，请分批排版')
+    const images: Buffer[] = []
+    for (let index = 0; index < pages; index++) {
+      images.push(Buffer.from(await page.screenshot({
+        type: 'png', omitBackground: Boolean(opts.transparent),
+        clip: { x: 0, y: index * maxHeight, width: shotWidth, height: paginate ? Math.min(maxHeight, totalHeight - index * maxHeight) : height },
+        captureBeyondViewport: true,
+      })))
+    }
+    return images
   } finally {
     await page.close().catch(() => {})
   }

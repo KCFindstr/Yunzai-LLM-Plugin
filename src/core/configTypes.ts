@@ -92,6 +92,8 @@ export interface ThinkingJudgeConfig {
 }
 
 export interface ChatSection {
+  maxPending: number
+  rosterSize: number
   sessionScope: 'user' | 'group'
   sessionTimeout: number
   historyMaxTurns: number

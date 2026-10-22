@@ -52,7 +52,7 @@ describe('markdown output', () => {
 
   it('system prompt tells the model whether markdown renders', () => {
     const base = { isGroup: true, botName: 'B', eff: config.effective(), tools: [], nativeSearch: false }
-    assert.match(buildSystemPrompt({ ...base, markdown: false }), /QQ不显示Markdown/)
+    assert.match(buildSystemPrompt({ ...base, markdown: false }), /短回复用纯文字/)
     assert.match(buildSystemPrompt({ ...base, markdown: true }), /按 Markdown 显示/)
   })
 
@@ -70,24 +70,35 @@ describe('markdown output', () => {
     assert.match(specs.render_html, /（每次回复最多 2 张图片，与 run_code 生成的图片合计）$/)
     assert.doesNotMatch(registry.get('web_fetch')!.description, /每次回复/, 'registered description stays static')
     const s = buildSystemPrompt({ isGroup: true, botName: 'B', eff, tools: ['web_fetch'], nativeSearch: false, markdown: false })
-    assert.match(s, /工具调用最多 4 轮/)
-    assert.doesNotMatch(buildSystemPrompt({ isGroup: true, botName: 'B', eff, tools: [], nativeSearch: false, markdown: false }), /工具调用最多/)
+    assert.match(s, /工具最多 4 轮/)
+    assert.doesNotMatch(buildSystemPrompt({ isGroup: true, botName: 'B', eff, tools: [], nativeSearch: false, markdown: false }), /工具最多/)
   })
 
-  it('markdown mode prefers Markdown for long answers and only renders HTML when needed', () => {
+  it('requires HTML for all long answers regardless of Markdown mode or structure', () => {
     const eff = { ...config.effective(), reply: { ...config.effective().reply, maxBubbles: 2 } }
     const base = { isGroup: true, botName: 'B', eff, tools: ['render_html'], nativeSearch: false }
     const md = buildSystemPrompt({ ...base, markdown: true })
-    assert.match(md, /长回答直接用 Markdown/)
-    assert.match(md, /只有 Markdown 表达不清楚时才用 render_html/)
-    assert.doesNotMatch(md, /用空行隔开/, 'markdown replies are one message, no bubble splitting')
+    assert.match(md, /所有长回复，无论是否结构化，都用 render_html/)
+    assert.doesNotMatch(md, /长回答直接用 Markdown/)
     const plain = buildSystemPrompt({ ...base, markdown: false })
-    assert.match(plain, /用空行隔开/)
-    assert.match(plain, /需要表格、多维对比.*render_html/)
+    assert.match(plain, /所有长回复，无论是否结构化，都用 render_html/)
+    assert.ok(plain.length < 2200, `concise static prompt: ${plain.length} chars`)
   })
 })
 
 describe('persona from file', () => {
+  it('passes raw Markdown and intentional backslashes through the config and system builder unchanged', async () => {
+    const { personaText } = await import('../src/core/config.ts')
+    const persona = '# Persona\n1. **Bold**\n- Bullet\nKeep C:\\work\\notes and literal \\* untouched.'
+    fs.writeFileSync(path.join(TMP, 'config/RAW.md'), persona)
+    const resolved = personaText('file:RAW.md')
+    assert.equal(resolved, persona)
+    const eff = { ...config.effective(), personaPrompt: resolved }
+    const system = buildSystemPrompt({ isGroup: true, botName: 'B', eff, tools: [], nativeSearch: false, markdown: false })
+    assert.ok(system.startsWith(persona + '\n\n'))
+    assert.doesNotMatch(system, /^\\# Persona/)
+  })
+
   it('loads `file:` presets from the config dir and refuses paths outside it', () => {
     assert.equal(config.effective().personaPrompt, '你是测试猫娘{botName}。')
     config.set('persona.active', 'evil')

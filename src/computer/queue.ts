@@ -18,6 +18,8 @@ export interface ComputerJob {
   cacheReadTokens?: number
   cacheWriteTokens?: number
   deliveryError?: boolean
+  modelId?: string
+  costUsd?: number
 }
 
 export interface JobResult {

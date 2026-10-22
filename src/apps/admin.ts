@@ -31,7 +31,7 @@ import { clearMemory, deleteMemory, listMemory, memoryStats, renderMemory, usage
 import { registry } from '../tools/registry.ts'
 import { deleteSkill, listSkills, loadSkills, parseSkillMarkdown, saveSkill } from '../tools/skills.ts'
 import { BasePlugin } from './base.ts'
-import { commandEvent, commandForward } from '../commands/reply.ts'
+import { commandEvent, commandForward, flushCommand } from '../commands/reply.ts'
 import { computerOwner, computerQueue } from '../tools/computer.ts'
 
 const THINKING: ThinkingLevel[] = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']
@@ -878,7 +878,7 @@ const COMMANDS: Cmd[] = [
       const job = computerQueue.get(id, identity)
       if (!job) return e.reply('找不到属于你在此会话中的电脑任务')
       if (action === '取消' || action === 'cancel') computerQueue.cancel(job)
-      return say(e, `${job.id} ${job.status}（${job.steps ?? 0}步）\n输入 ${job.inputTokens ?? 0}，输出 ${job.outputTokens ?? 0}，缓存读取 ${job.cacheReadTokens ?? 0}，缓存写入 ${job.cacheWriteTokens ?? 0}\n${job.report ?? ''}`)
+      return say(e, `${job.id} ${job.status}（${job.steps ?? 0}步）\n模型 ${job.modelId ?? '未知'}，费用 ${formatUsd(job.costUsd ?? 0)}\n输入 ${job.inputTokens ?? 0}，输出 ${job.outputTokens ?? 0}，缓存读取 ${job.cacheReadTokens ?? 0}，缓存写入 ${job.cacheWriteTokens ?? 0}\n${job.report ?? ''}`)
     },
   },
   {
@@ -1018,7 +1018,12 @@ export class LLMAdmin extends BasePlugin {
   }
 
   async dispatch(): Promise<boolean> {
-    const e = commandEvent(this.e, config.effective(this.e.group_id).reply)
+    const e = commandEvent(this.e, config.effective(this.e.group_id).reply, true)
+    try { return await this.dispatchEvent(e) }
+    finally { await flushCommand(e) }
+  }
+
+  private async dispatchEvent(e: any): Promise<boolean> {
     const text = String(e.msg ?? '').replace(/^#\s*llm/i, '').trim()
     const lower = text.toLowerCase()
     const hit = NAMES.find(([n]) => (n === '' ? lower === '' : lower.startsWith(n)))

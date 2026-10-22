@@ -1,13 +1,18 @@
 import type { ChatSection } from '../core/configTypes.ts'
 import { JsonStore } from '../core/store.ts'
-import { estimateTokens } from '../core/util.ts'
+import { estimateTokens, similarity, truncate } from '../core/util.ts'
+import { isSensitive } from '../memory/store.ts'
 import type { AssistantMsg, Msg, UserMsg } from '../llm/types.ts'
 import { partsToText } from '../llm/types.ts'
 
 /** Persisted history contains only plain user/assistant text — no tool transcripts, images or provider-raw data. */
+export interface ArchiveEntry { at: number; text: string; raw?: boolean }
+
 export interface StoredSession {
   messages: Msg[]
   summary?: string
+  /** Older context: one entry per trimmed chunk; `raw` until compactSession replaces it with a summary. */
+  archive?: ArchiveEntry[]
   updatedAt: number
   /** Server-side chain (gemini/responses): valid while messages.length === len and the model key matches. */
   state?: { key: string; previousId: string; len: number }
@@ -20,7 +25,7 @@ export function sessionKey(e: any, scope: ChatSection['sessionScope']): string {
   return `${e.self_id}:p${e.user_id}`
 }
 
-const PRUNE_AFTER = 3 * 86400_000
+const PRUNE_AFTER = 30 * 86400_000
 let lastPrune = 0
 
 /** Drop sessions idle for days so sessions.json doesn't grow with every user ever seen. */
@@ -40,8 +45,11 @@ export function getSession(key: string, timeoutMin: number): StoredSession {
   pruneIdle()
   const s = store.data[key]
   if (s && Date.now() - s.updatedAt < timeoutMin * 60_000) return s
-  const fresh: StoredSession = { messages: [], updatedAt: Date.now() }
+  if (s) archiveMessages(s, s.messages)
+  const recent = s?.messages.slice(-2).map(message => message.role === 'user' ? partsToText(message.content) : message.role === 'assistant' ? message.content : '').join('\n')
+  const fresh: StoredSession = { messages: [], summary: s?.summary || (recent && !isSensitive(recent) ? truncate(recent, 800) : undefined), archive: s?.archive, updatedAt: Date.now() }
   store.data[key] = fresh
+  store.save()
   return fresh
 }
 
@@ -114,9 +122,51 @@ export function truncateIfNeeded(key: string, chat: ChatSection): Msg[] {
     drop += 2
   }
   const dropped = s.messages.splice(0, drop)
+  archiveMessages(s, dropped)
   s.state = undefined
   store.save()
   return dropped
+}
+
+function archiveMessages(session: StoredSession, messages: Msg[]) {
+  const pairs: string[] = []
+  for (let index = 0; index < messages.length; index += 2) {
+    const text = messages.slice(index, index + 2).map(message => message.role === 'user' ? `对方：${partsToText(message.content)}` : message.role === 'assistant' ? `你：${message.content}` : '').filter(Boolean).join('\n')
+    if (text && !isSensitive(text)) pairs.push(text)
+  }
+  const archive = session.archive ??= []
+  if (pairs.length) archive.push({ at: session.updatedAt, text: truncate(pairs.join('\n'), 4000), raw: true })
+  session.archive = archive.filter(entry => Date.now() - entry.at < PRUNE_AFTER).slice(-60)
+}
+
+/** Archive chunks still waiting to be summarized. */
+export function pendingArchive(key: string): ArchiveEntry[] {
+  return (store.data[key]?.archive ?? []).filter(entry => entry.raw)
+}
+
+/**
+ * Replace the given raw chunks with one summarized episode, or without `text` just mark them settled.
+ * No-op if the session was reset meanwhile.
+ */
+export function setEpisode(key: string, pending: ArchiveEntry[], text?: string) {
+  const s = store.data[key]
+  if (!s?.archive || !pending.length || !pending.every(entry => s.archive!.includes(entry))) return
+  if (text) {
+    const index = s.archive.indexOf(pending[0])
+    s.archive = s.archive.filter(entry => !pending.includes(entry))
+    s.archive.splice(index, 0, { at: pending.at(-1)!.at, text })
+  } else for (const entry of pending) delete entry.raw
+  store.save()
+}
+
+export function recallSession(key: string, query: string, count = 3): string[] {
+  const entries = (store.data[key]?.archive ?? []).filter(entry => Date.now() - entry.at < PRUNE_AFTER)
+  const terms = query.toLowerCase().match(/[a-z0-9_-]{3,}|[\p{Script=Han}]{2,}/gu) ?? []
+  return entries.map((entry, index) => ({ entry, index, score: similarity(query, entry.text) + terms.reduce((score, term) => score + (entry.text.toLowerCase().includes(term) ? 0.2 : 0), 0) }))
+    .filter(hit => !query.trim() || hit.score >= 0.06)
+    .sort((left, right) => right.score - left.score || right.index - left.index)
+    .slice(0, Math.min(5, Math.max(1, count)))
+    .map(hit => `${new Date(hit.entry.at).toISOString().slice(0, 10)} ${truncate(hit.entry.text, 600)}`)
 }
 
 export function setSummary(key: string, summary: string) {

@@ -23,6 +23,21 @@ function params(provider: ProviderConfig, model: Partial<ModelConfig>, messages:
 
 const userMsg: Msg = { role: 'user', content: [{ type: 'text', text: '天气如何' }, { type: 'image', data: 'AAAA', mime: 'image/png' }] }
 
+describe('system prompt literal content', () => {
+  for (const type of ['openai', 'anthropic', 'openai-responses', 'gemini'] as const) {
+    it(`${type} preserves Markdown and intentional backslashes after JSON decoding`, async () => {
+      const system = '# Persona\n1. **Bold**\n- Bullet\nKeep C:\\work\\notes and literal \\* untouched.'
+      const server = await mockServer(() => [200, { id: 'example', status: 'completed', choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }], content: [{ type: 'text', text: 'ok' }], output: [], steps: [{ type: 'model_output', content: [{ type: 'text', text: 'ok' }] }], usage: {} }])
+      try {
+        await chat(params({ type, baseUrl: server.url, apiKey: 'mock' }, {}, [userMsg], { system }))
+        const body = server.requests[0].body
+        const received = type === 'openai' ? body.messages[0].content : type === 'anthropic' ? body.system[0].text : type === 'openai-responses' ? body.instructions : body.system_instruction
+        assert.equal(received, system)
+      } finally { await server.close() }
+    })
+  }
+})
+
 describe('openai chat completions', () => {
   it('builds request, parses tool calls, usage and cost', async () => {
     const srv = await mockServer(() => [

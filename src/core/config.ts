@@ -282,6 +282,8 @@ export function normalize(raw: any): PluginConfig {
   c.reply.groupRate ??= { count: 6, perSeconds: 60 }
   c.reply.globalRate ??= { count: 30, perSeconds: 60 }
   c.reply.markdown = c.reply.markdown === 'auto' ? 'auto' : c.reply.markdown === true
+  c.chat.maxPending = Math.min(100, Math.max(1, Number(c.chat.maxPending) || 20))
+  c.chat.rosterSize = Math.min(30, Math.max(0, Number(c.chat.rosterSize ?? 12) || 0))
   c.chat.autoThinking = { casual: 'low', question: 'medium', complex: 'high', ...(isPlainObject(c.chat.autoThinking) ? c.chat.autoThinking : {}) }
   const tj = isPlainObject(c.chat.thinkingJudge) ? c.chat.thinkingJudge : {}
   c.chat.thinkingJudge = {

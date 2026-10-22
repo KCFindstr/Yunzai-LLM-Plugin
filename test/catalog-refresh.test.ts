@@ -28,7 +28,7 @@ it('refreshes command discovery after plugins are removed and added without adve
   const prompt = buildSystemPrompt({ isGroup: true, botName: 'B', eff: config.effective(), tools: ['run_bot_command', 'search_bot_commands', 'list_bot_commands'], nativeSearch: false, markdown: false })
   assert.match(prompt, /#ping/)
   assert.doesNotMatch(prompt, /#深渊|\*体力|\*火花面板|\*忘却之庭|别名库/)
-  assert.match(prompt, /不要猜指令/)
+  assert.match(prompt, /不猜指令/)
 
   loader.priority.push({ name: 'new', plugin: { rule: [{ reg: /^#pong$/, fnc: 'pong' }] } })
   const listed = await registry.get('list_bot_commands')!.run({}, {} as any)

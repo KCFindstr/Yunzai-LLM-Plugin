@@ -7,6 +7,7 @@ import { chooseSticker, extractStickerMarkers, sendSticker } from '../stickers/p
 import { messagesSince, recordBotMessage } from './groupLog.ts'
 import { limiter } from './ratelimit.ts'
 import { replyMentions } from './mentions.ts'
+import { isLongResponse, renderResponse } from '../render/response.ts'
 
 /**
  * QQ shows Markdown literally; turn the common constructs into plain chat text.
@@ -93,10 +94,19 @@ export async function deliver(
   opts: { startedAt: number; convKey: string; suppressText?: boolean; images?: Buffer[] },
 ) {
   const cfg = eff.reply
-  const prep = prepareReply(raw, cfg, markdownEnabled(e, cfg))
+  const mentionBudget = { remaining: 5 }
+  let imageMentions: any[] = []
+  let rendered: Buffer[] = []
+  let content = raw
+  if (!opts.suppressText && isLongResponse(extractStickerMarkers(raw).text)) {
+    rendered = await renderResponse([extractStickerMarkers(raw).text], botNickname(e))
+    const segments = replyMentions(extractStickerMarkers(raw).text, e, mentionBudget)
+    if (Array.isArray(segments)) imageMentions = segments.filter(segment => segment.type === 'at')
+    content = extractStickerMarkers(raw).names.map(name => `[表情:${name}]`).join('\n')
+  }
+  const prep = prepareReply(content, cfg, markdownEnabled(e, cfg))
   const sticker = chooseSticker(opts.convKey, prep.stickerNames, eff.sticker)
   const elapsed = Date.now() - opts.startedAt
-  const mentionBudget = { remaining: 5 }
 
   if (!opts.suppressText && (prep.bubbles.length || prep.forward)) {
     await showTyping(e, cfg)
@@ -137,12 +147,13 @@ export async function deliver(
   }
 
   // tool-rendered images (render_html) follow the text; they are the answer, so wait longer for a slot
-  for (const img of opts.images ?? []) {
+  for (const img of [...rendered, ...opts.images ?? []]) {
     if (!(await takeSlot(e, cfg, 20000))) {
       log.warn('达到发送频率上限，渲染图片未发送')
       break
     }
-    await e.reply(seg().image(img))
+    await e.reply(imageMentions.length ? [...imageMentions, seg().image(img)] : seg().image(img))
+    imageMentions = []
     recordBotMessage(e, '[图片]', opts.convKey)
   }
 

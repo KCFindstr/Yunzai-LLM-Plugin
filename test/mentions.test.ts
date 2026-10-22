@@ -47,7 +47,7 @@ describe('explicit reply mentions', () => {
     assert.equal(segmentsToText(e.message, e.self_id), expected)
     const input = await extractInput(e, { includeImages: false, maxImages: 0, includeQuoted: false, vision: false })
     assert.equal(input.text, expected)
-    assert.match(buildSystemPrompt({ isGroup: true, botName: 'B', eff: eff(), tools: [], nativeSearch: false, markdown: false }), /\[at:you\] 表示@你/)
+    assert.match(buildSystemPrompt({ isGroup: true, botName: 'B', eff: eff(), tools: [], nativeSearch: false, markdown: false }), /\[at:you\] 是@你/)
   })
 
   it('keeps named and repeated mentions identifiable by ID, including an initial self mention', () => {
@@ -87,18 +87,18 @@ describe('explicit reply mentions', () => {
     assert.deepEqual(targets(replyMentions('[at:20005][at:20006]', e)), ['20005', '20006'])
   })
 
-  it('teaches the protocol without injecting a roster or restricting known identities', () => {
+  it('uses an informational roster without restricting known identities or changing the cached system', () => {
     const { e } = event()
     const input = { text: '提醒她', images: [], imageSegments: [] }
     const header = buildHeader(e, eff(), input, false)
-    assert.doesNotMatch(header.sent, /近期成员参考|"id":"20002"/)
-    assert.doesNotMatch(header.stored, /近期成员参考/)
+    assert.match(header.sent, /最近群友·仅身份参考/)
+    assert.doesNotMatch(header.stored, /最近群友/)
     const base = { botName: 'B', eff: eff(), tools: [], nativeSearch: false, markdown: true }
     const prompt = buildSystemPrompt({ ...base, isGroup: true })
     assert.match(prompt, /\[at:ID\]/)
     assert.doesNotMatch(prompt, /\[艾特:/)
-    assert.match(prompt, /不一定是真实QQ号/)
-    assert.match(prompt, /长期记忆/)
+    assert.match(prompt, /ID可来自消息、历史或记忆/)
+    assert.match(prompt, /不限制艾特对象/)
     assert.doesNotMatch(prompt, /近期成员参考|成员名单/)
     assert.doesNotMatch(prompt, /只使用本次|必须是列表里/)
     assert.doesNotMatch(prompt, /20002|小红/)

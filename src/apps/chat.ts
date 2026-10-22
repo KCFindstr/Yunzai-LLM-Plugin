@@ -2,7 +2,7 @@ import { DISPATCHED } from '../commands/dispatch.ts'
 import { config } from '../core/config.ts'
 import type { PluginConfig } from '../core/configTypes.ts'
 import { log } from '../core/log.ts'
-import { formatDuration, formatUsd, KeyedLock, pick, truncate } from '../core/util.ts'
+import { formatDuration, formatUsd, pick, sleep, truncate } from '../core/util.ts'
 import { compactSession, runTurn, type TurnOutcome } from '../chat/agent.ts'
 import { recordGroupMessage } from '../chat/groupLog.ts'
 import { extractInput, getQuoted } from '../chat/message.ts'
@@ -11,8 +11,9 @@ import { deliver } from '../chat/reply.ts'
 import { sessionKey } from '../chat/session.ts'
 import { pickModel } from '../chat/utility.ts'
 import { BasePlugin } from './base.ts'
+import { conversationLocks as locks } from '../chat/coordination.ts'
+import { observeUsers } from '../chat/roster.ts'
 
-const locks = new KeyedLock()
 const userCd = new Cooldown()
 const quotaNotice = new Cooldown()
 const errorNotice = new Cooldown()
@@ -89,6 +90,7 @@ export class LLMChat extends BasePlugin {
 
   async onMessage(): Promise<boolean> {
     const e = this.e
+    observeUsers(e)
     const cfg = config.get()
     const reason = await triggerReason(e, cfg)
     if (!reason) return false
@@ -101,15 +103,15 @@ export class LLMChat extends BasePlugin {
         await e.reply(pick(EMPTY_AT))
       return true
     }
-    if (!isAdmin && !userCd.pass(`${e.self_id}:${e.user_id}`, cfg.trigger.userCooldown)) return true
-
     const convKey = sessionKey(e, eff.chat.sessionScope)
-    if (locks.pending(convKey) >= 2) {
-      log.debug(`会话 ${convKey} 排队过多，忽略本条`)
+    if (locks.pending(convKey) >= eff.chat.maxPending) {
+      if (errorNotice.pass(`busy:${convKey}`, 15)) await e.reply('这会儿消息有点多，稍后再叫我一下吧')
       return true
     }
+    const startAt = isAdmin ? Date.now() : userCd.reserve(`${e.self_id}:${e.user_id}`, cfg.trigger.userCooldown)
 
     await locks.run(convKey, async () => {
+      await sleep(startAt - Date.now())
       const startedAt = Date.now()
       let afterReply: (() => void)[] | undefined
       try {
@@ -145,7 +147,7 @@ export class LLMChat extends BasePlugin {
         }
         const suppressText = Boolean(out.dispatched) && !eff.tools.botCommand.ack
         await deliver(e, out.text, eff, { startedAt, convKey, suppressText, images: out.images })
-        compactSession(convKey, eff, { userId: e.user_id, groupId: e.group_id, isAdmin }).catch(() => {})
+        await compactSession(convKey, eff, { userId: e.user_id, groupId: e.group_id, isAdmin })
       } catch (err: any) {
         log.error('处理对话失败', err)
       } finally {

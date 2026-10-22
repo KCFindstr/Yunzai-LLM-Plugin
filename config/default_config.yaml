@@ -162,6 +162,8 @@ chat:
   sessionTimeout: 180
   # 记忆上限（超过后一次性丢弃较早的一半，比逐条滑动更省 token：缓存前缀保持不变）
   historyMaxTurns: 20
+  maxPending: 20
+  rosterSize: 12
   historyMaxTokens: 6000
   # 丢弃的历史用便宜模型压缩成摘要保留
   summarize: true

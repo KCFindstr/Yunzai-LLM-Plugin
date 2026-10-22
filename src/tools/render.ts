@@ -1,5 +1,5 @@
 import { log } from '../core/log.ts'
-import { renderHtml, wrapHtml } from '../render/browser.ts'
+import { renderHtmlPages, wrapHtml } from '../render/browser.ts'
 import { renderInSandbox, sandboxEnabled, turnSession } from './exec.ts'
 import { MAX_IMAGES_PER_TURN, registry } from './registry.ts'
 
@@ -10,7 +10,7 @@ export function registerRenderTool() {
     name: 'render_html',
     source: 'builtin',
     description:
-      '把一段 HTML 渲染成图片，随回复一起发送。适合文字排版表达不清的内容：多列大表、多维对比、攻略卡片、时间线、特别长的整理等；普通的长回答直接用文字。' +
+      '所有长回复（有无结构均包括）都用 HTML 排版成图片发送：说明、故事、列表、表格、代码或长段落都适用。' +
       '只写 <body> 里的内容即可（已带好中文字体和基础样式，也可以自带 <style>）；不能用 JavaScript；图片可以用公网 https 链接、data: URI，或本次回复里 run_code 保存的文件（相对路径，如 img/logo.png、out/chart.png）。' +
       '调用后在文字回复里只说一两句概括，不要把图片里的内容再重复一遍。普通闲聊不要用。',
     parameters: {
@@ -32,16 +32,18 @@ export function registerRenderTool() {
       const opts = { width: Number(args.width) || cfg.width, maxHeight: cfg.maxHeight, allowNetwork: cfg.allowNetwork }
       let png: Buffer | undefined
       // with run_code on, render in the same sandbox so the page can use files the code downloaded or generated
-      if (sandboxEnabled(ctx)) {
+      const localFiles = /(?:src\s*=\s*["']|url\(\s*["']?)(?!https?:|data:|#)[^"'\s)]+/i.test(html)
+      if (sandboxEnabled(ctx) && localFiles) {
         try {
           png = await renderInSandbox(wrapHtml(html), ctx.eff.tools.exec, { ...opts, session: turnSession(ctx), signal: ctx.signal })
         } catch (err: any) {
           log.warn(`沙盒渲染失败，改用机器人自带的浏览器（本地文件引用会失效）: ${err?.message ?? err}`)
         }
       }
-      png ??= await renderHtml(html, opts)
-      ctx.turn.images.push(png)
-      return `已渲染为图片（${Math.round(png.length / 1024)}KB），会在你的文字回复之后发送。文字部分简短概括即可。`
+      if (png && png.readUInt32BE(20) >= opts.maxHeight * 2) return { content: '包含本地文件的页面超出单页高度，请拆分 HTML 后重试，不能裁掉后文。', isError: true }
+      const images = png ? [png] : await renderHtmlPages(html, opts)
+      ctx.turn.images.push(...images)
+      return `已渲染为${images.length}张图片（${Math.round(images.reduce((size, image) => size + image.length, 0) / 1024)}KB），会在你的文字回复之后发送。文字部分简短概括即可。`
     },
   })
 }

@@ -18,6 +18,7 @@ export interface TurnState {
   sandboxSession?: string
   afterReply?: (() => void)[]
   computerJob?: string
+  computerResult?: { id: string; images: Buffer[] }
 }
 
 export interface ToolCtx {

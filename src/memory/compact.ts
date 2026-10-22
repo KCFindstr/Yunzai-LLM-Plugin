@@ -23,6 +23,7 @@ export async function maybeCompact(scope: MemScope, key: string, ctx: { userId?:
     const lim = limitsOf(scope)
     const target = Math.max(3, Math.floor(lim.maxEntries * 0.6))
     const list = listMemory(scope, key)
+    const snapshot = JSON.stringify(list)
     const { text } = await utilityChat({
       candidates: utilityCandidates(),
       system: PROMPT(target, lim.entryMaxChars),
@@ -39,6 +40,7 @@ export async function maybeCompact(scope: MemScope, key: string, ctx: { userId?:
     if (texts.length > lim.maxEntries || total > lim.maxChars || texts.some(t => t.length > lim.entryMaxChars || isSensitive(t)))
       throw new Error('结果超出限制')
     if (texts.length >= list.length && total >= u.chars) throw new Error('没有缩减')
+    if (JSON.stringify(listMemory(scope, key)) !== snapshot) return
     replaceMemory(scope, key, texts)
     log.info(`长期记忆整理 ${scope}:${key} ${list.length}条/${u.chars}字 -> ${texts.length}条/${total}字`)
   } catch (err: any) {

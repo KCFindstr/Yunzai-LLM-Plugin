@@ -1,4 +1,5 @@
 import { truncate } from '../core/util.ts'
+import { observeUsers, knownName } from './roster.ts'
 
 interface Line {
   t: number
@@ -25,7 +26,7 @@ export function briefSegments(message: any[], selfId?: any): string {
         out += s.text ?? ''
         break
       case 'at':
-        out += String(s.qq) === String(selfId) ? '@你 ' : `@${s.name || s.qq} `
+        out += `[at:${String(s.qq) === String(selfId) ? 'you' : s.qq}]${s.name ? `(${s.name})` : ''} `
         break
       case 'image':
         out += s.sub_type == 1 || /表情/.test(s.summary ?? '') ? '[表情包]' : '[图片]'
@@ -58,6 +59,7 @@ export function briefSegments(message: any[], selfId?: any): string {
 }
 
 export function recordGroupMessage(e: any) {
+  observeUsers(e)
   if (!e?.group_id || String(e.user_id) === String(e.self_id)) return
   const text = briefSegments(e.message, e.self_id)
   if (!text) return
@@ -66,7 +68,7 @@ export function recordGroupMessage(e: any) {
   list.push({
     t: Date.now(),
     uid: String(e.user_id),
-    name: String(e.sender?.card || e.sender?.nickname || e.user_id),
+    name: `${knownName(e) || '群友'}(平台ID ${e.user_id})`,
     text: truncate(text, 200),
     mid: e.message_id != null ? String(e.message_id) : undefined,
   })
@@ -101,7 +103,8 @@ export function recentLines(e: any, n: number, maxChars: number, conv?: string, 
   const mid = e.message_id != null ? String(e.message_id) : undefined
   const cutoff = Date.now() - withinMs
   const out: string[] = []
-  for (let i = list.length - 1; i >= 0 && out.length < n; i--) {
+  const trigger = mid ? list.findIndex(line => line.mid === mid) : -1
+  for (let i = (trigger < 0 ? list.length : trigger) - 1; i >= 0 && out.length < n; i--) {
     const l = list[i]
     if (l.t < cutoff) break
     if (mid && l.mid === mid) continue

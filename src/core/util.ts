@@ -148,13 +148,22 @@ export class Semaphore {
   }
 
   async run<T>(fn: () => Promise<T>): Promise<T> {
-    if (this.active >= this.max) await new Promise<void>(r => this.queue.push(r))
-    this.active++
+    await new Promise<void>(resolve => {
+      this.queue.push(resolve)
+      this.drain()
+    })
     try {
       return await fn()
     } finally {
       this.active--
-      this.queue.shift()?.()
+      this.drain()
+    }
+  }
+
+  private drain() {
+    while (this.queue.length && this.active < Math.max(1, this.max)) {
+      this.active++
+      this.queue.shift()!()
     }
   }
 }

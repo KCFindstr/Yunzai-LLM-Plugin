@@ -237,7 +237,7 @@ describe('chat flow', () => {
     assert.doesNotMatch(q1.messages[0].content, /\d{4}-\d{2}-\d{2}/, 'no timestamp in system prompt')
     assert.match(q1.messages[0].content, /#深渊/, 'verified commands listed in prompt')
     assert.doesNotMatch(q1.messages[0].content, /#体力 —/, 'unverified commands not listed')
-    assert.match(q1.messages[1].content, /路人: 今天好热/, 'ambient group chat in the user turn')
+    assert.match(q1.messages[1].content, /路人\(平台ID 555\): 今天好热/, 'ambient group chat in the user turn')
     assert.equal(q2.messages.length, 4, 'system + previous user + previous assistant + new user')
     assert.equal(q2.messages[2].content, '你好呀~')
     assert.doesNotMatch(q2.messages[1].content, /今天好热/, 'ambient chat not persisted into history')
@@ -349,6 +349,28 @@ describe('chat flow', () => {
     assert.equal(b4.input.length, 5, 'full history resent: u,a,u,a,u')
     assert.deepEqual(r3.sent.map(s => s.msg), ['三'])
     config.set('defaultModel', 'main')
+  })
+
+  it('invalidates provider chains when completion-only tool definitions change', async () => {
+    const { registry } = await import('../src/tools/registry.ts')
+    const { runTurn } = await import('../src/chat/agent.ts')
+    const { sessionKey } = await import('../src/chat/session.ts')
+    registry.register({ name: 'completion_only', source: 'builtin', description: 'Result inspection', parameters: { type: 'object', properties: {} }, available: ctx => Boolean(ctx.turn.computerResult), run: async () => 'ok' })
+    config.set('defaultModel', 'gem')
+    try {
+      const gem = (id: string) => ({ id, status: 'completed', steps: [{ type: 'model_output', content: [{ type: 'text', text: '完成' }] }], usage: {} })
+      srvReplies.push(gem('before_completion'), gem('after_completion'))
+      const { e } = await trigger({ user_id: 20706, message_id: 'completion-start' })
+      const eff = config.effective(e.group_id)
+      const outcome = await runTurn({ e, eff, input: { text: 'Internal result', images: [], imageSegments: [] }, isAdmin: false, convKey: sessionKey(e, eff.chat.sessionScope), modelId: 'gem', computerResult: { id: 'job', images: [] } })
+      assert.equal(outcome.kind, 'reply')
+      assert.equal(srv.requests.length, 2)
+      assert.equal(srv.requests[1].body.previous_interaction_id, undefined, 'new tool definitions require the full current system and tool context')
+      assert.equal(srv.requests[1].body.input.length, 3)
+    } finally {
+      registry.unregisterWhere(tool => tool.name === 'completion_only')
+      config.set('defaultModel', 'main')
+    }
   })
 
   it('falls back / notifies when the quota is exhausted', async () => {

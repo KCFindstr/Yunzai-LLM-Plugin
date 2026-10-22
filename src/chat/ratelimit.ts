@@ -53,6 +53,11 @@ export const limiter = new RateLimiter()
 /** Simple per-key cooldown tracker. */
 export class Cooldown {
   private last = new Map<string, number>()
+  reserve(key: string, seconds: number): number {
+    const at = Math.max(Date.now(), (this.last.get(key) ?? 0) + Math.max(0, seconds) * 1000)
+    this.last.set(key, at)
+    return at
+  }
   ready(key: string, seconds: number): boolean {
     const t = this.last.get(key)
     return !t || Date.now() - t >= seconds * 1000

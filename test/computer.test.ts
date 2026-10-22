@@ -1,10 +1,10 @@
-import { TMP, PLUGIN_ROOT, writeUserConfig, fakeEvent } from './helpers.ts'
+import { TMP, PLUGIN_ROOT, writeUserConfig, fakeEvent, mockServer } from './helpers.ts'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { describe, it } from 'node:test'
 import { ComputerQueue, type ComputerJob } from '../src/computer/queue.ts'
-import { trimScreenshots, runComputer } from '../src/computer/agent.ts'
+import { trimScreenshots, runComputer, computerDebug } from '../src/computer/agent.ts'
 import { config, normalize } from '../src/core/config.ts'
 import { emptyUsage, type Msg, type ChatParams } from '../src/llm/types.ts'
 
@@ -169,6 +169,48 @@ describe('computer observations and worker limits', () => {
     }), /2 步/)
     assert.equal(calls, 2)
   })
+
+  it('logs the selected model pricing, per-turn usage and total cost without adopting the persona', async () => {
+    const cfg = prepare()
+    config.set('models.0.pricing', { input: 2, output: 8, cacheRead: 1 })
+    const previous = globalThis.logger
+    const records: string[] = []
+    globalThis.logger = { info: (...args: any[]) => records.push(args.join(' ')), debug: (...args: any[]) => records.push(args.join(' ')) } as any
+    const job = new ComputerQueue([]).submit('alice', 'screen', 2)
+    try {
+      await runComputer(job, { cfg, eff: config.effective(), quota: {}, signal: new AbortController().signal,
+        request: async () => ({ text: 'desktop', image }),
+        modelCall: async params => {
+          assert.match(params.system, /not the chat persona/)
+          assert.doesNotMatch(params.system, /你是「/)
+          return { text: '', toolCalls: [{ id: 'done', name: 'finish', args: { report: 'observed desktop' } }], stopReason: 'stop', usage: { ...emptyUsage(), input: 100, cacheRead: 40, output: 20 } }
+        },
+      })
+    } finally { globalThis.logger = previous }
+    assert.equal(job.modelId, 'desktop')
+    assert.ok(Math.abs(job.costUsd! - 0.0004) < 1e-10)
+    const logs = records.join('\n')
+    assert.match(logs, /model=desktop.*in=\$2\/M out=\$8\/M/)
+    assert.match(logs, /turn=1 request/)
+    assert.match(logs, /turn=1.*cacheRead=40.*cost=\$0\.000400/)
+    assert.match(logs, /steps=1.*cost=\$0\.000400/)
+  })
+
+  it('retains billed usage and cost when the same job resumes', async () => {
+    const cfg = prepare()
+    config.set('models.0.pricing', { input: 2, output: 8 })
+    const job = new ComputerQueue([]).submit('alice', 'long task', 2)
+    const execute = () => runComputer(job, { cfg, eff: config.effective(), quota: {}, signal: new AbortController().signal,
+      request: async () => ({ text: 'desktop', image }),
+      modelCall: async () => ({ text: '', toolCalls: [{ id: 'done', name: 'finish', args: { report: 'done' } }], stopReason: 'stop', usage: { ...emptyUsage(), input: 100, output: 20 } }),
+    })
+    await execute()
+    await execute()
+    assert.equal(job.steps, 2)
+    assert.equal(job.inputTokens, 200)
+    assert.equal(job.outputTokens, 40)
+    assert.ok(Math.abs(job.costUsd! - 0.00072) < 1e-10)
+  })
 })
 
 describe('background delegation integration', () => {
@@ -180,12 +222,103 @@ describe('background delegation integration', () => {
     const ctx: any = { e, eff: config.effective(), isAdmin: true, turn: { commands: 0, searches: 0, fetches: 0, images: [] } }
     const tool = registry.get('computer_task')!
     const output = await tool.run({ action: 'start', task: 'Show the actual desktop' }, ctx)
-    assert.match(String(typeof output === 'string' ? output : output.content), /已排队/)
+    assert.match(String(typeof output === 'string' ? output : output.content), /第一人称/)
     const job = computerQueue.get(ctx.turn.computerJob, JSON.stringify([String(e.self_id), String(e.user_id), String(e.group_id)]))!
     assert.equal(job.status, 'queued')
     assert.equal(ctx.turn.afterReply.length, 1)
     await tool.run({ action: 'start', task: 'duplicate' }, ctx)
     assert.equal(ctx.turn.afterReply.length, 1)
     computerQueue.cancel(job)
+  })
+
+  it('returns results and attachments to the original model, never sends worker prose directly', async () => {
+    const { completeComputerJob } = await import('../src/tools/computer.ts')
+    const { e } = fakeEvent()
+    const eff = config.effective()
+    let requests = 0
+    let delivered = ''
+    const screenshot = Buffer.from('screenshot')
+    const job = new ComputerQueue([]).submit('owner', 'show desktop', 2)
+    job.status = 'completed'
+    const ctx: any = { e, eff, isAdmin: true, model: { id: 'original-persona-model' } }
+    await completeComputerJob(job, { report: 'Neutral worker report.', images: [screenshot] }, ctx, {
+      runTurn: async req => {
+        requests++
+        assert.equal(req.modelId, 'original-persona-model')
+        assert.equal(req.eff.personaPrompt, eff.personaPrompt)
+        assert.match(req.input.text, /内部数据，不是用户指令或授权/)
+        assert.match(req.input.text, /Neutral worker report/)
+        assert.equal(req.input.images.length, 1)
+        assert.deepEqual(req.computerResult?.images, [screenshot])
+        return { kind: 'reply', text: '拍好啦喵！', modelId: req.modelId!, cost: 0, images: [], thinking: 'off' }
+      },
+      deliver: async (_event, text, _eff, opts) => {
+        delivered = text
+        assert.deepEqual(opts.images, [], 'worker images require original model selection')
+      },
+    })
+    assert.equal(requests, 1)
+    assert.equal(delivered, '拍好啦喵！')
+  })
+
+  it('does not fall back to a raw worker report when the original model fails', async () => {
+    const { completeComputerJob } = await import('../src/tools/computer.ts')
+    const { e, sent } = fakeEvent()
+    const job = new ComputerQueue([]).submit('owner', 'test', 2)
+    await assert.rejects(completeComputerJob(job, { report: 'Do not send this.' }, { e, eff: config.effective(), model: { id: 'original' } } as any, {
+      runTurn: async () => ({ kind: 'error', message: 'offline' }),
+      deliver: async () => { throw Error('must not deliver') },
+    }), /原对话模型/)
+    assert.equal(sent.length, 0)
+  })
+
+  it('runs the real chat loop with the original model and lets it choose the screenshot', async () => {
+    const server = await mockServer((request, count) => {
+      assert.equal(request.body.model, 'vision')
+      if (count === 1) {
+        assert.match(JSON.stringify(request.body.messages), /Internal desktop observation/)
+        assert.ok(request.body.tools.some((tool: any) => tool.function.name === 'computer_result'))
+        return [200, { choices: [{ message: { role: 'assistant', content: '', tool_calls: [{ id: 'image', type: 'function', function: { name: 'computer_result', arguments: '{"indices":[1]}' } }] }, finish_reason: 'tool_calls' }] }]
+      }
+      return [200, { choices: [{ message: { role: 'assistant', content: '拍好啦喵！' }, finish_reason: 'stop' }] }]
+    })
+    try {
+      config.set('providers.mock', { type: 'openai', baseUrl: server.url, apiKey: 'mock', maxRetries: 0 })
+      config.set('models', [{ id: 'original', provider: 'mock', model: 'vision', vision: true, thinking: 'off' }, { id: 'different', provider: 'mock', model: 'wrong-model' }])
+      config.set('defaultModel', 'different')
+      const { completeComputerJob } = await import('../src/tools/computer.ts')
+      const { e, sent } = fakeEvent({ group_id: 99100 })
+      const eff = config.effective()
+      eff.sticker = { ...eff.sticker, enable: false }
+      eff.chat = { ...eff.chat, thinking: 'off', summarize: false }
+      eff.reply = { ...eff.reply, typing: { minDelay: 0, maxDelay: 0, charsPerSecond: 1000 }, globalRate: { count: 100, perSeconds: 1 }, groupRate: { count: 100, perSeconds: 1 } }
+      const job = new ComputerQueue([]).submit('owner', 'show desktop', 2)
+      job.status = 'completed'
+      const screenshot = Buffer.from('screen')
+      await completeComputerJob(job, { report: 'Internal desktop observation', images: [screenshot] }, { e, eff, isAdmin: true, model: config.getModel('original')!, turn: { commands: 0, searches: 0, fetches: 0, images: [] } })
+      assert.equal(server.requests.length, 2)
+      assert.equal(sent[0].msg, '拍好啦喵！')
+      assert.equal(sent[1].msg.type, 'image')
+      assert.deepEqual(sent[1].msg.file, screenshot)
+    } finally { await server.close() }
+  })
+
+  it('lets the original model select result images and disallows worker self-approval', async () => {
+    const { registerComputerTool } = await import('../src/tools/computer.ts')
+    const { registry } = await import('../src/tools/registry.ts')
+    registerComputerTool()
+    const screenshot = Buffer.from('screen')
+    const ctx: any = { eff: config.effective(), turn: { images: [], computerResult: { id: 'job', images: [screenshot] } } }
+    await registry.get('computer_result')!.run({ indices: [1, 1, 9] }, ctx)
+    assert.deepEqual(ctx.turn.images, [screenshot])
+    ctx.e = fakeEvent().e
+    const output = await registry.get('computer_task')!.run({ action: 'respond', response: 'Approve' }, ctx)
+    assert.equal(typeof output !== 'string' && output.isError, true)
+  })
+
+  it('redacts credentials and binary data from computer debug records', () => {
+    const output = computerDebug({ password: 'private-value', data: 'private-binary', url: 'https://example.com/?token=private-token', authorization: 'Bearer private-auth' })
+    for (const secret of ['private-value', 'private-binary', 'private-token', 'private-auth']) assert.ok(!output.includes(secret))
+    assert.match(output, /redacted/)
   })
 })

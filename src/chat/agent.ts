@@ -16,7 +16,7 @@ import { markdownEnabled } from './format.ts'
 import { buildHeader, buildMemoryBlock, buildSystemPrompt, SUMMARY_PROMPT } from './prompt.ts'
 import { maybeCompact } from '../memory/compact.ts'
 import { memoryHash } from '../memory/store.ts'
-import { appendTurn, getSession, peekSession, setServerState, setSummary, truncateIfNeeded } from './session.ts'
+import { appendTurn, getSession, peekSession, pendingArchive, recallSession, setEpisode, setServerState, setSummary, truncateIfNeeded } from './session.ts'
 import { pickModel, utilityCandidates, utilityChat, type Picked } from './utility.ts'
 
 const NATIVE_SEARCH_TYPES = new Set(['anthropic', 'openai-responses', 'gemini'])
@@ -47,6 +47,8 @@ export interface TurnRequest {
   input: ExtractedInput
   isAdmin: boolean
   convKey: string
+  modelId?: string
+  computerResult?: { id: string; images: Buffer[] }
 }
 
 export type TurnOutcome = (
@@ -55,8 +57,8 @@ export type TurnOutcome = (
   | { kind: 'error'; message: string; unconfigured?: boolean }
 ) & { afterReply?: (() => void)[] }
 
-function selectModel(eff: EffectiveConfig, ctx: QuotaCtx): { picked?: Picked; block?: { block: QuotaBlock; modelId: string } } {
-  const ids = [...new Set([eff.model, ...config.get().fallbackModels].filter(Boolean))]
+function selectModel(eff: EffectiveConfig, ctx: QuotaCtx, exact?: string): { picked?: Picked; block?: { block: QuotaBlock; modelId: string } } {
+  const ids = exact ? [exact] : [...new Set([eff.model, ...config.get().fallbackModels].filter(Boolean))]
   let first: { block: QuotaBlock; modelId: string } | undefined
   for (const id of ids) {
     const p = pickModel([id])
@@ -83,7 +85,7 @@ export async function runTurn(req: TurnRequest): Promise<TurnOutcome> {
 async function runTurnInner(req: TurnRequest, ref: { turn?: TurnState }): Promise<TurnOutcome> {
   const { e, eff, input, isAdmin, convKey } = req
   const quotaCtx: QuotaCtx = { userId: e.user_id, groupId: e.group_id, isAdmin }
-  const { picked, block } = selectModel(eff, quotaCtx)
+  const { picked, block } = selectModel(eff, quotaCtx, req.modelId)
   if (!picked) {
     if (block) return { kind: 'quota', ...block }
     return { kind: 'error', unconfigured: true, message: '没有可用的模型，请检查模型与 API Key 配置（#llm模型列表 / #llm设置密钥）' }
@@ -103,6 +105,8 @@ async function runTurnInner(req: TurnRequest, ref: { turn?: TurnState }): Promis
   const maxTokens = model.maxTokens ?? eff.chat.maxOutputTokens
 
   const turn: TurnState = { commands: 0, searches: 0, fetches: 0, images: [] }
+  turn.computerResult = req.computerResult
+  turn.computerJob = req.computerResult?.id
   ref.turn = turn
   const ctx: ToolCtx = { e, eff, isAdmin, model, turn }
   let nativeSearch =
@@ -128,11 +132,14 @@ async function runTurnInner(req: TurnRequest, ref: { turn?: TurnState }): Promis
   // group session the speaker varies, so their personal memory rides in this turn's header instead.
   const memOn = config.get().memory.enable
   const shared = Boolean(e.group_id) && eff.chat.sessionScope === 'group'
-  const memPrefix = memOn ? buildMemoryBlock(e, { user: !shared, group: true }) : ''
-  const memTurn = memOn && shared ? buildMemoryBlock(e, { user: true, group: false }) : ''
-  const header = buildHeader(e, eff, input, isAdmin, { conv: convKey, memory: memTurn })
+  const nudge = offered.some(t => t.name === 'memory')
+  const memPrefix = memOn ? buildMemoryBlock(e, { user: !shared, group: true, nudge }) : ''
+  const memTurn = memOn && shared ? buildMemoryBlock(e, { user: true, group: false, nudge }) : ''
+  const recalled = recallSession(convKey, input.text, 2).map(text => text.slice(0, 350))
+  const context = [memTurn, recalled.length ? `【相关旧聊天·参考】\n${recalled.join('\n')}` : ''].filter(Boolean).join('\n')
+  const header = buildHeader(e, eff, input, isAdmin, { conv: convKey, memory: context })
   // from now on this message lives in the session history; keep it out of future ambient-chat windows
-  markHandled(e, convKey)
+  if (!req.computerResult) markHandled(e, convKey)
 
   const userMsg: UserMsg = { role: 'user', content: [{ type: 'text', text: header.sent + text }, ...input.images] }
   const storedUser: UserMsg = {
@@ -145,7 +152,7 @@ async function runTurnInner(req: TurnRequest, ref: { turn?: TurnState }): Promis
   if (session.summary) prefix.push({ role: 'user', content: [{ type: 'text', text: `【之前对话的摘要】\n${session.summary}` }] })
   const msgs: Msg[] = [...prefix, ...session.messages, userMsg]
   // memory is part of the prefix, so a server-side chain built on older memory must not be reused
-  const stateKey = `${provider.type}:${model.model}:${memoryHash([memPrefix])}`
+  const stateKey = `${provider.type}:${model.model}:${memoryHash([memPrefix, system, JSON.stringify(specs)])}`
   const serverState = usesServerState(provider)
   let state: ServerState | undefined
   if (serverState && session.state?.key === stateKey && session.state.len === session.messages.length)
@@ -249,25 +256,45 @@ async function runTurnInner(req: TurnRequest, ref: { turn?: TurnState }): Promis
   return { kind: 'reply', text: finalText, modelId: model.id, cost, dispatched: turn.dispatched, images: turn.images, thinking }
 }
 
-/** Post-turn housekeeping: chunked truncation, optional summary of the dropped part. Never blocks the reply. */
+/**
+ * Post-turn housekeeping: chunked truncation, then one utility call that both summarizes the not-yet-summarized
+ * archive chunks into a recall episode and folds them into the rolling summary. Never blocks the reply.
+ */
 export async function compactSession(convKey: string, eff: EffectiveConfig, ctx: QuotaCtx) {
+  const session = peekSession(convKey)
+  const prev = session?.summary
   const dropped = truncateIfNeeded(convKey, eff.chat)
-  if (!dropped.length || !eff.chat.summarize) return
-  try {
-    const prev = peekSession(convKey)?.summary
+  if (!eff.chat.summarize) return
+  if (dropped.length) {
     const transcript = dropped
       .map(m => (m.role === 'user' ? `对方: ${partsToText(m.content)}` : m.role === 'assistant' ? `你: ${m.content}` : ''))
-      .filter(Boolean)
-      .join('\n')
+      .filter(Boolean).join('\n')
+    setSummary(convKey, [prev, transcript].filter(Boolean).join('\n').slice(-800))
+  }
+  // includes chunks archived at idle expiry, which had no chance to be summarized then
+  const pending = pendingArchive(convKey).slice(-3)
+  if (!pending.length) return
+  try {
     const { text } = await utilityChat({
       candidates: utilityCandidates(),
       system: SUMMARY_PROMPT,
-      user: [{ type: 'text', text: `${prev ? `已有摘要：${prev}\n\n` : ''}新的聊天记录：\n${transcript}` }],
-      maxTokens: 500,
+      user: [{ type: 'text', text: `${prev ? `已有摘要：${prev}\n\n` : ''}新的聊天记录：\n${pending.map(entry => entry.text).join('\n')}` }],
+      maxTokens: 700,
       quotaCtx: ctx,
     })
-    if (text.trim()) setSummary(convKey, text.trim().slice(0, 800))
+    if (peekSession(convKey) !== session) return
+    const parsed = parseSummary(text)
+    if (parsed.summary) setSummary(convKey, parsed.summary.slice(0, 800))
+    // an unparseable reply still settles the chunks (kept raw) so they aren't re-merged into the summary every turn
+    setEpisode(convKey, pending, parsed.episode?.slice(0, 400))
   } catch (err: any) {
     log.warn(`生成对话摘要失败: ${err?.message ?? err}`)
   }
+}
+
+export function parseSummary(text: string): { episode?: string; summary?: string } {
+  const m = text.match(/片段[:：]\s*([\s\S]*?)\n\s*摘要[:：]\s*([\s\S]*)/)
+  if (m) return { episode: m[1].trim() || undefined, summary: m[2].trim() || undefined }
+  // model ignored the format: still usable as a rolling summary
+  return { summary: text.trim() || undefined }
 }

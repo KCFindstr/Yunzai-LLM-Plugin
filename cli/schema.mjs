@@ -111,6 +111,8 @@ const chat = obj(
     sessionScope: oneOf(['user', 'group'], '记忆范围'),
     sessionTimeout: int('会话过期（分钟）', { min: 1 }),
     historyMaxTurns: int('最多保留轮数', { min: 1 }),
+    maxPending: int('每会话最多待处理消息', { min: 1, max: 100 }),
+    rosterSize: int('最近群友资料条数', { min: 0, max: 30 }),
     historyMaxTokens: int('最多保留 token', { min: 100 }),
     summarize: bool('压缩旧对话为摘要'),
     groupContext: int('附带最近群聊条数', { min: 0, max: 30 }),

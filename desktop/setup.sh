@@ -25,18 +25,21 @@ install -d -m 755 /usr/local/lib/llm-desktop
 printf 'Amatsukaze\n' > /usr/local/lib/llm-desktop/hostname
 printf '127.0.0.1 localhost\n127.0.1.1 Amatsukaze\n::1 localhost\n' > /usr/local/lib/llm-desktop/hosts
 chmod 644 /usr/local/lib/llm-desktop/{hostname,hosts}
-cd /usr/local/lib/llm-render
-if ! find /usr/local/lib/llm-desktop/browsers/chrome -name chrome -type f 2>/dev/null | grep -q .; then
-  npx @puppeteer/browsers install chrome@stable --path /usr/local/lib/llm-desktop/browsers >/dev/null
+# Regular Google Chrome; its package adds Google's apt repo, so `apt-get upgrade` keeps it current
+if ! dpkg -s google-chrome-stable >/dev/null 2>&1; then
+  curl -fsSL -o /tmp/google-chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+  apt-get install -y -qq /tmp/google-chrome.deb >/dev/null
+  rm -f /tmp/google-chrome.deb
 fi
-find /usr/local/lib/llm-desktop/browsers/chrome -name chrome -type f | head -1 > /usr/local/lib/llm-desktop/chrome-path
+printf '/opt/google/chrome/google-chrome\n' > /usr/local/lib/llm-desktop/chrome-path
+rm -rf /usr/local/lib/llm-desktop/browsers
 chmod -R a+rX /usr/local/lib/llm-desktop
 cat > /opt/llm-desktop/start.sh <<'START'
 #!/bin/bash
 set -euo pipefail
 exec setpriv --reuid=pc --regid=pc --clear-groups --no-new-privs \
  bwrap --unshare-all --share-net --hostname Amatsukaze --new-session --die-with-parent \
- --ro-bind /usr /usr --ro-bind /etc /etc --ro-bind /usr/local/lib/llm-desktop/hostname /etc/hostname --ro-bind /usr/local/lib/llm-desktop/hosts /etc/hosts \
+ --ro-bind /usr /usr --ro-bind /etc /etc --ro-bind /opt/google /opt/google --ro-bind /usr/local/lib/llm-desktop/hostname /etc/hostname --ro-bind /usr/local/lib/llm-desktop/hosts /etc/hosts \
  --dir /mnt/wsl --ro-bind /usr/local/lib/llm-desktop/resolv.conf /mnt/wsl/resolv.conf --symlink usr/bin /bin --symlink usr/sbin /sbin \
  --symlink usr/lib /lib --symlink usr/lib64 /lib64 --proc /proc --dev /dev --tmpfs /tmp --tmpfs /run \
  --bind /var/lib/llm-desktop/disk/home /home/pc --bind /var/lib/llm-desktop/disk/work /work \

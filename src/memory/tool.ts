@@ -1,6 +1,7 @@
 import { config } from '../core/config.ts'
 import { registry } from '../tools/registry.ts'
 import { addMemory, deleteMemory, renderMemory, updateMemory, usage, type MemScope, type WriteResult } from './store.ts'
+import { recallSession, sessionKey } from '../chat/session.ts'
 
 export function memoryKey(scope: MemScope, e: any): string | undefined {
   if (scope === 'user') return e?.user_id != null ? String(e.user_id) : undefined
@@ -14,15 +15,24 @@ function groupWritable(ctx: { e: any; isAdmin: boolean }) {
 
 export function registerMemoryTool() {
   registry.register({
+    name: 'recall', source: 'builtin',
+    description: '按关键词检索当前会话更早的聊天（每段为摘要，尚未整理的为原文）。需要之前的约定、称呼、话题细节而【之前对话的摘要】不够时先查再答；仅当前会话，最多返回5条。',
+    parameters: { type: 'object', properties: { query: { type: 'string' }, count: { type: 'integer' } }, required: ['query'] },
+    async run(args, ctx) {
+      return recallSession(sessionKey(ctx.e, ctx.eff.chat.sessionScope), String(args.query ?? ''), Number(args.count) || 3).join('\n\n') || '没有匹配的旧聊天片段'
+    },
+  })
+  registry.register({
     name: 'memory',
     source: 'builtin',
     description:
-      '管理长期记忆（跨会话保留）。scope=user 记关于当前对方的事：对方明确告诉你的称呼、喜好、常玩的游戏/角色、生日、重要约定；scope=group 记本群的约定、梗、常识。' +
-      '不要记一次性的事情、闲聊内容本身、你自己的推测，绝不记录密码/证件号/手机号等敏感信息。每条一句话；已有相近条目时用 update 改写（填 id），过时或错误的用 delete。只在确实值得长期记住时使用。',
+      '管理长期记忆（跨会话保留）。scope=user 记关于当前对方的事；scope=group 记本群的约定、梗、常识。' +
+      '积极主动：对方透露称呼、身份、喜好/雷区、常玩的游戏角色、计划约定、纠正你的地方等以后用得上的信息时，当场 add，不必等对方要求，宁可多记（满了会自动整理）。' +
+      '每条一句话写明主语；相近条目用 update 改写，过时或错误用 delete；read 查看全部条目。不记一次性闲聊、推测和密码/证件号/手机号等敏感信息。',
     parameters: {
       type: 'object',
       properties: {
-        action: { type: 'string', enum: ['add', 'update', 'delete'] },
+        action: { type: 'string', enum: ['read', 'add', 'update', 'delete'] },
         scope: { type: 'string', enum: ['user', 'group'] },
         id: { type: 'string', description: 'update/delete 时填写记忆编号，如 m3' },
         text: { type: 'string', description: 'add/update 时的内容，一句话' },
@@ -33,9 +43,11 @@ export function registerMemoryTool() {
     limit: () => `最多修改 ${config.get().memory.maxWritesPerTurn} 次`,
     async run(args, ctx) {
       const scope: MemScope = args.scope === 'group' ? 'group' : 'user'
-      if (scope === 'group' && !groupWritable(ctx)) return { content: '当前不能修改群记忆', isError: true }
       const key = memoryKey(scope, ctx.e)
       if (!key) return { content: '缺少对象', isError: true }
+      if (args.action === 'read') return renderMemory(scope, key).join('\n') || '暂无记忆'
+      if (scope === 'group' && !groupWritable(ctx)) return { content: '当前不能修改群记忆', isError: true }
+      if (!['add', 'update', 'delete'].includes(args.action)) return { content: '未知记忆操作', isError: true }
       const max = config.get().memory.maxWritesPerTurn
       if ((ctx.turn.memoryWrites ?? 0) >= max) return { content: `本轮最多修改 ${max} 次记忆`, isError: true }
       ctx.turn.memoryWrites = (ctx.turn.memoryWrites ?? 0) + 1

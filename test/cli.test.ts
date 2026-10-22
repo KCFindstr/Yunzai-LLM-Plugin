@@ -25,6 +25,16 @@ describe('config schema', () => {
 })
 
 describe('config CLI subcommands', () => {
+  it('round-trips persona Markdown and intentional backslashes without escaping or unescaping them', () => {
+    writeUserConfig('')
+    const persona = '# Persona\n1. **Bold**\n- Bullet\nKeep C:\\work\\notes and literal \\* untouched.'
+    run(['set', 'persona.presets.raw', persona])
+    assert.equal(YAML.parse(userYaml()).persona.presets.raw, persona)
+    assert.equal(run(['get', 'persona.presets.raw']).trimEnd(), persona)
+    run(['set', 'reply.maxBubbles', '1'])
+    assert.equal(YAML.parse(userYaml()).persona.presets.raw, persona, 'unrelated config writes do not rewrite Markdown')
+  })
+
   it('set/get/unset keep comments, use map keys for group ids, mask secrets', () => {
     writeUserConfig('# 保留我\nreply:\n  maxBubbles: 1 # 行内\n')
     run(['set', 'groups.123456.enable', 'false'])

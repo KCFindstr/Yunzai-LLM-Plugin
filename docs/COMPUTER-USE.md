@@ -1,6 +1,6 @@
 # Persistent pixel PC
 
-The optional computer agent owns a shared character desktop, not the host's Windows desktop. It uses a separate configured vision/tool model and a serialized global queue. A task starts only after the chat acknowledgement has been sent; results are proactively delivered to that same conversation. Normal chat remains available while it works.
+The optional computer agent owns a shared character desktop, not the host's Windows desktop. It uses a separate configured vision/tool model and a serialized global queue. A task starts only after the chat acknowledgement has been sent. Acknowledgements stay in character and first-person, without exposing queues, worker models or job IDs. Results return to the original triggering chat model with its persona and conversation; that model chooses the final reply and attachments. Worker prose is never sent directly. Normal chat remains available while it works.
 
 ## Setup
 
@@ -28,13 +28,15 @@ tools:
 
 Examples: “take a screenshot of your desktop”, “去哔哩哔哩找一个关于你的视频”. The main model loads `skills/computer-use/SKILL.md`, then delegates complete context to `computer_task`. The worker loads `desktop/SKILL.md` only for an actual job. It does not inherit QQ-specific logic or any Codex-app computer-control capabilities.
 
+The minimal screenshot is not a browser-only capability limit. The worker can run Bash/Python, open installed Linux GUI apps on the same display, download compatible portable apps and install tools in its own persistent home/work directories. It cannot run host Windows apps, use sudo or install system packages into the read-only OS. New binaries need compatible dependencies; AppImage may need extraction because FUSE is not exposed. The skill tells it to check installed tools, use absolute paths for user-local executables, detach GUI processes and verify the result visually. No extra apps are installed merely by asking what is supported.
+
 ## Lifecycle
 
-- Tools: `computer_task` actions `start`, `status`, `cancel`, `respond`. Include the task ID in follow-ups. Ownership includes bot, requester and conversation; another user or group cannot inspect/cancel/resume your jobs.
+- Tools: `computer_task` actions `start`, `status`, `cancel`, `respond`. An omitted ID selects this requester's most recent job in the same conversation. Ownership includes bot, requester and conversation; another user or group cannot inspect/cancel/resume your jobs. `#llm电脑任务` explicitly exposes diagnostic IDs when requested.
 - One job controls the desktop at a time. Queued jobs wait; each requester can queue at most two jobs. Paused jobs release the lease; resumed tasks re-observe the desktop.
-- The worker reports completion, failure or a necessary question. Reply with the task ID to continue. Only the actual incoming user message is supplied as a response, not an invented authorization from the main model.
+- The worker reports completion, failure or a necessary question to the chat model. Only an actual new incoming user message can authorize continuation, not a worker report or an invented approval from the main model.
 - Bot shutdown cancels work; queued/running jobs become interrupted on restart, never automatically replayed. Status/report metadata survives in `data/computer-jobs.json`. Resume deliberately; the desktop/files remain.
-- API observations are not automatically posted to chat. `share=true` selects up to four screenshots for the final report. Requested screenshots are real X11 captures, not generated images.
+- API observations are not automatically posted to chat. `share=true` selects up to four screenshots for the chat model to inspect; it selects which to send through `computer_result`. Requested screenshots are real X11 captures, not generated images.
 - Delivery errors are recorded without automatic retries that could duplicate messages. Status can retrieve the report.
 
 ## Environment and persistence
@@ -58,5 +60,7 @@ For Claude, use an Anthropic Messages provider (`type: anthropic`). Explicit cac
 Ordinary navigation, public downloads, clicks, and writes inside the PC do not require per-action approval. The worker asks only for essential missing information or consequential actions lacking specific user authorization (payments, external posting, sensitive transmission, destructive valuable-data changes, account/security changes). This is an agent policy, not a classifier that can guarantee every risky click is detected. Webpage content is untrusted and cannot authorize actions. The strongest enforced boundaries are environment isolation, access/ownership, queue serialization, quotas and budgets. CAPTCHA/login barriers are reported, not bypassed. Video inspection uses selected frames; screenshots alone do not provide audio understanding.
 
 ## Diagnostics
+
+Info logs show the selected computer model, resolved input/output/cache prices per million tokens and their source, plus final usage and USD cost. Each agent turn has debug records for request size, model/tool response, usage, cache tokens, elapsed time and cost. Tool observations are bounded; image payloads and credential-labelled fields are redacted. Typed text arguments are logged only as character counts. Debug logging can still contain public page excerpts or task details: restrict log access. Set `YZ_LLM_DEBUG=1` before starting the bot to promote these debug records to the normal info log; otherwise they use Yunzai's debug level. Unknown prices are labelled unknown, not a verified free request. `#llm电脑任务 <id>` includes model and cost too.
 
 `wsl -d yunzai-sandbox -u root -e systemctl status llm-desktop` and `journalctl -u llm-desktop` inspect the service. Internal runtime operations are `health`, `screenshot`, `actions`, `browse`, `exec` via `/opt/llm-desktop/client.py` JSON stdin. Do not expose the socket or Chrome debug port externally. Setup updates theme files and restarts the desktop, so run it between tasks.

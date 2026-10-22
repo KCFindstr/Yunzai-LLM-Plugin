@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { log } from './log.ts'
+import { knownName } from '../chat/roster.ts'
 
 /** Plugin classes exported by this plugin; used to recognise our own rules in the loader. */
 export const ownClasses = new Set<Function>()
@@ -85,7 +86,7 @@ export function botNickname(e: any, fallback = ''): string {
 }
 
 export function senderName(e: any): string {
-  return String(e?.sender?.card || e?.sender?.nickname || e?.user_id || '某人')
+  return knownName(e) || [e?.sender?.card, e?.sender?.nickname].find(name => name && !/^\d+$/.test(String(name))) || '对方'
 }
 
 export async function sendApi(e: any, action: string, params: Record<string, any> = {}): Promise<any> {
