@@ -241,3 +241,47 @@ export function sessionStats() {
   const keys = Object.keys(store.data)
   return { count: keys.length, messages: keys.reduce((a, k) => a + store.data[k].messages.length, 0) }
 }
+
+/** Overview of every stored session for the web UI, most recently active first. */
+export function listSessions() {
+  return Object.entries(store.data)
+    .map(([key, s]) => ({
+      key,
+      messages: s.messages.length,
+      updatedAt: s.updatedAt,
+      summary: s.summary,
+      archive: s.archive?.length ?? 0,
+      vectors: Object.keys(vectors.data[key]?.v ?? {}).length,
+    }))
+    .sort((a, b) => b.updatedAt - a.updatedAt)
+}
+
+/** Archive entries of one session with whether each has a vector in the current embedding space. */
+export function archiveInfo(key: string) {
+  const v = vectors.data[key]?.tag === embeddingTag() ? vectors.data[key].v : {}
+  return (store.data[key]?.archive ?? []).map(entry => ({ ...entry, vector: Boolean(entry.id && v[entry.id]) }))
+}
+
+export function deleteArchiveEntry(key: string, id: string): boolean {
+  const s = store.data[key]
+  if (!s?.archive?.some(entry => entry.id === id)) return false
+  s.archive = s.archive.filter(entry => entry.id !== id)
+  if (vectors.data[key]?.v[id]) {
+    delete vectors.data[key].v[id]
+    vectors.save()
+  }
+  store.save()
+  return true
+}
+
+/** Every archive entry that has a vector in the current embedding space (for the web UI's projection). */
+export function allVectors(onlyKey?: string): { key: string; id: string; at: number; text: string; vec: Float32Array }[] {
+  const tag = embeddingTag()
+  const out: { key: string; id: string; at: number; text: string; vec: Float32Array }[] = []
+  for (const [key, s] of Object.entries(store.data)) {
+    if (onlyKey && key !== onlyKey) continue
+    const v = vectors.data[key]?.tag === tag ? vectors.data[key].v : {}
+    for (const entry of s.archive ?? []) if (entry.id && v[entry.id]) out.push({ key, id: entry.id, at: entry.at, text: entry.text, vec: decodeVector(v[entry.id]) })
+  }
+  return out
+}

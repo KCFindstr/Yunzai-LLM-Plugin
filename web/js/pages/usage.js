@@ -1,0 +1,57 @@
+import { enc, get, post } from '../api.js'
+import { menuButton } from '../main.js'
+import { act, bars, card, confirmDanger, empty, fmt, h, meter, mount, promptFields } from '../ui.js'
+
+const WINDOWS = [['window5h', 'used5h', '5小时'], ['weekly', 'usedWeek', '每周']]
+
+export async function render(root) {
+  const u = await get('/api/usage')
+  const days = u.daily.map(([d, per]) => [d.slice(5), Object.values(per).reduce((a, b) => a + b, 0)])
+  const models = Object.entries(u.totals).sort((a, b) => b[1].cost - a[1].cost)
+
+  const lookup = async () => {
+    const r = await promptFields('查询用户额度', [{ name: 'id', label: 'QQ 号' }])
+    if (!r?.id) return
+    const d = await act(() => get(`/api/usage/user/${enc(r.id.trim())}`))
+    if (!d) return
+    const rows = d.models.filter(m => m.user).map(m => h('tr', h('td', m.id),
+      WINDOWS.map(([lim, used]) => h('td', fmt.usd(m.user[used]), m.user.limits[lim] ? ` / ${fmt.usd(m.user.limits[lim])}` : ''))))
+    const { modal } = await import('../ui.js')
+    modal(`${d.name ?? d.id} 的用量`, h('table', h('thead', h('tr', h('th', '模型'), h('th', '5小时'), h('th', '每周'))), h('tbody', rows)))
+  }
+
+  mount(root,
+    h('div', { class: 'page-head' }, menuButton(), h('h1', '用量与额度'), h('span', { class: 'spacer' }),
+      h('button', { class: 'btn', onclick: lookup }, '查询用户'),
+      h('button', { class: 'btn danger', onclick: async () => {
+        if (await confirmDanger('清空所有用户、群和全局的额度计数？（不影响累计统计）')) act(() => post('/api/usage/reset', { all: true }), '已重置全部额度').then(() => render(root))
+      } }, '重置全部额度'),
+    ),
+    card('最近 14 天花费', bars(days, fmt.usd)),
+    h('div', { class: 'grid cols-2', style: { marginTop: '16px' } },
+      card('全局额度（按模型）',
+        u.models.length ? h('div', { class: 'col', style: { gap: '14px' } }, u.models.map(m => h('div',
+          h('div', { class: 'row' }, h('b', m.id), h('span', { class: 'right small muted' },
+            ['user', 'group', 'global'].map(s => { const l = m.limits[s]; return l.window5h || l.weekly ? `${{ user: '个人', group: '群', global: '全局' }[s]} ${l.window5h ? fmt.usd(l.window5h) + '/5h' : ''} ${l.weekly ? fmt.usd(l.weekly) + '/周' : ''}` : '' }).filter(Boolean).join(' · ') || '不限额')),
+          WINDOWS.map(([lim, used, label]) => h('div', { class: 'row small', style: { marginTop: '4px' } },
+            h('span', { class: 'muted', style: { width: '48px' } }, label),
+            h('div', { style: { flex: 1 } }, meter(m.global?.[used] ?? 0, m.global?.limits?.[lim])),
+            h('span', { style: { width: '130px', textAlign: 'right' } }, fmt.usd(m.global?.[used] ?? 0), m.global?.limits?.[lim] ? ` / ${fmt.usd(m.global.limits[lim])}` : ''))),
+        ))) : empty('没有模型'),
+      ),
+      card('本周花费最多的用户',
+        u.topUsers.length ? h('table', h('tbody', u.topUsers.map((x, i) => h('tr',
+          h('td', { class: 'muted' }, i + 1), h('td', x.name ?? '-', h('div', { class: 'small muted' }, x.id)), h('td', { class: 'num' }, fmt.usd(x.usd)),
+          h('td', { class: 'num' }, h('button', { class: 'btn sm', onclick: async () => {
+            if (await confirmDanger(`重置 ${x.name ?? x.id} 的额度计数？`)) act(() => post('/api/usage/reset', { userId: x.id }), '已重置').then(() => render(root))
+          } }, '重置')))))) : empty('本周还没有用量'),
+      ),
+    ),
+    card('累计统计（按模型）',
+      models.length ? h('div', { class: 'table-wrap' }, h('table',
+        h('thead', h('tr', h('th', '模型'), h('th', { class: 'num' }, '调用'), h('th', { class: 'num' }, '输入'), h('th', { class: 'num' }, '缓存读'), h('th', { class: 'num' }, '缓存写'), h('th', { class: 'num' }, '输出'), h('th', { class: 'num' }, '花费'))),
+        h('tbody', models.map(([id, t]) => h('tr', h('td', id), [t.calls, t.input, t.cacheRead, t.cacheWrite, t.output].map(v => h('td', { class: 'num' }, fmt.num(v))), h('td', { class: 'num' }, fmt.usd(t.cost))))),
+      )) : empty('还没有调用记录'),
+    ),
+  )
+}

@@ -170,3 +170,8 @@ export function memoryStats() {
   const count = (o: Record<string, MemEntry[]>) => Object.values(o).reduce((a, l) => a + l.length, 0)
   return { users: Object.keys(store.data.user).length, groups: Object.keys(store.data.group).length, entries: count(store.data.user) + count(store.data.group) }
 }
+
+/** Every user/group that has long-term memory, for the web UI. */
+export function memoryOwners(scope: MemScope): string[] {
+  return Object.keys(store.data[scope]).filter(key => store.data[scope][key].length)
+}

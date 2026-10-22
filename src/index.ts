@@ -17,6 +17,7 @@ import { registerExecTool, stopKeepalive } from './tools/exec.ts'
 import { closeOwnBrowser } from './render/browser.ts'
 import { registerComputerTool, computerQueue } from './tools/computer.ts'
 import { refreshComputerKeepalive, stopComputerKeepalive } from './computer/keepalive.ts'
+import { startWeb, stopWeb } from './web/server.ts'
 
 ownClasses.add(LLMChat)
 ownClasses.add(LLMAdmin)
@@ -41,6 +42,13 @@ function startup() {
   loadSkills()
   loadCustomTools().catch(err => log.warn('加载自定义工具失败', err))
   startPriceRefresh()
+  try {
+    startWeb()
+  } catch (err: any) {
+    log.error('启动网页管理面板失败', err)
+  }
+  // host/port/enable edits apply without a restart
+  config.onChange(() => startWeb())
 
   const B = globalThis.Bot
   const scan = () => setTimeout(() => scanCatalog().catch(err => log.warn('扫描指令失败', err)), 3000)
@@ -48,6 +56,7 @@ function startup() {
   else B?.once?.('online', scan)
   B?.once?.('exit', () => {
     computerQueue.stop()
+    stopWeb()
     stopComputerKeepalive()
     flushAllStores()
     stopKeepalive()

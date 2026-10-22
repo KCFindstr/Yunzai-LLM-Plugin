@@ -6,7 +6,24 @@ const TAG = '[LLM]'
  */
 const verbose = /^(1|true|yes|on)$/i.test(process.env.YZ_LLM_DEBUG ?? '')
 
+export interface LogLine { seq: number; at: number; level: string; text: string }
+
+/** Recent lines for the web console (debug lines only when verbose, matching what Yunzai itself shows). */
+const recent: LogLine[] = []
+let seq = 0
+
+function remember(level: string, args: any[]) {
+  const text = args.map(a => (a instanceof Error ? a.stack ?? a.message : typeof a === 'string' ? a : (() => { try { return JSON.stringify(a) } catch { return String(a) } })())).join(' ')
+  recent.push({ seq: ++seq, at: Date.now(), level, text: text.length > 4000 ? `${text.slice(0, 4000)}…` : text })
+  if (recent.length > 1000) recent.splice(0, recent.length - 1000)
+}
+
+export function recentLogs(after = 0, level?: string): LogLine[] {
+  return recent.filter(line => line.seq > after && (!level || line.level === level))
+}
+
 function sink(level: string, args: any[]) {
+  if (level !== 'debug' || verbose) remember(level, args)
   const l = globalThis.logger
   if (l && typeof l[level] === 'function') return l[level](TAG, ...args)
   if (process.env.YZ_LLM_QUIET) return

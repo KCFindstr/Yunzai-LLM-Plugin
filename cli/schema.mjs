@@ -364,6 +364,15 @@ export const SCHEMA = obj(
     memory,
     skills: obj({ enable: bool('启用技能') }, '技能'),
     pricing: obj({ sources: multi(['litellm', 'openrouter'], '价格表来源', { ordered: true }), refreshHours: num('刷新间隔（小时）', { min: 1 }) }, '价格表'),
+    web: obj(
+      {
+        enable: bool('启用网页管理面板'),
+        host: str('监听地址（127.0.0.1 仅本机）'),
+        port: int('端口', { min: 1, max: 65535 }),
+        password: secret('登录密码（空=自动生成）'),
+      },
+      '网页管理',
+    ),
   },
   '全部配置',
 )

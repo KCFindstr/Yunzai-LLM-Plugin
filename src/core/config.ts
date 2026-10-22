@@ -146,6 +146,20 @@ class ConfigManager {
     this.load()
   }
 
+  /** config.yaml as text (comments included). */
+  readRaw(): string {
+    return fs.existsSync(CONFIG_FILE) ? fs.readFileSync(CONFIG_FILE, 'utf8') : USER_TEMPLATE
+  }
+
+  /** Replace config.yaml wholesale; the caller validates. Throws on YAML syntax errors without writing. */
+  writeRaw(text: string) {
+    const doc = YAML.parseDocument(text)
+    if (doc.errors.length) throw new Error(doc.errors[0].message)
+    this.selfWriteAt = Date.now()
+    fs.writeFileSync(CONFIG_FILE, text, 'utf8')
+    this.load()
+  }
+
   private materializeArrays(doc: YAML.Document, parts: (string | number)[]) {
     for (let i = 1; i < parts.length; i++) {
       if (typeof parts[i] !== 'number') continue
@@ -384,6 +398,13 @@ export function normalize(raw: any): PluginConfig {
   c.pricing = isPlainObject(c.pricing) ? c.pricing : {}
   c.pricing.sources = asArray(c.pricing.sources ?? ['openrouter', 'litellm'])
   c.pricing.refreshHours ??= 24
+  const w = isPlainObject(c.web) ? c.web : {}
+  c.web = {
+    enable: w.enable !== false,
+    host: String(w.host || '127.0.0.1'),
+    port: Number.isInteger(Number(w.port)) && Number(w.port) > 0 && Number(w.port) < 65536 ? Number(w.port) : 6190,
+    password: String(w.password ?? ''),
+  }
   return c as PluginConfig
 }
 

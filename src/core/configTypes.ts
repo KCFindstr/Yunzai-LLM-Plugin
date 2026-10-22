@@ -302,6 +302,16 @@ export interface PluginConfig {
   skills: { enable: boolean }
   memory: MemorySection
   pricing: { sources: ('openrouter' | 'litellm')[]; refreshHours: number }
+  web: WebSection
+}
+
+/** Built-in management web UI. */
+export interface WebSection {
+  enable: boolean
+  host: string
+  port: number
+  /** Login password; empty = a random one is generated once and saved in data/web-auth.json. */
+  password: string
 }
 
 /** Effective per-conversation view (group overrides applied). */

@@ -5,7 +5,7 @@ import { ensureCatalog } from '../commands/catalog.ts'
 import type { EffectiveConfig, ThinkingLevel } from '../core/configTypes.ts'
 import { brief, log } from '../core/log.ts'
 import { Semaphore, sha1 } from '../core/util.ts'
-import { botNickname } from '../core/yunzai.ts'
+import { botNickname, senderName } from '../core/yunzai.ts'
 import { addUsage, chat, emptyUsage, LLMError, partsToText, usesServerState, type Msg, type ServerState, type UserMsg } from '../llm/index.ts'
 import { cleanupSandbox } from '../tools/exec.ts'
 import { registry, type ToolCtx, type TurnState } from '../tools/registry.ts'
@@ -18,6 +18,7 @@ import { maybeCompact } from '../memory/compact.ts'
 import { memoryHash } from '../memory/store.ts'
 import { appendTurn, getSession, peekSession, indexArchive, pendingArchive, recallSession, setEpisode, setServerState, setSummary, truncateIfNeeded } from './session.ts'
 import { pickModel, utilityCandidates, utilityChat, type Picked } from './utility.ts'
+import { recordTurn } from './turnLog.ts'
 
 const NATIVE_SEARCH_TYPES = new Set(['anthropic', 'openai-responses', 'gemini'])
 const semaphore = new Semaphore(3)
@@ -198,6 +199,12 @@ async function runTurnInner(req: TurnRequest, ref: { turn?: TurnState }): Promis
     }
   }
 
+  const turnInfo = () => ({
+    at: started, conv: convKey, userId: e.user_id != null ? String(e.user_id) : undefined, userName: senderName(e),
+    groupId: e.group_id != null ? String(e.group_id) : undefined, model: model.id, input: text, cost, ms: Date.now() - started,
+    tools: msgs.flatMap(m => (m.role === 'assistant' ? (m.toolCalls ?? []).map(call => call.name) : [])),
+    tokens: { input: usage.input, output: usage.output, cacheRead: usage.cacheRead },
+  })
   try {
     for (let round = 0; round < maxRounds; round++) {
       const res = await call()
@@ -228,13 +235,17 @@ async function runTurnInner(req: TurnRequest, ref: { turn?: TurnState }): Promis
     }
   } catch (err: any) {
     log.error(`LLM 调用失败 [${model.id}]: ${err?.message ?? err}`)
-    if (!finalText && !turn.dispatched) return { kind: 'error', message: err?.message ?? String(err) }
+    if (!finalText && !turn.dispatched) {
+      recordTurn({ ...turnInfo(), reply: '', error: err?.message ?? String(err) })
+      return { kind: 'error', message: err?.message ?? String(err) }
+    }
   }
 
   log.info(
     `[${model.id}] ${Date.now() - started}ms think=${thinking} in=${usage.input} cache=${usage.cacheRead}/${usage.cacheWrite + usage.cacheWrite1h} out=${usage.output}${usage.reasoning ? `(思考${usage.reasoning})` : ''}${usage.webSearches ? ` 自带搜索${usage.webSearches}次` : ''} $${cost.toFixed(5)}${turn.dispatched ? ` cmd=${turn.dispatched}` : ''}`,
   )
   if (finalText) log.debug(`[${model.id}] 回复：${brief(finalText, 500)}`)
+  recordTurn({ ...turnInfo(), reply: finalText || (turn.dispatched ? `（执行指令 ${turn.dispatched}）` : '') })
 
   if (turn.memoryChanged) {
     const mctx = { userId: e.user_id, groupId: e.group_id }
