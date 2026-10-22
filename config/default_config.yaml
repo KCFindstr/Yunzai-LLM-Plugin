@@ -290,9 +290,9 @@ tools:
     # 每轮最多打开网页次数
     maxPerTurn: 3
   botCommand:
-    # 允许把自然语言转成机器人已有指令执行（如「帮我查深渊」→ #深渊）
+    # 允许把自然语言转成当前已启用插件的指令执行
     enable: true
-    # 系统提示里列出的常用指令数量（按游戏轮流选取；其余可通过 search_bot_commands 搜到）
+    # 系统提示里列出的已验证指令数量，其余可通过 search_bot_commands 搜索
     inPrompt: 50
     # 执行指令后是否再发送模型的附带文字
     ack: false
@@ -333,6 +333,20 @@ tools:
     diskMB: 128
     maxOutput: 4000            # 返回给模型的输出字符数
     maxRunsPerTurn: 3
+  computer:
+    enable: false
+    distro: yunzai-sandbox
+    access: admin
+    model: ''                 # 独立视觉/工具模型 id；留空使用默认模型
+    maxSteps: 100              # 独立于 chat.maxToolRounds
+    maxMinutes: 20
+    maxInputTokens: 150000     # 每个任务累计输入（含缓存）
+    maxOutputTokens: 30000
+    maxQueue: 8
+    recentScreenshots: 2       # 旧截图从工作上下文移除
+    maxTokensPerStep: 1200
+    thinking: 'off'
+    checkpointSteps: 8         # Claude 使用追加式上下文，定期检查点以保留缓存命中
   # 禁用的工具名（#llm工具列表 查看）
   disabled: []
 

@@ -39,7 +39,10 @@ const script =
   readFileSync(join(root, 'exec', 'setup.sh'), 'utf8') +
   "cat > /opt/llm-sandbox/runner.py <<'RUNNER_EOF'\n" +
   readFileSync(join(root, 'exec', 'runner.py'), 'utf8') +
-  'RUNNER_EOF\nchmod 700 /opt/llm-sandbox/runner.py\necho "sandbox ready"\n'
+  'RUNNER_EOF\nchmod 700 /opt/llm-sandbox/runner.py\n' +
+  "cat > /usr/local/lib/llm-render/render.mjs <<'RENDER_EOF'\n" +
+  readFileSync(join(root, 'exec', 'render.mjs'), 'utf8') +
+  'RENDER_EOF\nchmod 644 /usr/local/lib/llm-render/render.mjs\necho "sandbox ready"\n'
 
 console.log(`配置 ${distro} …（首次需要安装软件包，可能要几分钟）`)
 if (wsl(['-d', distro, '-u', 'root', '-e', 'bash', '-s'], script.replace(/\r\n/g, '\n'))) process.exit(1)

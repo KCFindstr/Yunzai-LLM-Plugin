@@ -23,7 +23,7 @@ export function isStickerSegment(s: any): boolean {
   return s?.type === 'mface' || (s?.type === 'image' && (s.sub_type == 1 || /表情/.test(s.summary ?? '')))
 }
 
-/** Segments -> text for the LLM; bot mentions are dropped, others become @name. */
+/** Segments -> text for the LLM, preserving mention identities and their positions. */
 export function segmentsToText(message: any[], selfId?: any): string {
   let out = ''
   for (const s of message ?? []) {
@@ -32,7 +32,10 @@ export function segmentsToText(message: any[], selfId?: any): string {
         out += s.text ?? ''
         break
       case 'at':
-        if (String(s.qq) !== String(selfId)) out += s.qq === 'all' ? '@全体成员 ' : `@${s.name || s.qq} `
+        if (s.qq != null) {
+          const isSelf = String(s.qq) === String(selfId)
+          out += `[at:${isSelf ? 'you' : s.qq}]${!isSelf && s.name ? `(${s.name})` : ''} `
+        }
         break
       case 'image':
         out += isStickerSegment(s) ? '[表情包]' : '[图片]'
@@ -79,6 +82,11 @@ export async function loadImage(url: string): Promise<ImagePart | undefined> {
   return { type: 'image', data: buf.toString('base64'), mime }
 }
 
+function imageUrl(segment: any): string | undefined {
+  if (!['image', 'mface'].includes(segment?.type)) return undefined
+  return [segment.url, segment.file].find(value => typeof value === 'string' && /^https?:\/\//.test(value))
+}
+
 export async function getQuoted(e: any): Promise<QuotedMessage | undefined> {
   if (e._llmQuoted !== undefined) return e._llmQuoted || undefined
   let q: QuotedMessage | undefined
@@ -92,7 +100,7 @@ export async function getQuoted(e: any): Promise<QuotedMessage | undefined> {
           fromBot: String(uid) === String(e.self_id),
           name: String(r.sender?.card || r.sender?.nickname || uid || '某人'),
           text: segmentsToText(segs, e.self_id),
-          imageUrls: segs.filter((s: any) => s?.type === 'image' && s.url).map((s: any) => s.url),
+          imageUrls: segs.map(imageUrl).filter((url: string | undefined): url is string => Boolean(url)),
         }
       }
     }
@@ -111,13 +119,18 @@ export async function extractInput(
   const quoted = opts.includeQuoted ? await getQuoted(e) : undefined
 
   const images: ImagePart[] = []
-  if (opts.includeImages && opts.vision && opts.maxImages > 0) {
-    const urls = [
-      ...message.filter(s => s?.type === 'image' && s.url).map(s => s.url),
+  const maxImages = Math.max(0, Math.floor(opts.maxImages))
+  if (opts.includeImages && opts.vision && maxImages > 0) {
+    const urls = [...new Set([
+      ...message.map(imageUrl).filter((url): url is string => Boolean(url)),
       ...(quoted?.imageUrls ?? []),
-    ].slice(0, opts.maxImages)
-    const loaded = await Promise.all(urls.map(loadImage))
-    for (const img of loaded) if (img) images.push(img)
+    ])]
+    for (let offset = 0; offset < urls.length && images.length < maxImages;) {
+      const batch = urls.slice(offset, offset + maxImages - images.length)
+      offset += batch.length
+      const loaded = await Promise.all(batch.map(loadImage))
+      for (const img of loaded) if (img) images.push(img)
+    }
   }
   return { text, images, quoted, imageSegments }
 }

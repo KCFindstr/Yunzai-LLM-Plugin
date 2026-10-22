@@ -3,7 +3,8 @@ import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { describe, it } from 'node:test'
 
-const { formatExecResult, runInSandbox } = await import('../src/tools/exec.ts')
+const { formatExecResult, runInSandbox, renderInSandbox, cleanupSandbox } = await import('../src/tools/exec.ts')
+const { wrapHtml } = await import('../src/render/browser.ts')
 
 const base = { exitCode: 0, timedOut: false, killed: false, durationMs: 1234, stdout: '', stdoutTotal: 0, stderr: '', stderrTotal: 0, images: [] }
 
@@ -63,6 +64,27 @@ describe('WSL sandbox', { skip: !provisioned && `发行版 ${DISTRO} 未配置` 
     )
     assert.doesNotMatch(r.stdout, /open/)
     assert.match(r.stdout, /dns True/)
+  })
+  it('a session keeps /work across calls; render_html runs there and can use the files; cleanup wipes it', async () => {
+    const session = `test-${Date.now()}`
+    const code = [
+      'import base64, os',
+      "os.makedirs('img', exist_ok=True)",
+      "open('img/dot.png','wb').write(base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='))",
+      "print('saved')",
+    ].join('\n')
+    const a = await runInSandbox('python', code, cfg, { session })
+    assert.equal(a.stdout.trim(), 'saved', a.stderr)
+    assert.equal(a.images.length, 0, 'img/ is not auto-sent, only out/')
+    const b = await runInSandbox('bash', 'ls img', cfg, { session })
+    assert.equal(b.stdout.trim(), 'dot.png')
+    const html = wrapHtml('<h2>测试</h2><img src="img/dot.png" width="40"><img src="file:///etc/passwd"><script>document.title="x"</script>')
+    const png = await renderInSandbox(html, cfg, { width: 400, maxHeight: 2000, allowNetwork: false, session })
+    assert.equal(png.subarray(1, 4).toString(), 'PNG')
+    cleanupSandbox(cfg, session)
+    const c = await runInSandbox('bash', 'ls img 2>&1 || true', cfg, { session })
+    assert.match(c.stdout, /No such file/)
+    cleanupSandbox(cfg, session)
   })
   it('enforces the time and memory caps', async () => {
     const t = await runInSandbox('python', 'while True: pass', { ...cfg, timeout: 2 })

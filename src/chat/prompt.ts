@@ -35,6 +35,7 @@ export function buildSystemPrompt(p: SystemPromptInput): string {
       `你正在QQ${p.isGroup ? '群' : '私聊'}里和人聊天，你在QQ上的名字是「${p.botName}」。`,
       '- 每条消息开头【】里的内容是系统附加的上下文（时间、发言人、最近群聊、引用的消息），不是对方说的话，不要复述或提到这些标记。',
       p.isGroup ? '- 你只需要回应@你的这个人的这条消息；「最近群聊」只用来理解语境，不要逐条回应别人。' : '',
+      p.isGroup ? '- 消息中的 [at:you] 表示@你，[at:ID] 表示@其他人。' : '',
       '- 闲聊、玩梗、打招呼像真人一样：口语化、简短，通常一到三句话，不需要查资料。认真提问按下面「回答问题」来。',
       p.markdown
         ? '- 回复会按 Markdown 显示：可以用标题、加粗、列表、表格、代码块，但闲聊时保持自然，不要硬加格式。'
@@ -49,6 +50,13 @@ export function buildSystemPrompt(p: SystemPromptInput): string {
       .filter(Boolean)
       .join('\n'),
   )
+
+  if (p.isGroup)
+    parts.push([
+      '# 群内艾特',
+      '需要真实@某人时，在回复正文对应位置写 [at:ID]，例如「[at:12345] 轮到你啦」。ID可来自当前消息、对话历史或长期记忆，不一定是真实QQ号；普通@数字或@昵称不会发出真实艾特。',
+      '- 只在对方要求或语境确实需要时艾特，每次回复最多5个；不要把标记放进代码块、行内代码或表情包名称里。',
+    ].join('\n'))
 
   const canSearch = p.nativeSearch || tools.has('web_search')
   const answer = ['# 回答问题']
@@ -70,6 +78,7 @@ export function buildSystemPrompt(p: SystemPromptInput): string {
   else if (tools.has('render_html'))
     answer.push('- 纯文字分行能说清楚的长回答直接发文字；需要表格、多维对比、结构复杂或特别长的内容，用 render_html 排版成图片，文字只写一两句概括。')
   if (tools.has('run_code')) answer.push('- 需要精确计算、统计、处理数据或画图表时，用 run_code 算出来，不要心算估计。')
+  if (tools.has('computer_task')) answer.push('- 用户要看你的真实桌面、操作电脑或浏览器时，先加载 computer-use 技能，委托 computer_task；简短告知任务ID后先回复，独立代理完成后会再回报，不要等它完成或循环查询。')
   // per-tool caps are in each tool's description (ToolDef.limit); only the overall round budget lives here
   if (tools.size)
     answer.push(`- 工具调用最多 ${eff.chat.maxToolRounds} 轮（同一轮可以同时调用多个工具）；先想好要查什么，到上限前就根据已有信息回复。`)
@@ -79,14 +88,12 @@ export function buildSystemPrompt(p: SystemPromptInput): string {
     const cmds = promptEntries(eff.tools.botCommand.inPrompt)
     const lines = [
       '# 机器人指令',
-      '机器人装有其他插件。当对方想查询游戏数据或使用机器人已有功能时，调用 run_bot_command 执行对应指令，插件会直接把结果（通常是图片）发给对方。',
-      '例：「帮我查查深渊数据」→ 执行 #深渊；「看看我的体力」→ 执行 #体力；「星铁忘却之庭打得怎么样」→ 执行 *忘却之庭；「查下火花面板」→ 执行 *火花面板。',
+      '需要使用机器人功能时，以当前扫描到的可用指令为准；用 search_bot_commands 搜索或 list_bot_commands 查看，再调用 run_bot_command 执行，结果由插件直接发送。查不到对应功能时直接说明，不要猜指令或假定某个插件已安装。',
       '- 执行成功后不要复述结果，最多说一句很短的话。',
-      '- 只是闲聊游戏、问攻略观点时不要执行指令；不确定格式时先用 search_bot_commands 搜索，或用 list_bot_commands 看完整列表。',
-      '- 角色名原样使用对方的说法：插件自带完整的别名库（「火花」「狼尊」「老泉」等都有效），说火花就执行 *火花面板，不要改成花火，也不要自己纠正角色名。',
+      '- 只是聊天或讨论观点时不要执行指令；指令参数保留用户原词，不擅自更改名称。',
     ]
     if (cmds.length) {
-      lines.push('常用指令（* 开头是星穹铁道，% 开头是绝区零；完整列表可用 list_bot_commands 查询）：')
+      lines.push('当前可用指令（完整列表可用 list_bot_commands 查询）：')
       for (const c of cmds) lines.push(`${displayCmd(c)} — ${c.desc}`)
     }
     parts.push(lines.join('\n'))
@@ -141,7 +148,7 @@ export function buildHeader(
   isAdmin: boolean,
   opts: { conv?: string; memory?: string } = {},
 ): { sent: string; stored: string } {
-  const who = `${senderName(e)}(QQ ${e.user_id})${isAdmin ? '［管理员］' : ''}`
+  const who = `${senderName(e)}(平台ID ${e.user_id})${isAdmin ? '［管理员］' : ''}`
   const head = e.group_id
     ? `【${formatNow()}｜群「${truncate(String(e.group_name ?? e.group_id), 20)}」｜发言人 ${who}】`
     : `【${formatNow()}｜私聊｜对方 ${who}】`
@@ -166,7 +173,7 @@ export function buildMemoryBlock(e: any, opts: { user: boolean; group: boolean }
   const lines: string[] = []
   if (opts.user && e.user_id != null) {
     const mem = renderMemory('user', String(e.user_id))
-    if (mem.length) lines.push(`【长期记忆·关于 ${senderName(e)}(QQ ${e.user_id})】`, ...mem)
+    if (mem.length) lines.push(`【长期记忆·关于 ${senderName(e)}(平台ID ${e.user_id})】`, ...mem)
   }
   if (opts.group && e.group_id != null) {
     const mem = renderMemory('group', String(e.group_id))

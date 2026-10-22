@@ -91,6 +91,44 @@ describe('openai chat completions', () => {
 })
 
 describe('anthropic messages', () => {
+  it('uses at most four explicit cache points and preserves stable prefixes with Haiku', async () => {
+    const srv = await mockServer((_request, index) => [200, {
+      content: [{ type: 'text', text: 'done' }], stop_reason: 'end_turn',
+      usage: index === 1 ? { input_tokens: 10, output_tokens: 2, cache_creation: { ephemeral_5m_input_tokens: 600, ephemeral_1h_input_tokens: 0 } }
+        : { input_tokens: 20, output_tokens: 2, cache_read_input_tokens: 600, cache_creation_input_tokens: 50 },
+    }])
+    after(srv.close)
+    const provider: ProviderConfig = { type: 'anthropic', baseUrl: srv.url, apiKey: 'test-key', cacheTtl: '5m' }
+    const firstMessages: Msg[] = [userMsg, { role: 'assistant', content: '', toolCalls: [{ id: 'c1', name: 'get_weather', args: {} }] }, { role: 'tool', results: [{ id: 'c1', name: 'get_weather', content: 'sunny' }] }]
+    const first = await chat(params(provider, { model: 'claude-haiku-5-5', topP: 0.8 }, firstMessages, { thinking: 'off', temperature: 0.3 }))
+    const extended: Msg[] = [...firstMessages, { role: 'assistant', content: '', toolCalls: [{ id: 'c2', name: 'get_weather', args: {} }] }, { role: 'tool', results: [{ id: 'c2', name: 'get_weather', content: 'cloudy' }] }]
+    const second = await chat(params(provider, { model: 'claude-haiku-5-5' }, extended, { thinking: 'off' }))
+    const before = srv.requests[0].body
+    const nextBody = srv.requests[1].body
+    const withoutMarkers = value => JSON.parse(JSON.stringify(value, (key, entry) => key === 'cache_control' ? undefined : entry))
+    assert.deepEqual(nextBody.tools, before.tools)
+    assert.deepEqual(nextBody.system, before.system)
+    assert.deepEqual(withoutMarkers(nextBody.messages.slice(0, 3)), withoutMarkers(before.messages))
+    assert.equal(JSON.stringify(nextBody).match(/"cache_control"/g)?.length, 4)
+    assert.deepEqual(nextBody.tools.at(-1).cache_control, { type: 'ephemeral' })
+    assert.equal(before.temperature, undefined)
+    assert.equal(before.top_p, undefined)
+    assert.equal(before.thinking, undefined)
+    assert.equal(first.usage.cacheWrite, 600)
+    assert.equal(second.usage.cacheRead, 600)
+    assert.equal(second.usage.input, 20)
+  })
+
+  it('reports one-hour cache writes separately from five-minute writes', async () => {
+    const srv = await mockServer(() => [200, { content: [{ type: 'text', text: 'ok' }], usage: { input_tokens: 3, cache_creation_input_tokens: 900, cache_creation: { ephemeral_5m_input_tokens: 200, ephemeral_1h_input_tokens: 700 } } }])
+    after(srv.close)
+    const result = await chat(params({ type: 'anthropic', baseUrl: srv.url, apiKey: 'test-key', cacheTtl: '1h' }, { model: 'claude-haiku-4-5' }, [userMsg], { thinking: 'off' }))
+    assert.deepEqual(srv.requests[0].body.tools.at(-1).cache_control, { type: 'ephemeral', ttl: '1h' })
+    assert.equal(result.usage.cacheWrite, 200)
+    assert.equal(result.usage.cacheWrite1h, 700)
+    assert.equal(result.usage.input, 3)
+  })
+
   it('sets cache breakpoints, adaptive thinking and parses usage', async () => {
     const srv = await mockServer(() => [
       200,

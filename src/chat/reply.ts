@@ -6,6 +6,7 @@ import { markdownEnabled } from './format.ts'
 import { chooseSticker, extractStickerMarkers, sendSticker } from '../stickers/picker.ts'
 import { messagesSince, recordBotMessage } from './groupLog.ts'
 import { limiter } from './ratelimit.ts'
+import { replyMentions } from './mentions.ts'
 
 /**
  * QQ shows Markdown literally; turn the common constructs into plain chat text.
@@ -13,12 +14,12 @@ import { limiter } from './ratelimit.ts'
  */
 export function stripMarkdown(text: string): string {
   return text
-    .replace(/```[\w-]*\n?([\s\S]*?)```/g, (_, code: string) => code.trimEnd())
+    .replace(/```[\w-]*\n?([\s\S]*?)```/g, (block, code: string) => code.includes('[at:') ? block : code.trimEnd())
     .replace(/^[ \t]{0,3}#{1,6}[ \t]+/gm, '')
     .replace(/\*\*([^*\n]+)\*\*/g, '$1')
     .replace(/__([^_\n]+)__/g, '$1')
     .replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, '$1$2')
-    .replace(/`([^`\n]+)`/g, '$1')
+    .replace(/`([^`\n]+)`/g, (inline, code: string) => code.includes('[at:') ? inline : code)
     .replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, '$2')
     .replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, (_, t: string, u: string) => (t === u ? u : `${t} ${u}`))
     .replace(/^[ \t]*[-*+][ \t]+/gm, '· ')
@@ -95,6 +96,7 @@ export async function deliver(
   const prep = prepareReply(raw, cfg, markdownEnabled(e, cfg))
   const sticker = chooseSticker(opts.convKey, prep.stickerNames, eff.sticker)
   const elapsed = Date.now() - opts.startedAt
+  const mentionBudget = { remaining: 5 }
 
   if (!opts.suppressText && (prep.bubbles.length || prep.forward)) {
     await showTyping(e, cfg)
@@ -112,7 +114,7 @@ export async function deliver(
 
     if (prep.forward) {
       if (quote || at) await e.reply('内容有点长，我整理在下面啦', quote, { at })
-      await sendForward(e, [prep.forward], botNickname(e))
+      await sendForward(e, [replyMentions(prep.forward, e, mentionBudget)], botNickname(e))
       recordBotMessage(e, truncate(prep.forward, 100), opts.convKey)
     } else {
       for (let i = 0; i < prep.bubbles.length; i++) {
@@ -121,14 +123,14 @@ export async function deliver(
           if (!(await takeSlot(e, cfg, 8000))) {
             // out of budget: merge the rest into one last message
             const rest = prep.bubbles.slice(i).join('\n')
-            await e.reply(rest)
+            await e.reply(replyMentions(rest, e, mentionBudget))
             recordBotMessage(e, rest, opts.convKey)
             break
           }
           await showTyping(e, cfg)
           await sleep(typingDelay(b.length, cfg))
         }
-        await e.reply(b, i === 0 && quote, i === 0 && at ? { at: true } : {})
+        await e.reply(replyMentions(b, e, mentionBudget), i === 0 && quote, i === 0 && at ? { at: true } : {})
         recordBotMessage(e, b, opts.convKey)
       }
     }

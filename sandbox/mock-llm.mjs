@@ -62,6 +62,9 @@ export function decide(body) {
     if (/不允许|主人指令|没有插件/.test(content)) return reply('这个我帮不了你哦，直接发指令试试？')
     if (/已记住|已合并/.test(content)) return reply('好，我记住啦')
     if (/已渲染为图片/.test(content)) return reply('整理好啦，看图喵！')
+    // 「做张海报」: run_code saved img/poster.png, now lay it out with render_html (same sandbox workspace)
+    if (/IMG_READY/.test(content) && tools.has('render_html'))
+      return reply(null, call('render_html', { html: '<h2>胡桃出场统计</h2><img src="img/poster.png" style="width:100%"><p>数据来自沙盒里的 run_code</p>' }))
     const exit = /^退出码 (\d+)[\s\S]*?\[stdout\]\n([^\n]*)/.exec(content)
     if (exit) return reply(`算好了：${exit[2]}`)
     return reply(`（模拟）根据工具结果：${content.slice(0, 60)}`)
@@ -81,6 +84,11 @@ export function decide(body) {
     )
   if (/表格|整理一下|对比一下/.test(text) && tools.has('render_html'))
     return reply(null, call('render_html', { html: '<h2>对比</h2><table><tr><th>角色</th><th>定位</th></tr><tr><td>胡桃</td><td>主C</td></tr><tr><td>行秋</td><td>副C</td></tr></table>' }))
+  if (/做张海报/.test(text) && tools.has('run_code'))
+    return reply(null, call('run_code', {
+      language: 'python',
+      code: 'import os\nimport matplotlib.pyplot as plt\nos.makedirs("img", exist_ok=True)\nplt.bar(["胡桃","行秋","夜兰"],[5,3,4]);plt.savefig("img/poster.png");print("IMG_READY")',
+    }))
   if (/算一下|画个图/.test(text) && tools.has('run_code'))
     return reply(null, call('run_code', {
       language: 'python',

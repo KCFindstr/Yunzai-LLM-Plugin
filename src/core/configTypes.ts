@@ -182,10 +182,27 @@ export interface ToolsSection {
   http: HttpToolConfig[]
   renderHtml: { enable: boolean; width: number; maxHeight: number; allowNetwork: boolean }
   exec: ExecToolConfig
+  computer: ComputerConfig
   disabled: string[]
 }
 
 export type ExecLanguage = 'python' | 'node' | 'bash'
+
+export interface ComputerConfig {
+  enable: boolean
+  distro: string
+  access: 'admin' | 'all'
+  model: string
+  maxSteps: number
+  maxMinutes: number
+  maxInputTokens: number
+  maxOutputTokens: number
+  maxQueue: number
+  recentScreenshots: number
+  maxTokensPerStep: number
+  thinking: ThinkingLevel
+  checkpointSteps: number
+}
 
 /** run_code: sandboxed execution in a dedicated WSL distro (see exec/ and cli/exec-setup.mjs) */
 export interface ExecToolConfig {

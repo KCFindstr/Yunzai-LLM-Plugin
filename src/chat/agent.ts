@@ -1,11 +1,13 @@
 import { checkQuota, record, type QuotaBlock, type QuotaCtx } from '../billing/ledger.ts'
 import { computeCost, resolvePrice } from '../billing/pricing.ts'
 import { config } from '../core/config.ts'
+import { ensureCatalog } from '../commands/catalog.ts'
 import type { EffectiveConfig, ThinkingLevel } from '../core/configTypes.ts'
 import { brief, log } from '../core/log.ts'
 import { Semaphore, sha1 } from '../core/util.ts'
 import { botNickname } from '../core/yunzai.ts'
 import { addUsage, chat, emptyUsage, LLMError, partsToText, usesServerState, type Msg, type ServerState, type UserMsg } from '../llm/index.ts'
+import { cleanupSandbox } from '../tools/exec.ts'
 import { registry, type ToolCtx, type TurnState } from '../tools/registry.ts'
 import type { ExtractedInput } from './message.ts'
 import { resolveThinking } from './thinking.ts'
@@ -47,10 +49,11 @@ export interface TurnRequest {
   convKey: string
 }
 
-export type TurnOutcome =
+export type TurnOutcome = (
   | { kind: 'reply'; text: string; modelId: string; cost: number; dispatched?: string; images: Buffer[]; thinking: ThinkingLevel }
   | { kind: 'quota'; block: QuotaBlock; modelId: string }
   | { kind: 'error'; message: string; unconfigured?: boolean }
+) & { afterReply?: (() => void)[] }
 
 function selectModel(eff: EffectiveConfig, ctx: QuotaCtx): { picked?: Picked; block?: { block: QuotaBlock; modelId: string } } {
   const ids = [...new Set([eff.model, ...config.get().fallbackModels].filter(Boolean))]
@@ -67,10 +70,17 @@ function selectModel(eff: EffectiveConfig, ctx: QuotaCtx): { picked?: Picked; bl
 
 export async function runTurn(req: TurnRequest): Promise<TurnOutcome> {
   semaphore.max = Math.max(1, req.eff.reply.concurrency || 3)
-  return semaphore.run(() => runTurnInner(req))
+  const ref: { turn?: TurnState } = {}
+  try {
+    const result = await semaphore.run(() => runTurnInner(req, ref))
+    return { ...result, afterReply: ref.turn?.afterReply }
+  } finally {
+    // run_code / render_html workspace lives only for this reply
+    if (ref.turn?.sandboxSession) cleanupSandbox(req.eff.tools.exec, ref.turn.sandboxSession)
+  }
 }
 
-async function runTurnInner(req: TurnRequest): Promise<TurnOutcome> {
+async function runTurnInner(req: TurnRequest, ref: { turn?: TurnState }): Promise<TurnOutcome> {
   const { e, eff, input, isAdmin, convKey } = req
   const quotaCtx: QuotaCtx = { userId: e.user_id, groupId: e.group_id, isAdmin }
   const { picked, block } = selectModel(eff, quotaCtx)
@@ -86,13 +96,14 @@ async function runTurnInner(req: TurnRequest): Promise<TurnOutcome> {
     : await resolveThinking(
         model.thinking ?? eff.chat.thinking,
         eff.chat,
-        { text: input.text, images: input.images.length, quoted: Boolean(input.quoted), quotedText: input.quoted?.text },
+        { text: input.text.replaceAll('[at:you]', '').trim(), images: input.images.length, quoted: Boolean(input.quoted), quotedText: input.quoted?.text },
         quotaCtx,
       )
   const temperature = model.temperature ?? eff.chat.temperature
   const maxTokens = model.maxTokens ?? eff.chat.maxOutputTokens
 
   const turn: TurnState = { commands: 0, searches: 0, fetches: 0, images: [] }
+  ref.turn = turn
   const ctx: ToolCtx = { e, eff, isAdmin, model, turn }
   let nativeSearch =
     !dropped.has('nativeSearch') &&
@@ -103,6 +114,7 @@ async function runTurnInner(req: TurnRequest): Promise<TurnOutcome> {
     model.nativeSearch !== false
   let offered = model.toolUse === false || dropped.has('tools') ? [] : registry.forTurn(ctx)
   let specs = registry.specs(offered, ctx)
+  if (offered.some(tool => tool.name === 'run_bot_command')) await ensureCatalog()
 
   const botName = config.get().persona.botName || botNickname(e)
   const markdown = markdownEnabled(e, eff.reply)

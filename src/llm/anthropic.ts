@@ -62,7 +62,11 @@ export const anthropic: Adapter = {
       }
     }
 
-    // Incremental conversation cache: breakpoint on the final user block.
+    const earlierUser = messages.slice(0, -1).findLast(message => message.role === 'user')
+    if (earlierUser) {
+      const index = earlierUser.content.length - 1
+      if (CACHEABLE_TAIL.has(earlierUser.content[index]?.type)) earlierUser.content[index] = { ...earlierUser.content[index], cache_control: cc }
+    }
     const lastMsg = messages[messages.length - 1]
     if (lastMsg?.role === 'user') {
       const i = lastMsg.content.length - 1
@@ -78,14 +82,16 @@ export const anthropic: Adapter = {
     }
     const tools: any[] = p.tools.map(t => ({ name: t.name, description: t.description, input_schema: t.parameters }))
     if (p.nativeSearch) tools.push({ type: searchToolType(p.model.model), name: 'web_search', max_uses: 3 })
+    if (tools.length) tools[tools.length - 1].cache_control = cc
     if (tools.length) body.tools = tools
     const effort = anthropicEffort(p.thinking)
     if (effort) {
       body.thinking = { type: 'adaptive' }
       body.output_config = { effort }
     }
-    if (p.temperature != null) body.temperature = p.temperature
-    if (p.model.topP != null) body.top_p = p.model.topP
+    const noSampling = /(?:haiku|sonnet|opus)[-.]5[-.]5(?:\b|$)/i.test(p.model.model)
+    if (!noSampling && p.temperature != null) body.temperature = p.temperature
+    if (!noSampling && p.model.topP != null) body.top_p = p.model.topP
     if (p.model.extraBody) body = deepMerge(body, p.model.extraBody)
 
     const res = await requestJson(
@@ -110,8 +116,8 @@ export const anthropic: Adapter = {
     }
 
     const u = res?.usage ?? {}
-    const created = u.cache_creation_input_tokens ?? 0
     const w1h = u.cache_creation?.ephemeral_1h_input_tokens ?? 0
+    const created = u.cache_creation_input_tokens ?? (u.cache_creation?.ephemeral_5m_input_tokens ?? 0) + w1h
     return {
       text,
       toolCalls,

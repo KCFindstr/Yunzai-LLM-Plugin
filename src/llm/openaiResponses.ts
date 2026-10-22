@@ -22,7 +22,7 @@ export const openaiResponses: Adapter = {
             c.type === 'text'
               ? { type: 'input_text', text: c.text }
               : vision
-                ? { type: 'input_image', image_url: dataUrl(c), detail: 'low' }
+                ? { type: 'input_image', image_url: dataUrl(c), detail: c.detail ?? 'low' }
                 : { type: 'input_text', text: '[图片]' },
           ),
         })

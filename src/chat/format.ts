@@ -8,6 +8,7 @@ export function isQQBotEvent(e: any): boolean {
 
 /** Whether replies for this event are written and sent as Markdown. */
 export function markdownEnabled(e: any, reply: ReplySection): boolean {
+  if (e?.isPrivate || e?.message_type === 'private' || (!e?.group_id && !e?.guild_id && !e?.channel_id)) return false
   if (reply.markdown === 'auto') return isQQBotEvent(e)
   return reply.markdown === true
 }

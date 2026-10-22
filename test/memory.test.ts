@@ -105,7 +105,7 @@ describe('memory in conversation', () => {
     const b1 = srv.requests[0].body
     const b3 = srv.requests[2].body
     assert.equal(b1.messages[0].content, b3.messages[0].content, 'system prompt byte-identical')
-    assert.match(b3.messages[1].content, /【长期记忆·关于 小明\(QQ 50001\)】\n\[m\w+\] 喜欢被叫小龙/)
+    assert.match(b3.messages[1].content, /【长期记忆·关于 小明\(平台ID 50001\)】\n\[m\w+\] 喜欢被叫小龙/)
     assert.doesNotMatch(b1.messages[1].content, /长期记忆/)
   })
 

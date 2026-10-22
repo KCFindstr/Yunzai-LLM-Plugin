@@ -52,7 +52,7 @@ const providerNames = c => Object.keys(c.providers ?? {})
 const modelIds = c => (c.models ?? []).map(m => m.id).filter(Boolean)
 const presetNames = c => Object.keys(c.persona?.presets ?? {})
 const toolNames = c => [
-  ...new Set(['web_search', 'web_fetch', 'run_bot_command', 'search_bot_commands', 'list_bot_commands', 'load_skill', 'memory', 'add_sticker', 'list_stickers', 'render_html', 'run_code', ...(c.tools?.http ?? []).map(h => h.name).filter(Boolean), ...(c.tools?.disabled ?? [])]),
+  ...new Set(['web_search', 'web_fetch', 'run_bot_command', 'search_bot_commands', 'list_bot_commands', 'load_skill', 'memory', 'add_sticker', 'list_stickers', 'render_html', 'run_code', 'computer_task', ...(c.tools?.http ?? []).map(h => h.name).filter(Boolean), ...(c.tools?.disabled ?? [])]),
 ]
 
 const limits = label => obj({ window5h: num('5小时额度（美元）', { min: 0, nullable: true }), weekly: num('每周额度（美元）', { min: 0, nullable: true }) }, label)
@@ -255,6 +255,24 @@ const tools = obj(
         maxRunsPerTurn: int('每轮最多运行次数', { min: 1, max: 100 }),
       },
       '运行代码',
+    ),
+    computer: obj(
+      {
+        enable: bool('持久像素电脑（需先 npm run computer-setup）'),
+        distro: str('专用 WSL 发行版', { pattern: /^[\w.-]+$/ }),
+        access: oneOf(['admin', 'all'], '谁可以使用共享电脑'),
+        model: oneOf(modelIds, '独立电脑代理模型', { allowEmpty: true }),
+        maxSteps: int('每个任务的模型轮数上限', { min: 1, max: 500 }),
+        maxMinutes: int('每个任务最多分钟数', { min: 1, max: 120 }),
+        maxInputTokens: int('累计输入 token（含缓存）', { min: 1000, max: 2000000 }),
+        maxOutputTokens: int('累计输出 token', { min: 256, max: 500000 }),
+        maxQueue: int('全局排队任务上限', { min: 1, max: 50 }),
+        recentScreenshots: int('工作上下文保留截图数', { min: 1, max: 4 }),
+        maxTokensPerStep: int('每步输出 token 上限', { min: 128, max: 32768 }),
+        thinking: oneOf(THINKING, '电脑代理思考强度（默认关闭以节省输出）'),
+        checkpointSteps: int('Claude 上下文检查点间隔', { min: 2, max: 30 }),
+      },
+      '持久电脑代理',
     ),
     disabled: multi(toolNames, '禁用的工具'),
   },

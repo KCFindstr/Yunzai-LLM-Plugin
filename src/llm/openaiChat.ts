@@ -9,7 +9,7 @@ function userContent(parts: Part[], vision: boolean): any {
   return parts.map(p => {
     if (p.type === 'text') return { type: 'text', text: p.text }
     if (!vision) return { type: 'text', text: '[图片]' }
-    return { type: 'image_url', image_url: { url: dataUrl(p), detail: 'low' } }
+    return { type: 'image_url', image_url: { url: dataUrl(p), detail: p.detail === 'original' ? 'high' : p.detail ?? 'low' } }
   })
 }
 

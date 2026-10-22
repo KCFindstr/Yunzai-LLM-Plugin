@@ -104,7 +104,7 @@ export function seg() {
   )
 }
 
-/** Send a forward (合并转发) message made of text/segment nodes; falls back to plain text. */
+/** Send a forward (合并转发) message made of text/segment nodes; falls back to individual nodes. */
 export async function sendForward(e: any, nodes: any[], title?: string): Promise<any> {
   const Bot = globalThis.Bot
   const nickname = title || botNickname(e)
@@ -114,10 +114,16 @@ export async function sendForward(e: any, nodes: any[], title?: string): Promise
     const make = target?.makeForwardMsg ?? Bot?.makeForwardMsg
     if (typeof make === 'function') {
       const msg = await make.call(target ?? Bot, nodes.map(message => ({ message, nickname, user_id })))
-      return await e.reply(msg)
+      const result = await e.reply(msg)
+      const error = Array.isArray(result?.error) ? result.error.length > 0 : Boolean(result?.error)
+      if (!result?.message_id && (result === false || error || result?.status === 'failed' || (result?.retcode != null && result.retcode !== 0)))
+        throw new Error('适配器未能发送合并转发')
+      return result
     }
   } catch (err: any) {
     log.warn('发送合并转发失败，改为普通消息', err?.message ?? err)
   }
-  return e.reply(nodes.map(n => (typeof n === 'string' ? n : '')).filter(Boolean).join('\n\n'))
+  const results: any[] = []
+  for (const node of nodes) results.push(await e.reply(node))
+  return results.length === 1 ? results[0] : results
 }

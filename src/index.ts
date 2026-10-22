@@ -13,8 +13,10 @@ import { registerWebTools } from './tools/web.ts'
 import { registerMemoryTool } from './memory/tool.ts'
 import { registerStickerTools } from './stickers/tool.ts'
 import { registerRenderTool } from './tools/render.ts'
-import { registerExecTool } from './tools/exec.ts'
+import { registerExecTool, stopKeepalive } from './tools/exec.ts'
 import { closeOwnBrowser } from './render/browser.ts'
+import { registerComputerTool, computerQueue } from './tools/computer.ts'
+import { refreshComputerKeepalive, stopComputerKeepalive } from './computer/keepalive.ts'
 
 ownClasses.add(LLMChat)
 ownClasses.add(LLMAdmin)
@@ -33,6 +35,9 @@ function startup() {
   registerStickerTools()
   registerRenderTool()
   registerExecTool()
+  registerComputerTool()
+  refreshComputerKeepalive()
+  config.onChange(refreshComputerKeepalive)
   loadSkills()
   loadCustomTools().catch(err => log.warn('加载自定义工具失败', err))
   startPriceRefresh()
@@ -42,10 +47,18 @@ function startup() {
   if (B?.stat?.online === 2) scan()
   else B?.once?.('online', scan)
   B?.once?.('exit', () => {
+    computerQueue.stop()
+    stopComputerKeepalive()
     flushAllStores()
+    stopKeepalive()
     return closeOwnBrowser()
   })
-  process.once('exit', () => flushAllStores())
+  process.once('exit', () => {
+    computerQueue.stop()
+    stopComputerKeepalive()
+    flushAllStores()
+    stopKeepalive()
+  })
 
   const c = config.get()
   const def = config.defaultModelId()

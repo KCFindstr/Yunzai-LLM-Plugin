@@ -35,10 +35,19 @@ describe('markdown output', () => {
 
   it('auto enables markdown only for the QQBot adapter', () => {
     const r = { ...config.effective().reply, markdown: 'auto' as const }
-    assert.equal(markdownEnabled({ adapter_name: 'QQBot' }, r), true)
+    assert.equal(markdownEnabled({ group_id: 1, adapter_name: 'QQBot' }, r), true)
     assert.equal(markdownEnabled({ adapter_name: 'OneBotv11' }, r), false)
     assert.equal(markdownEnabled({ adapter_name: 'QQBot' }, { ...r, markdown: false }), false)
     assert.equal(config.effective().reply.markdown, false, 'default is plain text')
+  })
+
+  it('forces plain mode for DMs regardless of explicit or automatic Markdown settings', () => {
+    const reply = config.effective().reply
+    for (const markdown of [true, 'auto'] as const) {
+      assert.equal(markdownEnabled({ message_type: 'private', adapter_name: 'QQBot' }, { ...reply, markdown }), false)
+      assert.equal(markdownEnabled({ user_id: 1, adapter_name: 'OneBotv11' }, { ...reply, markdown }), false)
+      assert.equal(markdownEnabled({ isPrivate: true, group_id: 1 }, { ...reply, markdown }), false)
+    }
   })
 
   it('system prompt tells the model whether markdown renders', () => {

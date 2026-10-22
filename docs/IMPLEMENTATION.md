@@ -152,6 +152,18 @@ Only erasable TS syntax (no enums/parameter properties/namespaces) — `erasable
   (`chat.maxToolRounds`). Shared constants: `MAX_IMAGES_PER_TURN` (render.ts, shared with run_code),
   `MAX_COMMANDS_PER_TURN` (commands/tools.ts). Note: scripts that import src/ must run with cwd = bot root
   (`paths.ts` resolves `plugins/Yunzai-LLM-Plugin` from cwd), or they read/create a stray empty config.
+- Shared sandbox workspace + in-sandbox rendering (2026-10-21): runner.py actions `run` / `render` / `cleanup`, with an
+  optional `session` id → `/var/lib/llm-sandbox/s-<id>` tmpfs persists across calls (root-owned `<dir>.last` marks
+  activity; idle > 1h is swept). The agent gives each reply one session (`TurnState.sandboxSession`, created lazily by
+  `turnSession`) and `runTurn` cleans it up in `finally`. Calls on a session are serialized in exec.ts (parallel tool
+  calls in one round). run_code only auto-sends images in out/ changed by that call; files elsewhere (img/) are for HTML.
+  - render_html: when run_code is available for the turn, renders inside the sandbox with Chrome headless shell +
+    puppeteer-core 25.14.0 at /usr/local/lib/llm-render (exec/render.mjs; needs `pipe: true` because the sandbox
+    firewall blocks loopback, `--no-sandbox` because Chrome's sandbox can't nest in bwrap; JS off, CSP from wrapHtml,
+    file:// limited to /work, network = sandbox firewall). Memory ≥1024MB, TasksMax 512 for Chrome. Falls back to the
+    host renderer if the sandbox render fails.
+  - WSL idle-terminates the distro ~15-30s after its last process, wiping tmpfs: exec.ts holds a `sleep 1800` process
+    in the distro while any session is live (released on cleanup / plugin exit). Verified: files survive 45s idle.
 - Sandbox repro of prod: `--runtime <name>` uses a separate `sandbox/.runtime-<name>/` (e.g. without game plugins,
   like prod), `--overlay <file>` merges YAML over the generated plugin config (copy prod's settings minus
   providers/models/keys, remap the group whitelist to 30001). Used 2026-10-20 to debug "#深渊 fails in prod":

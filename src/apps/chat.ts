@@ -111,6 +111,7 @@ export class LLMChat extends BasePlugin {
 
     await locks.run(convKey, async () => {
       const startedAt = Date.now()
+      let afterReply: (() => void)[] | undefined
       try {
         const model = pickModel([eff.model, ...cfg.fallbackModels])?.model
         const input = await extractInput(e, {
@@ -125,6 +126,7 @@ export class LLMChat extends BasePlugin {
         }
 
         const out = await runTurn({ e, eff, input, isAdmin, convKey })
+        afterReply = out.afterReply
         if (out.kind === 'quota') {
           if (quotaNotice.pass(`${e.self_id}:${e.user_id}:${out.block.scope}`, cfg.quota.notifyCooldown))
             await e.reply(quotaText(out), Boolean(e.group_id))
@@ -146,6 +148,8 @@ export class LLMChat extends BasePlugin {
         compactSession(convKey, eff, { userId: e.user_id, groupId: e.group_id, isAdmin }).catch(() => {})
       } catch (err: any) {
         log.error('处理对话失败', err)
+      } finally {
+        for (const start of afterReply ?? []) start()
       }
     })
     return true

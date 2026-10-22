@@ -332,6 +332,24 @@ export function normalize(raw: any): PluginConfig {
     maxRunsPerTurn: Math.min(100, Math.max(1, Number(ex.maxRunsPerTurn) || 3)),
   }
   c.sticker.maxSendSize = Number.isFinite(Number(c.sticker.maxSendSize)) ? Number(c.sticker.maxSendSize) : 240
+  const pc = isPlainObject(c.tools.computer) ? c.tools.computer : {}
+  const bounded = (value: any, fallback: number, min: number, max: number) =>
+    Math.floor(Math.min(max, Math.max(min, Number.isFinite(Number(value)) ? Number(value) : fallback)))
+  c.tools.computer = {
+    enable: pc.enable === true,
+    distro: typeof pc.distro === 'string' && /^[\w.-]+$/.test(pc.distro) ? pc.distro : 'yunzai-sandbox',
+    access: pc.access === 'all' ? 'all' : 'admin',
+    model: typeof pc.model === 'string' ? pc.model : '',
+    maxSteps: bounded(pc.maxSteps, 100, 1, 500),
+    maxMinutes: bounded(pc.maxMinutes, 20, 1, 120),
+    maxInputTokens: bounded(pc.maxInputTokens, 150000, 1000, 2000000),
+    maxOutputTokens: bounded(pc.maxOutputTokens, 30000, 256, 500000),
+    maxQueue: bounded(pc.maxQueue, 8, 1, 50),
+    recentScreenshots: bounded(pc.recentScreenshots, 2, 1, 4),
+    maxTokensPerStep: bounded(pc.maxTokensPerStep, 1200, 128, 32768),
+    thinking: ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'].includes(pc.thinking) ? pc.thinking : 'off',
+    checkpointSteps: bounded(pc.checkpointSteps, 8, 2, 30),
+  }
   c.tools.disabled = asArray(c.tools.disabled)
   c.skills = isPlainObject(c.skills) ? c.skills : { enable: true }
   const m = isPlainObject(c.memory) ? c.memory : {}

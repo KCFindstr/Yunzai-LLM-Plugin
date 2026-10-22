@@ -20,7 +20,7 @@ EOF
 # 2. Runtimes and tools available to sandboxed code.
 export DEBIAN_FRONTEND=noninteractive
 PKGS="bubblewrap iptables python3 python3-pip python3-venv python3-requests python3-numpy python3-bs4 python3-matplotlib
-  python3-pandas nodejs npm curl ca-certificates jq bc fonts-noto-cjk"
+  python3-pandas nodejs npm curl ca-certificates jq bc fonts-noto-cjk unzip libnss3 libasound2t64"
 MISSING=$(for p in $PKGS; do dpkg -s "$p" >/dev/null 2>&1 || echo "$p"; done)
 if [ -n "$MISSING" ]; then
   apt-get update -qq
@@ -76,4 +76,15 @@ systemctl daemon-reload
 systemctl enable llm-sandbox-firewall.service >/dev/null 2>&1
 /opt/llm-sandbox/firewall.sh
 
-# 5. Runner (heredoc appended by cli/exec-setup.mjs).
+# 5. HTML renderer for render_html: puppeteer-core (same version as Yunzai's) + Chrome headless shell, under /usr
+#    so the sandbox (which only sees /usr and /etc) can run it. render.mjs is appended by cli/exec-setup.mjs.
+install -d -m 755 /usr/local/lib/llm-render
+cd /usr/local/lib/llm-render
+[ -f package.json ] || echo '{"private":true,"type":"module"}' > package.json
+[ -d node_modules/puppeteer-core ] || npm install --silent --no-audit --no-fund puppeteer-core@25.14.0 @puppeteer/browsers >/dev/null
+ls browsers/chrome-headless-shell/*/chrome-headless-shell-linux64/chrome-headless-shell >/dev/null 2>&1 ||
+  npx @puppeteer/browsers install chrome-headless-shell@stable --path /usr/local/lib/llm-render/browsers >/dev/null
+chmod -R a+rX /usr/local/lib/llm-render
+cd /
+
+# 6. Runner and renderer (heredocs appended by cli/exec-setup.mjs).

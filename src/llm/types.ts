@@ -11,6 +11,7 @@ export interface ImagePart {
   data?: string
   mime?: string
   url?: string
+  detail?: 'low' | 'high' | 'auto' | 'original'
 }
 
 export type Part = TextPart | ImagePart

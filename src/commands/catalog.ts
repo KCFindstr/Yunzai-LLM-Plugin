@@ -6,7 +6,7 @@ import { log } from '../core/log.ts'
 import { PLUGIN_NAME } from '../core/paths.ts'
 import { similarity } from '../core/util.ts'
 import { getLoader, getYunzaiCfg, ownClasses, pluginsDir } from '../core/yunzai.ts'
-import { PLACEHOLDER, PRESETS } from './presets.ts'
+const PLACEHOLDER = '{角色}'
 
 export interface RuleInfo {
   plugin: string
@@ -25,7 +25,7 @@ export interface RuleInfo {
 export interface CommandEntry {
   cmd: string
   desc: string
-  source: 'preset' | 'hint' | 'help'
+  source: 'hint' | 'help'
   plugin?: string
   verified: boolean
   /** concrete command used for validation (placeholder substituted) */
@@ -39,6 +39,15 @@ let rules: RuleInfo[] = []
 let entries: CommandEntry[] = []
 export let catalogVersion = 0
 let scannedAt = 0
+let scannedSignature = ''
+
+function ruleSignature(current: RuleInfo[]): string {
+  return JSON.stringify([config.version, current.map(rule => [rule.plugin, rule.reg.source, rule.reg.flags, rule.fnc, rule.permission, rule.event, rule.pluginEvent, rule.own])])
+}
+
+export async function ensureCatalog(): Promise<void> {
+  if (ruleSignature(await collectRules()) !== scannedSignature) await scanCatalog()
+}
 
 const NONSENSE = ['zq9x随机测试文本qq', '你好呀今天天气不错', 'abc', '']
 const SKIP_DIRS = new Set([PLUGIN_NAME, 'adapter', 'system', 'other', 'example'])
@@ -242,9 +251,9 @@ export async function scanCatalog(): Promise<{ rules: number; entries: number; v
     })
   }
   for (const h of config.get().tools.botCommand.hints ?? []) if (h?.cmd) await add(h.cmd, h.desc ?? '', 'hint')
-  for (const p of PRESETS) await add(p.cmd, p.desc, 'preset', { example: p.example, test: p.test, game: p.game, hidden: p.hidden })
   for (const h of scanHelpFiles()) await add(h.cmd, h.desc, 'help', { plugin: h.plugin })
   entries = list
+  scannedSignature = ruleSignature(rules)
   catalogVersion++
   scannedAt = Date.now()
   const verified = list.filter(x => x.verified).length
@@ -320,32 +329,19 @@ export function formatCommandCatalog(opts: CatalogFilter = {}): string {
     sections.push(`【${title}】（${list.length} 条）：\n${lines.join('\n')}`)
   }
 
-  const note =
-    '\n【角色与别名使用说明】\n' +
-    '1. 凡带有「角色名」的指令（如 *{角色}面板、#{角色}面板、*{角色}伤害、*{角色}攻略 等），插件已内嵌海量官方全名、二创别称及SP角色（如星铁的火花、狼尊、老泉、卡芙卡；原神的雷神、帝君等）。\n' +
-    '2. 用户询问角色时，直接使用用户提到的角色名代入指令即可（例如用户说“火花面板”执行「*火花面板」，用户说“狼尊面板”执行「*狼尊面板」），严禁自行纠正或替换角色名！'
+  const note = filtered.some(entry => entry.cmd.includes(PLACEHOLDER))
+    ? '\n参数使用用户提供的名称；不要自行纠正或替换名称。'
+    : ''
 
   return `=== 机器人已安装指令列表（共 ${filtered.length} 条可用） ===\n\n${sections.join('\n\n')}\n${note}`
 }
 
-/**
- * Entries for the system prompt: verified hints first, then presets round-robin across games (so a small limit
- * still covers 原神/星铁/绝区零), then scraped help entries. Deterministic for a given catalog.
- */
+/** Verified user hints and discovered help entries, in stable order. */
 export function promptEntries(limit: number): CommandEntry[] {
   const ok = entries.filter(e => e.verified && !e.hidden)
   const hints = ok.filter(e => e.source === 'hint')
-  const byGame = new Map<string, CommandEntry[]>()
-  for (const e of ok.filter(x => x.source === 'preset')) {
-    const g = e.game ?? 'other'
-    if (!byGame.has(g)) byGame.set(g, [])
-    byGame.get(g)!.push(e)
-  }
-  const presets: CommandEntry[] = []
-  const queues = [...byGame.values()]
-  for (let i = 0; queues.some(q => i < q.length); i++) for (const q of queues) if (i < q.length) presets.push(q[i])
   const help = ok.filter(e => e.source === 'help')
-  return [...hints, ...presets, ...help].slice(0, Math.max(0, limit))
+  return [...hints, ...help].slice(0, Math.max(0, limit))
 }
 
 /** Lexical search over descriptions and rule regexes (Chinese-friendly bigram similarity). */
@@ -381,6 +377,7 @@ export function searchCommands(query: string, n = 8): string[] {
   }
 
   for (const c of entries) {
+    if (!c.verified) continue
     let s = Math.max(similarity(q, c.desc), similarity(q, c.cmd) * 0.9)
     if (c.cmd.includes(PLACEHOLDER)) {
       const concretized = c.cmd.replace(PLACEHOLDER, q)

@@ -14,6 +14,10 @@ export interface TurnState {
   /** images produced by tools (render_html, run_code), sent after the text reply */
   images: Buffer[]
   memoryChanged?: boolean
+  /** run_code / render_html workspace shared within this reply (deleted when the reply ends) */
+  sandboxSession?: string
+  afterReply?: (() => void)[]
+  computerJob?: string
 }
 
 export interface ToolCtx {
@@ -43,6 +47,8 @@ export interface ToolDef {
   run(args: Record<string, any>, ctx: ToolCtx): Promise<ToolOutput | string>
 }
 
+/** images per reply from render_html and run_code combined */
+export const MAX_IMAGES_PER_TURN = 2
 const MAX_RESULT_CHARS = 8000
 const TOOL_TIMEOUT_MS = 60_000
 

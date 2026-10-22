@@ -1,6 +1,7 @@
 import { fakeEvent, mockServer, writeUserConfig } from './helpers.ts'
 import assert from 'node:assert/strict'
 import { after, before, beforeEach, describe, it } from 'node:test'
+import http from 'node:http'
 
 const srvReplies: any[] = []
 const srvStatus: number[] = []
@@ -44,6 +45,13 @@ reply:
 trigger: { userCooldown: 0 }
 sticker: { enable: false }
 tools:
+  botCommand:
+    hints:
+      - { cmd: '#深渊', desc: '原神深境螺旋' }
+      - { cmd: '#上期深渊', desc: '原神上期深境螺旋' }
+      - { cmd: '*忘却之庭', desc: '星铁忘却之庭' }
+      - { cmd: '#{角色}面板', desc: '原神角色面板' }
+      - { cmd: '#体力', desc: '原神体力' }
   webSearch: { enable: false }
 `)
 
@@ -99,7 +107,7 @@ describe('command catalog', () => {
     await scanCatalog()
   })
 
-  it('validates presets against live rules (incl. * prefix normalisation) and ignores catch-alls', () => {
+  it('validates configured hints against live rules (incl. * prefix normalisation) and ignores catch-alls', () => {
     const byCmd = new Map(catalogEntries().map(c => [c.cmd, c]))
     assert.equal(byCmd.get('#深渊')?.verified, true)
     assert.equal(byCmd.get('#上期深渊')?.verified, true)
@@ -133,7 +141,7 @@ describe('command catalog', () => {
     )
   })
 
-  it('prompt list covers every game even with a small limit and hides synonyms', () => {
+  it('prompt list uses verified hints and honors its limit', () => {
     const cmds = promptEntries(3).map(c => c.cmd)
     assert.equal(cmds.length, 3)
     assert.ok(cmds.includes('#深渊') || cmds.some(c => c.startsWith('#')), String(cmds))
@@ -183,6 +191,38 @@ describe('chat flow', () => {
     assert.equal(srv.requests.length, 0)
   })
 
+  it('sends standalone, inline, and quoted images as real API image parts', async () => {
+    const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9ZlWQAAAAASUVORK5CYII=', 'base64')
+    const server = http.createServer((_req, res) => {
+      res.writeHead(200, { 'content-type': 'image/png' })
+      res.end(png)
+    })
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+    const url = `http://127.0.0.1:${(server.address() as any).port}/image.png`
+    try {
+      for (const [index, image] of [{ type: 'image', url }, { type: 'image', file: url }, { type: 'mface', url }].entries()) {
+        srvReplies.push(textReply('看到了'))
+        await trigger({ user_id: 20500 + index, message_id: `image-${index}`, message: [
+          { type: 'at', qq: 10000 }, { type: 'text', text: '看看' }, image, { type: 'text', text: '这张图' },
+        ] })
+        const content = srv.requests[index].body.messages.at(-1).content
+        assert.match(content[0].text, /看看.*这张图/)
+        assert.deepEqual(content.filter((part: any) => part.type === 'image_url'), [
+          { type: 'image_url', image_url: { url: `data:image/png;base64,${png.toString('base64')}`, detail: 'low' } },
+        ])
+      }
+      srvReplies.push(textReply('引用图片也看到了'))
+      await trigger({ user_id: 20503, message_id: 'quoted-image', reply_id: 'original-image', getReply: async () => ({
+        sender: { user_id: 42, nickname: '图片作者' }, message: [{ type: 'image', file: url }],
+      }), message: [{ type: 'at', qq: 10000 }, { type: 'text', text: '看看引用图片' }] })
+      const content = srv.requests[3].body.messages.at(-1).content
+      assert.match(content[0].text, /图片作者/)
+      assert.equal(content.filter((part: any) => part.type === 'image_url').length, 1)
+    } finally {
+      await new Promise<void>(resolve => server.close(() => resolve()))
+    }
+  })
+
   it('replies to @ with model text and keeps the system prompt stable across turns', async () => {
     srvReplies.push(textReply('你好呀~'), textReply('我记得你'))
     recordGroupMessage({ self_id: 10000, group_id: 30001, user_id: 555, sender: { card: '路人' }, message: [{ type: 'text', text: '今天好热' }], message_id: 'x0' })
@@ -201,6 +241,54 @@ describe('chat flow', () => {
     assert.equal(q2.messages.length, 4, 'system + previous user + previous assistant + new user')
     assert.equal(q2.messages[2].content, '你好呀~')
     assert.doesNotMatch(q2.messages[1].content, /今天好热/, 'ambient chat not persisted into history')
+  })
+
+  it('converts model mention markers into real group at segments end to end', async () => {
+    srvReplies.push(textReply('好呀，[at:20010] 轮到你啦'))
+    const { sent } = await trigger({ group_id: 30002, user_id: 20009, message_id: 'mention-turn', message: [
+      { type: 'at', qq: 10000 }, { type: 'text', text: '请提醒她' }, { type: 'at', qq: 20010, name: '小红' },
+    ] })
+    assert.equal(sent.length, 1)
+    assert.deepEqual(sent[0].msg.filter((item: any) => item.type === 'at').map((item: any) => item.qq), ['20010'])
+    assert.match(srv.requests[0].body.messages[0].content, /\[at:ID\]/)
+    assert.match(srv.requests[0].body.messages[1].content, /\[at:20010\]\(小红\)/)
+  })
+
+  it('allows a model to mention an identity from long-term memory absent from the recent roster', async () => {
+    const { addMemory, clearMemory } = await import('../src/memory/store.ts')
+    assert.equal(addMemory('group', '30003', '群成员7是大肥鱼').ok, true)
+    try {
+      srvReplies.push(textReply('[at:7] 出来玩'))
+      const { sent } = await trigger({ group_id: 30003, user_id: 20009, message_id: 'remembered-mention-turn', message: [
+        { type: 'at', qq: 10000 }, { type: 'text', text: '艾特记忆里的大肥鱼' },
+      ] })
+      const messages = srv.requests[0].body.messages
+      assert.ok(messages.some((message: any) => String(message.content).includes('群成员7是大肥鱼')))
+      assert.doesNotMatch(messages.at(-1).content, /"id":"7"/)
+      assert.deepEqual(sent[0].msg.filter((item: any) => item.type === 'at').map((item: any) => item.qq), ['7'])
+    } finally {
+      clearMemory('group', '30003')
+    }
+  })
+
+  it('sends ordered mentions with a self marker to the model and preserves them in history', async () => {
+    srvReplies.push(textReply('我知道前半句是在对另一个机器人说话'))
+    const { e } = await trigger({ group_id: 30004, user_id: 20012, message_id: 'mixed-mention-turn', message: [
+      { type: 'at', qq: 7 }, { type: 'text', text: ' 你才是大肥鱼，' },
+      { type: 'at', qq: 10000 }, { type: 'text', text: ' 是哈基米' },
+    ] })
+    const content = srv.requests[0].body.messages.at(-1).content
+    assert.match(content, /\[at:7\] 你才是大肥鱼，\[at:you\] 是哈基米/)
+    const { peekSession, sessionKey } = await import('../src/chat/session.ts')
+    const stored = JSON.stringify(peekSession(sessionKey(e, config.effective(e.group_id).chat.sessionScope))?.messages)
+    assert.match(stored, /\[at:7\] 你才是大肥鱼，\[at:you\] 是哈基米/)
+  })
+
+  it('an empty self mention still uses the short acknowledgement without calling the model', async () => {
+    const { handled, sent } = await trigger({ user_id: 20013, message_id: 'only-self-at', msg: '', message: [{ type: 'at', qq: 10000 }] })
+    assert.equal(handled, true)
+    assert.equal(srv.requests.length, 0)
+    assert.equal(sent.length, 1)
   })
 
   it('turns natural language into an existing command and stops without extra text', async () => {

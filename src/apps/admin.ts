@@ -2,12 +2,12 @@ import YAML from 'yaml'
 import { queryBalance } from '../billing/balance.ts'
 import { daily, limitsFor, resetUsage, summarize, topUsers, totals, WINDOW_WEEK } from '../billing/ledger.ts'
 import { priceCacheInfo, refreshPrices, resolvePrice } from '../billing/pricing.ts'
-import { catalogEntries, catalogInfo, displayCmd, formatCommandCatalog, matchRule, scanCatalog, searchCommands } from '../commands/catalog.ts'
+import { catalogEntries, catalogInfo, displayCmd, ensureCatalog, formatCommandCatalog, matchRule, scanCatalog, searchCommands } from '../commands/catalog.ts'
 import { config, resolveKeys } from '../core/config.ts'
 import type { ModelConfig, ProviderType, QuotaScope, ThinkingLevel } from '../core/configTypes.ts'
 import { log } from '../core/log.ts'
 import { fetchBuffer, formatDuration, formatUsd, isPlainObject, maskSecret, truncate } from '../core/util.ts'
-import { botNickname, sendApi, sendForward } from '../core/yunzai.ts'
+import { botNickname, sendApi } from '../core/yunzai.ts'
 import { clearSession, clearSessionsWhere, peekSession, sessionKey, sessionStats } from '../chat/session.ts'
 import { getQuoted } from '../chat/message.ts'
 import { pickModel, utilityChat } from '../chat/utility.ts'
@@ -31,6 +31,8 @@ import { clearMemory, deleteMemory, listMemory, memoryStats, renderMemory, usage
 import { registry } from '../tools/registry.ts'
 import { deleteSkill, listSkills, loadSkills, parseSkillMarkdown, saveSkill } from '../tools/skills.ts'
 import { BasePlugin } from './base.ts'
+import { commandEvent, commandForward } from '../commands/reply.ts'
+import { computerOwner, computerQueue } from '../tools/computer.ts'
 
 const THINKING: ThinkingLevel[] = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']
 const SECRET_KEYS = /(apikey|api_key|key|token|secret|password)$/i
@@ -61,7 +63,7 @@ async function say(e: any, text: string) {
     cur += (cur ? '\n\n' : '') + para
   }
   if (cur) chunks.push(cur)
-  return sendForward(e, chunks, botNickname(e))
+  return commandForward(e, chunks, botNickname(e))
 }
 
 function parseValue(raw: string): any {
@@ -166,7 +168,7 @@ const COMMANDS: Cmd[] = [
           help.ADMIN_HELP_STICKER,
           help.ADMIN_HELP_TOOLS,
         )
-      return sendForward(e, nodes, botNickname(e))
+      return commandForward(e, nodes, botNickname(e))
     },
   },
   {
@@ -864,6 +866,22 @@ const COMMANDS: Cmd[] = [
 
   // ----- tools / skills / commands -----
   {
+    names: ['电脑任务', 'pctasks'],
+    level: 'user',
+    async run({ e, args }) {
+      const identity = computerOwner(e)
+      const [id, action] = args.trim().split(/\s+/)
+      if (!id) {
+        const jobs = computerQueue.jobs.filter(job => job.owner === identity).slice(-5).reverse()
+        return say(e, jobs.length ? jobs.map(job => `${job.id} ${job.status} ${truncate(job.task, 70)}`).join('\n') + '\n#llm电脑任务 <id> [取消]' : '你在此会话中还没有电脑任务')
+      }
+      const job = computerQueue.get(id, identity)
+      if (!job) return e.reply('找不到属于你在此会话中的电脑任务')
+      if (action === '取消' || action === 'cancel') computerQueue.cancel(job)
+      return say(e, `${job.id} ${job.status}（${job.steps ?? 0}步）\n输入 ${job.inputTokens ?? 0}，输出 ${job.outputTokens ?? 0}，缓存读取 ${job.cacheReadTokens ?? 0}，缓存写入 ${job.cacheWriteTokens ?? 0}\n${job.report ?? ''}`)
+    },
+  },
+  {
     names: ['工具列表', 'tools'],
     level: 'admin',
     async run({ e }) {
@@ -946,6 +964,7 @@ const COMMANDS: Cmd[] = [
     names: ['指令列表'],
     level: 'admin',
     async run({ e, args }) {
+      await ensureCatalog()
       if (args) return say(e, searchCommands(args, 15).join('\n') || '没有找到')
       return say(e, formatCommandCatalog())
     },
@@ -962,7 +981,8 @@ const COMMANDS: Cmd[] = [
     names: ['测试指令'],
     level: 'admin',
     async run({ e, args }) {
-      if (!args) return e.reply('格式：#llm测试指令 #深渊')
+      if (!args) return e.reply('格式：#llm测试指令 <完整指令>（先用 #llm指令列表 查询）')
+      await ensureCatalog()
       const r = await matchRule(args, e)
       return e.reply(r ? `「${args}」→ 插件「${r.plugin}」的 ${r.fnc}（/${truncate(r.reg.source, 80)}/）${r.permission ? ` 权限:${r.permission}` : ''}` : `没有插件会处理「${args}」`)
     },
@@ -998,7 +1018,7 @@ export class LLMAdmin extends BasePlugin {
   }
 
   async dispatch(): Promise<boolean> {
-    const e = this.e
+    const e = commandEvent(this.e, config.effective(this.e.group_id).reply)
     const text = String(e.msg ?? '').replace(/^#\s*llm/i, '').trim()
     const lower = text.toLowerCase()
     const hit = NAMES.find(([n]) => (n === '' ? lower === '' : lower.startsWith(n)))
