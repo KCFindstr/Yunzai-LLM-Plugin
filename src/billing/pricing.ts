@@ -35,6 +35,24 @@ const BUILTIN: Record<string, Omit<Price, 'source'>> = {
   'claude-sonnet-4-6': { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75, cacheWrite1h: 6 },
   'claude-haiku-5-5': { input: 0.1, output: 0.5, cacheRead: 0.01, cacheWrite: 0.125, cacheWrite1h: 0.2 },
   'claude-haiku-4-5': { input: 1, output: 5, cacheRead: 0.1, cacheWrite: 1.25, cacheWrite1h: 2 },
+  // TypeSafe System One
+  jev: { input: 0.042, output: 0 },
+  kev: { input: 0, output: 0 },
+}
+
+/** Default price for TypeSafe System One Jev models ($0.042/1M input tokens, free outputs). */
+export const DEFAULT_JEV_PRICE: Omit<Price, 'source'> = { input: 0.042, output: 0 }
+/** Default price for self-hosted Kev models (local, $0). */
+export const DEFAULT_KEV_PRICE: Omit<Price, 'source'> = { input: 0, output: 0 }
+
+export function isJevModel(id: string): boolean {
+  const norm = normalizeModelId(id)
+  return norm === 'jev' || /^jev([-_].*)?$/.test(norm)
+}
+
+export function isKevModel(id: string): boolean {
+  const norm = normalizeModelId(id)
+  return norm === 'kev' || /^kev([-_].*)?$/.test(norm)
 }
 
 /** Approximate native web-search prices (USD/search) when the price list has none. */
@@ -164,12 +182,30 @@ export function resolvePrice(model: ModelConfig): Price | undefined {
     return withSearch({ ...(model.pricing as any), source: 'config' })
   const id = normalizeModelId(model.pricingId || model.model)
   if (BUILTIN[id]) return withSearch({ ...BUILTIN[id], source: 'builtin' })
+  if (isJevModel(id)) return withSearch({ ...DEFAULT_JEV_PRICE, source: 'builtin' })
+  if (isKevModel(id)) return withSearch({ ...DEFAULT_KEV_PRICE, source: 'builtin' })
   const remote = cache.data.entries[id]
   if (remote) return withSearch(remote)
   if (!warned.has(id)) {
     warned.add(id)
     log.warn(`模型 ${model.id}(${model.model}) 价格未知，额度统计将按 $0 计算。请在配置中设置 pricing 或 pricingId`)
   }
+  return undefined
+}
+
+/** Resolve price for an arbitrary model name or id (e.g. System One judges, classifiers) without a ModelConfig. */
+export function resolveModelPrice(modelName: string): Price | undefined {
+  const m = config.getModel(modelName)
+  if (m) {
+    const p = resolvePrice(m)
+    if (p) return p
+  }
+  const id = normalizeModelId(modelName)
+  if (BUILTIN[id]) return { ...BUILTIN[id], source: 'builtin' }
+  if (isJevModel(id)) return { ...DEFAULT_JEV_PRICE, source: 'builtin' }
+  if (isKevModel(id)) return { ...DEFAULT_KEV_PRICE, source: 'builtin' }
+  const remote = cache.data.entries[id]
+  if (remote) return remote
   return undefined
 }
 

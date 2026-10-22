@@ -316,7 +316,7 @@ tools:
   #   parameters: { type: object, properties: { city: { type: string } }, required: [city] }
   #   url: https://wttr.in/{city}?format=3&lang=zh
   http: []
-  # 把 HTML 渲染成图片发送（用于长回答、表格、对比、步骤、代码等）。页面脚本被禁用，只能加载公网资源
+  # 模型可把 HTML 渲染成图片发送（用于表格、多维对比、排版复杂的内容；代码、命令、链接和普通长文仍发文字）。页面脚本被禁用，只能加载公网资源
   renderHtml:
     enable: true
     width: 720

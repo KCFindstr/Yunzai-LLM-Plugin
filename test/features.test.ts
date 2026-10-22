@@ -74,14 +74,15 @@ describe('markdown output', () => {
     assert.doesNotMatch(buildSystemPrompt({ isGroup: true, botName: 'B', eff, tools: [], nativeSearch: false, markdown: false }), /工具最多/)
   })
 
-  it('requires HTML for all long answers regardless of Markdown mode or structure', () => {
+  it('lets the model choose text or HTML for long answers, keeping copyable content as text', () => {
     const eff = { ...config.effective(), reply: { ...config.effective().reply, maxBubbles: 2 } }
     const base = { isGroup: true, botName: 'B', eff, tools: ['render_html'], nativeSearch: false }
     const md = buildSystemPrompt({ ...base, markdown: true })
-    assert.match(md, /所有长回复，无论是否结构化，都用 render_html/)
-    assert.doesNotMatch(md, /长回答直接用 Markdown/)
+    assert.match(md, /长回复自己决定用文字还是图片/)
+    assert.match(md, /要复制的内容.*直接发文字/)
+    assert.doesNotMatch(md, /所有长回复/)
     const plain = buildSystemPrompt({ ...base, markdown: false })
-    assert.match(plain, /所有长回复，无论是否结构化，都用 render_html/)
+    assert.match(plain, /长回复自己决定用文字还是图片/)
     assert.ok(plain.length < 2200, `concise static prompt: ${plain.length} chars`)
   })
 })

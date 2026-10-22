@@ -1,6 +1,8 @@
 import type { QuotaCtx } from '../billing/ledger.ts'
+import { computeCost, DEFAULT_JEV_PRICE, resolveModelPrice, resolvePrice } from '../billing/pricing.ts'
 import type { ChatSection, ThinkingJudgeConfig, ThinkingLevel, ThinkingSetting } from '../core/configTypes.ts'
 import { brief, log } from '../core/log.ts'
+import { emptyUsage, type Usage } from '../llm/types.ts'
 import { utilityCandidates, utilityChat } from './utility.ts'
 
 /** Requests that benefit from deeper reasoning or research. */
@@ -68,8 +70,22 @@ function obvious(t: string, input: JudgeInput): MessageKind | undefined {
   return undefined
 }
 
+function formatProbabilities(probs: any): string {
+  if (!probs || typeof probs !== 'object') return ''
+  const entries: [string, any][] = Array.isArray(probs)
+    ? probs.map((p: any) => [p.choice ?? p.name ?? '?', p.probability ?? p.score ?? p.prob])
+    : Object.entries(probs)
+  if (!entries.length) return ''
+  const order: Record<string, number> = { casual: 1, question: 2, complex: 3 }
+  entries.sort(([a], [b]) => (order[a] ?? 99) - (order[b] ?? 99))
+  return entries
+    .map(([k, v]) => `${k}=${typeof v === 'number' ? (Number.isInteger(v) ? v : v.toFixed(3)) : v}`)
+    .join(' ')
+}
+
 async function judgeWithModel(input: JudgeInput, cfg: ThinkingJudgeConfig, quotaCtx: QuotaCtx): Promise<MessageKind | undefined> {
-  const { text } = await utilityChat({
+  const started = Date.now()
+  const { text, model, usage, cost } = await utilityChat({
     candidates: utilityCandidates(cfg.model || undefined),
     system: JUDGE_PROMPT,
     user: [{ type: 'text', text: judgeUserText(input.text, input) }],
@@ -79,11 +95,19 @@ async function judgeWithModel(input: JudgeInput, cfg: ThinkingJudgeConfig, quota
     quotaCtx,
     signal: AbortSignal.timeout(cfg.timeoutMs),
   })
-  return parseJudge(text)
+  const kind = parseJudge(text)
+  const price = resolvePrice(model)
+  const priceStr = price ? `$${price.input}/M` : 'unknown'
+  const costStr = cost != null ? `$${cost.toFixed(5)}` : '$0.00000'
+  log.debug(
+    `[model-judge ${model.id}] ${Date.now() - started}ms choice=${kind ?? 'unknown'}(${text.trim()}) in=${usage?.input ?? '?'} price=${priceStr} cost=${costStr}`,
+  )
+  return kind
 }
 
 /** TypeSafe System One API (Jev), also served by self-hosted Kev. */
 async function judgeWithSystemOne(input: JudgeInput, cfg: ThinkingJudgeConfig): Promise<MessageKind | undefined> {
+  const started = Date.now()
   const res = await fetch(cfg.url, {
     method: 'POST',
     headers: { 'content-type': 'application/json', ...(cfg.apiKey ? { authorization: `Bearer ${cfg.apiKey}` } : {}) },
@@ -96,7 +120,28 @@ async function judgeWithSystemOne(input: JudgeInput, cfg: ThinkingJudgeConfig): 
   })
   if (!res.ok) throw new Error(`System One HTTP ${res.status}`)
   const j: any = await res.json()
-  return parseJudge(String(j?.answers?.kind?.choice ?? ''))
+  const kindAns = j?.answers?.kind
+  const kind = parseJudge(String(kindAns?.choice ?? ''))
+  const ms = Date.now() - started
+  const modelName = j?.model || cfg.systemoneModel || 'jev-latest'
+  const price = resolveModelPrice(modelName) ?? (/typesafe\.ai/i.test(cfg.url) ? { ...DEFAULT_JEV_PRICE, source: 'builtin' } : undefined)
+  const inputTokens = j?.usage?.input_tokens ?? j?.usage?.prompt_tokens ?? j?.usage?.input
+  const outputTokens = j?.usage?.output_tokens ?? j?.usage?.completion_tokens ?? j?.usage?.output ?? 0
+  const usage: Usage = {
+    ...emptyUsage(),
+    input: inputTokens ?? 0,
+    output: outputTokens,
+    cost: typeof j?.cost === 'number' ? j.cost : typeof j?.usage?.cost === 'number' ? j.usage.cost : undefined,
+  }
+  const cost = computeCost(usage, price)
+  const probs = formatProbabilities(kindAns?.probabilities)
+  const confStr = kindAns?.confidence != null ? ` conf=${typeof kindAns.confidence === 'number' ? kindAns.confidence.toFixed(2) : kindAns.confidence}` : ''
+  const priceStr = price ? `$${price.input}/M` : 'unknown'
+  const costStr = `$${cost.toFixed(6)}`
+  log.debug(
+    `[systemone ${modelName}] ${ms}ms choice=${kindAns?.choice ?? '?'}${confStr}${probs ? ` probs=(${probs})` : ''} in=${inputTokens ?? '?'} price=${priceStr} cost=${costStr}`,
+  )
+  return kind
 }
 
 /** Classify a message for thinking=auto; any judge failure or timeout falls back to the keyword heuristic. */

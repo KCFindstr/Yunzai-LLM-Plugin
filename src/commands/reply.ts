@@ -8,6 +8,7 @@ import { detectImageMime } from '../core/util.ts'
 
 const originalEvents = new WeakMap<object, any>()
 const batches = new WeakMap<object, { sections: string[]; media: any[] }>()
+const formatters = new WeakMap<object, (message: any) => any>()
 
 function capture(batch: { sections: string[]; media: any[] }, message: any) {
   if (typeof message === 'string') { if (message.trim()) batch.sections.push(message); return }
@@ -47,6 +48,12 @@ export async function flushCommand(e: any) {
   const native = batch.media.filter((_segment, index) => !sources[index])
   const original = originalEvents.get(e) ?? e
   if (!batch.sections.length && sources.every(source => !source)) return original.reply(native.length === 1 ? native[0] : native)
+  // short output stays copyable text; only long output (help, lists) becomes one image
+  const text = batch.sections.join('\n\n')
+  if (!isLongResponse(text)) {
+    const parts = [...(text ? [(formatters.get(e) ?? ((message: any) => message))(text)] : []), ...batch.media]
+    return original.reply(parts.length === 1 ? parts[0] : parts)
+  }
   const image = seg().image(await renderCommandResponse(batch.sections, botNickname(e), sources.filter((source): source is string => Boolean(source))))
   return original.reply(native.length ? [image, ...native] : image)
 }
@@ -121,6 +128,7 @@ export function commandEvent(e: any, reply: ReplySection, batch = false): any {
     }, configurable: true },
   })
   originalEvents.set(wrapped, e)
+  formatters.set(wrapped, format)
   if (batch) batches.set(wrapped, { sections: [], media: [] })
   return wrapped
 }

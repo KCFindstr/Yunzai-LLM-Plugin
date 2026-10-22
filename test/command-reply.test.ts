@@ -72,7 +72,8 @@ describe('command reply formatting', () => {
     e.msg = '#llm不存在'
     await admin.dispatch()
     assert.equal(sent.length, 2)
-    assert.ok(isImage(sent.at(-1)!.msg), 'short command responses use the same single-image template')
+    assert.equal(typeof sent.at(-1)!.msg, 'string', 'short command responses stay text')
+    assert.ok(!isImage(sent.at(-1)!.msg))
   })
 
   it('renders long DM and OneBot built-in responses as images too', async () => {
@@ -91,20 +92,22 @@ describe('command reply formatting', () => {
     assert.equal(sent[0].msg.at(-1), originalImage)
   })
 
-  it('automatically renders long model text and preserves explicit mentions beside the image', async () => {
+  it('sends long model text as copyable text, not an image, keeping explicit mentions', async () => {
     const { e, sent } = fakeEvent()
     const eff = config.effective()
     eff.sticker.enable = false
+    eff.reply.markdown = true
     eff.reply.typing = { charsPerSecond: 1000, minDelay: 0, maxDelay: 0 }
     eff.reply.groupRate = { count: 100, perSeconds: 1 }
     eff.reply.globalRate = { count: 100, perSeconds: 1 }
-    await deliver(e, '故事'.repeat(350) + '[at:20002]', eff, { startedAt: Date.now(), convKey: 'html-fallback' })
+    await deliver(e, '```bash\n' + 'echo 故事\n'.repeat(120) + '```[at:20002]', eff, { startedAt: Date.now(), convKey: 'long-text' })
     assert.ok(sent.length > 0)
     const segments = sent.flatMap(item => Array.isArray(item.msg) ? item.msg : [item.msg])
-    assert.ok(segments.some(isImage))
-    assert.equal(segments.filter(part => part.type === 'at').length, 1)
-    assert.equal(segments.find(part => part.type === 'at').qq, '20002')
-    assert.ok(!segments.some(part => part.type === 'text'), 'no duplicate long text')
+    assert.ok(!segments.some(isImage), 'not auto-rendered')
+    const text = segments.map(part => typeof part === 'string' ? part : part.type === 'text' ? part.text ?? part.data?.text ?? '' : '').join('')
+    assert.equal(text.match(/echo 故事/g)?.length, 120, 'full text kept')
+    assert.equal(segments.filter(part => part?.type === 'at').length, 1)
+    assert.equal(segments.find(part => part?.type === 'at').qq, '20002')
   })
 
   it('merges all text and image replies from one command before sending exactly one image', async () => {

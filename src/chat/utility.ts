@@ -3,7 +3,7 @@ import { checkQuota, record, type QuotaCtx } from '../billing/ledger.ts'
 import { config } from '../core/config.ts'
 import type { ModelConfig, ProviderConfig, ThinkingLevel } from '../core/configTypes.ts'
 import { log } from '../core/log.ts'
-import { chat, type Part } from '../llm/index.ts'
+import { chat, type Part, type Usage } from '../llm/index.ts'
 
 export interface Picked {
   model: ModelConfig
@@ -43,7 +43,7 @@ export async function utilityChat(opts: {
   thinking?: ThinkingLevel
   temperature?: number
   signal?: AbortSignal
-}): Promise<{ text: string; model: ModelConfig }> {
+}): Promise<{ text: string; model: ModelConfig; usage: Usage; cost: number }> {
   const picked = pickModel(opts.candidates, opts.vision)
   if (!picked) throw new Error(opts.vision ? '没有可用的视觉模型（需配置 vision 模型及 API Key）' : '没有可用的模型')
   const block = checkQuota(picked.model, opts.quotaCtx)
@@ -72,8 +72,8 @@ export async function utilityChat(opts: {
   }
   const cost = computeCost(res.usage, resolvePrice(picked.model))
   record(picked.model, opts.quotaCtx, cost, res.usage)
-  log.debug(`utility call ${picked.model.id} cost=${cost.toFixed(5)}`)
-  return { text: res.text, model: picked.model }
+  log.debug(`utility call ${picked.model.id} in=${res.usage?.input ?? 0} out=${res.usage?.output ?? 0} cost=${cost.toFixed(5)}`)
+  return { text: res.text, model: picked.model, usage: res.usage, cost }
 }
 
 /** Extract the first JSON object from model text (tolerates code fences / prose). */

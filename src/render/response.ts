@@ -1,4 +1,4 @@
-import { renderHtml, renderHtmlPages } from './browser.ts'
+import { renderHtml } from './browser.ts'
 
 export const LONG_RESPONSE_CHARS = 600
 
@@ -76,10 +76,4 @@ export async function renderCommandResponse(sections: string[], title?: string, 
   const html = responsePages(sections, title, true, true)[0] ?? responsePages(['（无内容）'], title, true, true)[0]
   const withMedia = html.replace('</main>', media.map(url => `<img class="media" src="${escapeHtml(url)}">`).join('') + '</main>')
   return renderHtml(withMedia, { width: columns ? 1280 : 760, maxHeight: 16000, scale: 0.75, allowNetwork: media.some(url => /^https?:/i.test(url)), fit: true })
-}
-
-export async function renderResponse(sections: string[], title?: string, literal = false): Promise<Buffer[]> {
-  const images: Buffer[] = []
-  for (const html of responsePages(sections, title, literal)) images.push(...await renderHtmlPages(html, { width: 760, maxHeight: 6000, allowNetwork: false }))
-  return images
 }

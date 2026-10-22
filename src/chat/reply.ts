@@ -7,7 +7,6 @@ import { chooseSticker, extractStickerMarkers, sendSticker } from '../stickers/p
 import { messagesSince, recordBotMessage } from './groupLog.ts'
 import { limiter } from './ratelimit.ts'
 import { replyMentions } from './mentions.ts'
-import { isLongResponse, renderResponse } from '../render/response.ts'
 
 /**
  * QQ shows Markdown literally; turn the common constructs into plain chat text.
@@ -95,16 +94,8 @@ export async function deliver(
 ) {
   const cfg = eff.reply
   const mentionBudget = { remaining: 5 }
-  let imageMentions: any[] = []
-  let rendered: Buffer[] = []
-  let content = raw
-  if (!opts.suppressText && isLongResponse(extractStickerMarkers(raw).text)) {
-    rendered = await renderResponse([extractStickerMarkers(raw).text], botNickname(e))
-    const segments = replyMentions(extractStickerMarkers(raw).text, e, mentionBudget)
-    if (Array.isArray(segments)) imageMentions = segments.filter(segment => segment.type === 'at')
-    content = extractStickerMarkers(raw).names.map(name => `[表情:${name}]`).join('\n')
-  }
-  const prep = prepareReply(content, cfg, markdownEnabled(e, cfg))
+  // long text stays text (copyable); the model calls render_html itself when an image reads better
+  const prep = prepareReply(raw, cfg, markdownEnabled(e, cfg))
   const sticker = chooseSticker(opts.convKey, prep.stickerNames, eff.sticker)
   const elapsed = Date.now() - opts.startedAt
 
@@ -147,13 +138,12 @@ export async function deliver(
   }
 
   // tool-rendered images (render_html) follow the text; they are the answer, so wait longer for a slot
-  for (const img of [...rendered, ...opts.images ?? []]) {
+  for (const img of opts.images ?? []) {
     if (!(await takeSlot(e, cfg, 20000))) {
       log.warn('达到发送频率上限，渲染图片未发送')
       break
     }
-    await e.reply(imageMentions.length ? [...imageMentions, seg().image(img)] : seg().image(img))
-    imageMentions = []
+    await e.reply(seg().image(img))
     recordBotMessage(e, '[图片]', opts.convKey)
   }
 

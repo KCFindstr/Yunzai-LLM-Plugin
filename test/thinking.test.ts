@@ -85,6 +85,67 @@ describe('thinking judge', () => {
     assert.deepEqual(Object.keys(req.body.questions.kind.criteria), ['casual', 'question', 'complex'])
   })
 
+  it('logs probabilities, input tokens, and pricing for systemone judge', async () => {
+    const logs: string[] = []
+    const prevLogger = (globalThis as any).logger
+    ;(globalThis as any).logger = {
+      debug: (_tag: string, msg: string) => logs.push(msg),
+      info: () => {},
+      warn: () => {},
+      error: () => {},
+    }
+    const s2 = await mockServer(() => [
+      200,
+      {
+        model: 'jev-latest',
+        answers: {
+          kind: {
+            type: 'choice',
+            choice: 'question',
+            confidence: 0.92,
+            probabilities: { casual: 0.05, question: 0.92, complex: 0.03 },
+          },
+        },
+        usage: { input_tokens: 120, output_tokens: 5 },
+      },
+    ])
+    try {
+      const j = await judgeMessage(
+        { text: '中秋节是几月几号' },
+        { ...cfg(), mode: 'systemone', url: `${s2.url}/v1/systemone`, apiKey: 'sk', systemoneModel: 'jev-latest' },
+        q,
+      )
+      assert.equal(j.kind, 'question')
+      assert.equal(j.source, 'systemone')
+      const debugLog = logs.find(l => l.includes('[systemone jev-latest]'))
+      assert.ok(debugLog, `should log [systemone jev-latest], got: ${JSON.stringify(logs)}`)
+      assert.ok(debugLog.includes('choice=question'), 'should include choice')
+      assert.ok(debugLog.includes('conf=0.92'), 'should include confidence')
+      assert.ok(debugLog.includes('casual=0.050 question=0.920 complex=0.030'), 'should include probabilities')
+      assert.ok(debugLog.includes('in=120'), 'should include input tokens')
+      assert.ok(debugLog.includes('price=$0.042/M'), 'should include jev price')
+      assert.ok(debugLog.includes('cost=$0.000005'), 'should include computed cost')
+    } finally {
+      ;(globalThis as any).logger = prevLogger
+      await s2.close()
+    }
+  })
+
+  it('resolves default price for jev models', async () => {
+    const { resolveModelPrice, resolvePrice, DEFAULT_JEV_PRICE } = await import('../src/billing/pricing.ts')
+    for (const name of ['jev', 'jev-latest', 'jev-preview', 'jev-1.0', 'typesafe/jev']) {
+      const price = resolveModelPrice(name)
+      assert.ok(price, `should resolve price for ${name}`)
+      assert.equal(price.input, DEFAULT_JEV_PRICE.input)
+      assert.equal(price.output, DEFAULT_JEV_PRICE.output)
+      assert.equal(price.source, 'builtin')
+    }
+    const modelCfgPrice = resolvePrice({ id: 'm', provider: 'typesafe', model: 'jev-preview', pricing: 'auto' })
+    assert.ok(modelCfgPrice)
+    assert.equal(modelCfgPrice.input, 0.042)
+    assert.equal(modelCfgPrice.output, 0)
+  })
+
   it('resolveThinking maps auto through chat.autoThinking and leaves fixed levels alone', async () => {
     const chat = config.effective().chat
     assert.equal(await resolveThinking('auto', chat, { text: '胡桃和行秋怎么配队' }, q), 'high')
