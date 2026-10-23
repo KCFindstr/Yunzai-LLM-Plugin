@@ -5,6 +5,7 @@ import type { ChatSection, ThinkingJudgeConfig, ThinkingLevel, ThinkingSetting }
 import { brief, log } from '../core/log.ts'
 import { emptyUsage, type Usage } from '../llm/types.ts'
 import { utilityCandidates, utilityChat } from './utility.ts'
+import { resolveKeys } from '../core/config.ts'
 
 /** Requests that benefit from deeper reasoning or research. */
 const COMPLEX =
@@ -146,7 +147,7 @@ async function judgeWithSystemOne(input: JudgeInput, cfg: ThinkingJudgeConfig): 
   const started = Date.now()
   const res = await fetch(cfg.url, {
     method: 'POST',
-    headers: { 'content-type': 'application/json', ...(cfg.apiKey ? { authorization: `Bearer ${cfg.apiKey}` } : {}) },
+    headers: { 'content-type': 'application/json', ...(resolveKeys(cfg.apiKey)[0] ? { authorization: `Bearer ${resolveKeys(cfg.apiKey)[0]}` } : {}) },
     body: JSON.stringify({
       model: cfg.systemoneModel,
       state: judgeUserText(input.text, input),

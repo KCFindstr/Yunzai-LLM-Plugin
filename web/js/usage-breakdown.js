@@ -16,7 +16,7 @@ export function usageBreakdown(modelIds) {
     h('p', '时间按本地时区，包含开始、不包含结束。缓存包括缓存读和写；输出包含思考 token。其他费用为搜索和请求费。服务商仅返回总费用时记入“未分摊费用”，不推算各类费用。'))
   const submit = h('button', { class: 'btn', type: 'submit' }, '查询')
 
-  let data, sequence = 0
+  let data, sequence = 0, chartObserver
   let chartMetric = 'cost' // 'cost' | 'tokens'
   let chartMode = 'line' // 'line' | 'grouped' | 'category'
 
@@ -45,6 +45,7 @@ export function usageBreakdown(modelIds) {
   )
 
   function renderChart() {
+    chartObserver?.disconnect()
     if (!data || !data.rows.length) {
       mount(chartArea, null)
       return
@@ -132,7 +133,17 @@ export function usageBreakdown(modelIds) {
         ? (chartMode === 'category' ? '提示：显示各类别的汇总分布' : '提示：默认分离输入/输出/缓存；悬浮查看明细，点击柱形可按模型筛选')
         : '当前模型用量构成分布（未缓存输入、输出、缓存）')
 
-    const detailBox = h('div', { class: 'small muted', style: { minHeight: '18px', transition: 'color .15s' } }, defaultHint)
+    const detailBox = h('div', { class: 'usage-chart-detail', role: 'status', 'aria-live': 'polite', 'aria-atomic': 'true' }, defaultHint)
+    const swatch = (color, dash = 'none') => h('span', { class: 'usage-legend-swatch', 'aria-hidden': 'true',
+      html: `<svg xmlns="http://www.w3.org/2000/svg" width="26" height="12" viewBox="0 0 26 12"><line x1="2" y1="6" x2="24" y2="6" stroke="${color}" stroke-width="3" stroke-linecap="round" stroke-dasharray="${dash}" /></svg>` })
+    const showDetails = (title, subtitle, values) => {
+      detailBox.className = 'usage-chart-detail active'
+      mount(detailBox,
+        h('div', { class: 'usage-detail-head' }, h('strong', title), h('span', subtitle)),
+        h('div', { class: 'usage-detail-values' }, values.map(item => h('div', { class: 'usage-detail-value' },
+          item.color ? swatch(item.color, item.dash) : h('span', { class: `usage-legend-dot ${item.colorClass}` }),
+          h('span', { class: 'usage-detail-label' }, item.label), h('strong', formatVal(item.val))))))
+    }
 
     if (chartMode === 'line' && data.timeline && data.timeline.length) {
       const pts = data.timeline
@@ -195,20 +206,13 @@ export function usageBreakdown(modelIds) {
       const lineLegendBar = h('div', { class: 'usage-chart-legend' },
         series.map(s => {
           const pct = sumTotal > 0 ? (s.total / sumTotal * 100).toFixed(1) : '0.0'
-          return h('div', {
+          return h(isMultiModel ? 'button' : 'div', {
             class: `usage-legend-item ${isMultiModel ? 'clickable' : ''}`,
+            type: isMultiModel ? 'button' : null,
             title: isMultiModel ? `${s.label}：${formatVal(s.total)} (${pct}%)\n点击筛选该模型` : `${s.label}：${formatVal(s.total)} (${pct}%)`,
             onclick: isMultiModel ? () => { model.value = s.model; void load() } : null,
           },
-            h('svg', { width: '20', height: '10', class: 'usage-legend-line-svg', viewBox: '0 0 20 10' },
-              h('line', {
-                x1: '1', y1: '5', x2: '19', y2: '5',
-                stroke: s.color,
-                'stroke-width': '2.5',
-                'stroke-dasharray': s.dash !== 'none' ? s.dash : undefined,
-                'stroke-linecap': 'round',
-              })
-            ),
+            swatch(s.color, s.dash),
             h('span', { class: 'usage-legend-label' }, s.label),
             h('span', { class: 'usage-legend-val' }, `${compactVal(s.total)} (${pct}%)`),
           )
@@ -221,12 +225,15 @@ export function usageBreakdown(modelIds) {
       const plotH = height - padT - padB
       const getY = val => padT + plotH - (maxVal > 0 ? (val / maxVal) * plotH : 0)
 
-      const lineChartWrap = h('div', { class: 'usage-line-chart' })
+      const lineChartWrap = h('div', { class: 'usage-line-chart', tabIndex: 0, role: 'group',
+        'aria-label': '模型用量趋势，使用左右方向键选择时段' })
+      let geometry, selectedIndex
 
       function drawSvg(w) {
         const width = Math.max(360, Math.round(w || lineChartWrap.clientWidth || 800))
         const plotW = width - padL - padR
         const getX = i => padL + (N > 1 ? (i / (N - 1)) * plotW : plotW / 2)
+        geometry = { getX, plotW }
 
         const gridSvg = `
           <line x1="${padL}" y1="${padT}" x2="${padL + plotW}" y2="${padT}" class="usage-line-grid" />
@@ -264,10 +271,10 @@ export function usageBreakdown(modelIds) {
           `
         }).join('')
 
-        const crosshairDots = series.map(s => `<circle id="dot-${s.key}" class="usage-line-dot" fill="${s.color}" cx="0" cy="0" />`).join('')
+        const crosshairDots = series.map(s => `<circle class="usage-line-dot" fill="${s.color}" cx="0" cy="0" r="4.5" />`).join('')
         const crosshairSvg = `
-          <g id="crosshair-group" style="display: none;">
-            <line id="crosshair-line" x1="0" y1="${padT}" x2="0" y2="${padT + plotH}" class="usage-line-crosshair" />
+          <g class="usage-crosshair-group" style="display: none;">
+            <line x1="0" y1="${padT}" x2="0" y2="${padT + plotH}" class="usage-line-crosshair" />
             ${crosshairDots}
           </g>
         `
@@ -278,31 +285,23 @@ export function usageBreakdown(modelIds) {
           ${crosshairSvg}
           ${xLabelsSvg}
         </svg>`
+        if (selectedIndex != null) paintSelection(selectedIndex)
       }
 
-      lineChartWrap.onmousemove = e => {
-        const rect = lineChartWrap.getBoundingClientRect()
-        const mouseX = e.clientX - rect.left
-        const width = Math.max(360, Math.round(rect.width || 800))
-        const plotW = width - padL - padR
-        const getX = i => padL + (N > 1 ? (i / (N - 1)) * plotW : plotW / 2)
-
-        const clampedX = Math.max(padL, Math.min(padL + plotW, mouseX))
-        const ratio = (clampedX - padL) / (plotW || 1)
-        const idx = Math.max(0, Math.min(N - 1, Math.round(ratio * (N - 1))))
+      function paintSelection(idx) {
         const pt = pts[idx]
         if (!pt) return
-
-        const ptX = getX(idx)
-        const crossGroup = lineChartWrap.querySelector('#crosshair-group')
+        const ptX = geometry.getX(idx)
+        const crossGroup = lineChartWrap.querySelector('.usage-crosshair-group')
         if (crossGroup) crossGroup.style.display = ''
-        const line = lineChartWrap.querySelector('#crosshair-line')
+        const line = lineChartWrap.querySelector('.usage-line-crosshair')
         if (line) {
           line.setAttribute('x1', ptX.toFixed(1))
           line.setAttribute('x2', ptX.toFixed(1))
         }
-        for (const s of series) {
-          const dot = lineChartWrap.querySelector(`#dot-${s.key}`)
+        const dots = lineChartWrap.querySelectorAll('.usage-line-dot')
+        for (const [index, s] of series.entries()) {
+          const dot = dots[index]
           if (dot) {
             dot.setAttribute('cx', ptX.toFixed(1))
             dot.setAttribute('cy', getY(s.getVal(pt)).toFixed(1))
@@ -315,30 +314,37 @@ export function usageBreakdown(modelIds) {
           ? d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })
           : d.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })
 
-        const activeSeries = series.map(s => ({ s, val: s.getVal(pt) })).filter(item => item.val > 0)
-        let detailHtml = `<strong>${timeStr}</strong> · 共 ${fmt.num(pt.calls)} 次调用`
-        if (activeSeries.length) {
-          const parts = activeSeries.map(({ s, val }) => `<span style="color:${s.color};font-weight:550;">${s.shortLabel}: ${formatVal(val)}</span>`)
-          detailHtml += '：' + parts.join(' · ')
-        } else {
-          detailHtml += '：无用量'
+        if (selectedIndex !== idx) {
+          const values = series.map(s => ({ label: s.shortLabel, val: s.getVal(pt), color: s.color, dash: s.dash }))
+          showDetails(timeStr, `${fmt.num(pt.calls)} 次调用 · ${isTokens ? 'Token' : '费用（USD）'}`,
+            values)
         }
-        detailBox.innerHTML = detailHtml
-        detailBox.className = 'small'
+        selectedIndex = idx
       }
 
-      lineChartWrap.onmouseleave = () => {
-        const crossGroup = lineChartWrap.querySelector('#crosshair-group')
-        if (crossGroup) crossGroup.style.display = 'none'
-        detailBox.textContent = defaultHint
-        detailBox.className = 'small muted'
+      lineChartWrap.onpointermove = e => {
+        const svg = lineChartWrap.querySelector('svg')
+        const matrix = svg?.getScreenCTM()
+        if (!matrix) return
+        const point = svg.createSVGPoint()
+        point.x = e.clientX; point.y = e.clientY
+        const x = point.matrixTransform(matrix.inverse()).x
+        const ratio = Math.max(0, Math.min(1, (x - padL) / geometry.plotW))
+        paintSelection(Math.round(ratio * (N - 1)))
+      }
+      lineChartWrap.onpointerdown = lineChartWrap.onpointermove
+      lineChartWrap.onkeydown = e => {
+        const current = selectedIndex ?? N - 1
+        const next = { ArrowLeft: Math.max(0, current - 1), ArrowRight: Math.min(N - 1, current + 1), Home: 0, End: N - 1 }[e.key]
+        if (next != null) { e.preventDefault(); paintSelection(next) }
       }
 
       let curW = 800
       drawSvg(curW)
 
       if (typeof ResizeObserver !== 'undefined') {
-        const ro = new ResizeObserver(entries => {
+        const observer = new ResizeObserver(entries => {
+          if (!lineChartWrap.isConnected) { observer.disconnect(); return }
           for (const entry of entries) {
             const w = Math.round(entry.contentRect.width)
             if (w > 0 && Math.abs(w - curW) > 4) {
@@ -347,7 +353,8 @@ export function usageBreakdown(modelIds) {
             }
           }
         })
-        ro.observe(lineChartWrap)
+        chartObserver = observer
+        observer.observe(lineChartWrap)
       }
 
       mount(chartArea, h('div', { class: 'usage-chart-wrap' }, chartHeader, lineLegendBar, lineChartWrap, detailBox))
@@ -375,14 +382,8 @@ export function usageBreakdown(modelIds) {
           role: 'button',
           tabIndex: 0,
           'aria-label': `${item.label} ${formatVal(item.val)}`,
-          onmouseenter: () => {
-            detailBox.innerHTML = `<strong>${item.label}</strong>：${formatVal(item.val)} (${pctStr}%) · 各模型汇总`
-            detailBox.className = 'small'
-          },
-          onmouseleave: () => {
-            detailBox.textContent = defaultHint
-            detailBox.className = 'small muted'
-          },
+          onmouseenter: () => showDetails(item.label, `占比 ${pctStr}% · 各模型汇总`, [item]),
+          onfocus: () => showDetails(item.label, `占比 ${pctStr}% · 各模型汇总`, [item]),
         },
           h('span', { class: 'usage-bar-val' }, compactVal(item.val)),
           h('div', { class: 'usage-bar-track' },
@@ -429,8 +430,7 @@ export function usageBreakdown(modelIds) {
             title: `${row.model} · ${seg.label}: ${formatVal(seg.val)}`,
             onmouseenter: e => {
               e.stopPropagation()
-              detailBox.innerHTML = `<strong>${row.model} · ${seg.label}</strong>：${formatVal(seg.val)} · 点击筛选此模型`
-              detailBox.className = 'small'
+              showDetails(row.model, `${seg.label} · 点击筛选此模型`, [seg])
             },
           })
         })
@@ -441,14 +441,8 @@ export function usageBreakdown(modelIds) {
           tabIndex: 0,
           'aria-label': `${row.model} ${formatVal(rowTotal)}`,
           onclick: () => { model.value = row.model; void load() },
-          onmouseenter: () => {
-            detailBox.innerHTML = `<strong>${row.model}</strong>：总计 ${formatVal(rowTotal)}（输入 ${formatVal(inVal)} · 输出 ${formatVal(outVal)} · 缓存 ${formatVal(cacheVal)}）· 调用 ${fmt.num(row.calls)} 次 · 点击筛选`
-            detailBox.className = 'small'
-          },
-          onmouseleave: () => {
-            detailBox.textContent = defaultHint
-            detailBox.className = 'small muted'
-          },
+          onmouseenter: () => showDetails(row.model, `${fmt.num(row.calls)} 次调用 · 点击筛选此模型`, segs),
+          onfocus: () => showDetails(row.model, `${fmt.num(row.calls)} 次调用 · 点击筛选此模型`, segs),
         },
           h('span', { class: 'usage-bar-val' }, compactVal(rowTotal)),
           h('div', { class: 'usage-bar-track grouped' }, subBars),

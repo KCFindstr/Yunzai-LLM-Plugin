@@ -14,7 +14,7 @@ export async function render(root, [sub]) {
     const draw = () => {
       const visible = tools.filter(x => !filter || `${x.name} ${x.description} ${x.source}`.toLowerCase().includes(filter))
       mount(tbody, visible.length ? visible.map(x => h('tr',
-        h('td', switchEl(x.enabled, on => act(() => put(`/api/tools/${enc(x.name)}`, { enabled: on }), `${x.name} 已${on ? '启用' : '禁用'}`))),
+        h('td', x.runtimeReady === false ? h('a', { href: '#/config/setup', class: 'badge warn' }, '尚未就绪') : switchEl(x.enabled, on => act(() => put(`/api/tools/${enc(x.name)}`, { enabled: on }), `${x.name} 已${on ? '启用' : '禁用'}`))),
         h('td', h('b', { class: 'mono' }, x.name), h('div', badge(x.source))),
         h('td', { class: 'small' }, x.description),
         h('td', h('button', { class: 'btn sm ghost', onclick: () => modal(x.name, h('pre', JSON.stringify(x.parameters, null, 2))) }, '参数')),
@@ -36,7 +36,7 @@ export async function render(root, [sub]) {
     const edit = async s => {
       const r = await promptFields(s ? `编辑技能 ${s.name}` : '新建技能', [
         ...(s ? [] : [{ name: 'name', label: '技能名称（英文/数字/横线）' }]),
-        { name: 'markdown', label: '内容（第一行写简介，或使用 --- frontmatter）', multiline: true, code: true, rows: 18, value: s ? `---\nname: ${s.name}\ndescription: ${JSON.stringify(s.description)}\n---\n${s.body}` : '' },
+        { name: 'markdown', label: '内容（第一行写简介，或使用 --- frontmatter）', multiline: true, code: true, rows: 18, value: s ? `---\nname: ${s.name}\ndescription: ${JSON.stringify(s.description)}\n${s.requiresTools?.length ? `requires_tools: ${JSON.stringify(s.requiresTools)}\n` : ''}---\n${s.body}` : '' },
       ], '保存')
       const name = s?.name ?? r?.name?.trim()
       if (r && name) act(() => put(`/api/skills/${enc(name)}`, { markdown: r.markdown }), '已保存').then(ok => ok && render(root, ['skills']))
@@ -44,6 +44,7 @@ export async function render(root, [sub]) {
     return mount(root, head, t,
       h('div', { class: 'row', style: { marginBottom: '12px' } }, h('button', { class: 'btn primary', onclick: () => edit() }, '＋ 新建技能')),
       skills.length ? skills.map(s => card(h('span', s.name, ' ', h('span', { class: 'small muted' }, s.description)),
+        s.available === false ? h('a', { class: 'badge warn', href: '#/config/setup' }, '技能已停用 · 检查依赖与设置') : null,
         h('pre', { class: 'small', style: { maxHeight: '240px', overflowY: 'auto' } }, s.body),
         h('div', { class: 'row', style: { marginTop: '10px' } },
           h('button', { class: 'btn sm', onclick: () => edit(s) }, '编辑'),

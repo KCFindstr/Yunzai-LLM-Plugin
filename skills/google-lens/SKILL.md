@@ -1,5 +1,6 @@
 ---
 name: google-lens
+requires_tools: [google_lens]
 description: 使用 Google Lens 对本轮或引用的图片进行以图搜图，识别角色、表情包、画作原图、物品或查找图片出处。直接上传原图并返回 Google AI Overview 识别总结（若有）、精确匹配（若有）与视觉匹配结果及来源。
 ---
 

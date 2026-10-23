@@ -4,7 +4,7 @@ import type { EffectiveConfig } from '../core/configTypes.ts'
 import { formatNow, truncate } from '../core/util.ts'
 import { senderName } from '../core/yunzai.ts'
 import { stickerPromptLines } from '../stickers/picker.ts'
-import { listSkills } from '../tools/skills.ts'
+import { skillsForTools } from '../tools/skills.ts'
 import { renderMemory } from '../memory/store.ts'
 import { recentLines } from './groupLog.ts'
 import { observeUsers, rosterLines } from './roster.ts'
@@ -59,7 +59,7 @@ export function buildSystemPrompt(p: SystemPromptInput): string {
     ].join('\n'))
   if (tools.has('recall')) parts.push('【之前对话的摘要】只是极简梗概，缺失大量细节；凡是对方提起过去（如“上次说的”、“之前那个”、“你还记得吗”、“我们说到哪了”）、续接旧话题、探讨早先决定/约定/称呼，或被问到某天聊了什么（昨天、上周六、10月20日…）时，务必先调用 recall 检索旧聊天确认真实背景与细节，按话题描述检索，也可加日期筛选。')
   if (tools.has('load_skill')) {
-    const skills = listSkills()
+    const skills = skillsForTools(tools)
     if (skills.length) parts.push(['# 技能', '使用前 load_skill 读取：', ...skills.map(skill => `${skill.name}：${skill.description}`)].join('\n'))
   }
   if (eff.sticker.enable) {

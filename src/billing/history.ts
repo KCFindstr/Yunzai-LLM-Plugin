@@ -148,7 +148,7 @@ export function queryUsageCalls(from: number, to: number, model?: string) {
     }
   }
 
-  const timeline = []
+  const timeline: Record<string, any>[] = []
   for (let i = 0; i < numBuckets; i++) {
     const entry = bucketMap.get(i)
     timeline.push({

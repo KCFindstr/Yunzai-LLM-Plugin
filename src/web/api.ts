@@ -28,7 +28,8 @@ import { agyQueue, cancelAgyJob } from '../tools/agy.ts'
 import { agyHistory, agyJobView } from '../agy/history.ts'
 import { computerHistory, readComputerScreenshot } from '../computer/history.ts'
 import { registry } from '../tools/registry.ts'
-import { deleteSkill, listSkills, parseSkillMarkdown, saveSkill } from '../tools/skills.ts'
+import { deleteSkill, listSkills, parseSkillMarkdown, saveSkill, skillsForTools } from '../tools/skills.ts'
+import { prepareRuntimeTools, runtimeToolReady, setupStatus } from '../core/setup.ts'
 
 export type Reply = any
 interface Req { params: string[]; query: URLSearchParams; body: any }
@@ -365,6 +366,26 @@ export const routes: Route[] = [
       presets: PRESET_PROVIDERS, thinking: THINKING, problems: configProblems(cfg) }
   }),
   R('PUT', '/api/config', ({ body }) => setConfig(String(body.path ?? ''), body.value)),
+  R('GET', '/api/setup', ({ query }) => setupStatus(query.get('refresh') === '1')),
+  R('PUT', '/api/setup', ({ body }) => {
+    if (!Array.isArray(body.changes) || !body.changes.length || body.changes.length > 30) throw fail('请提供有效的设置项')
+    const doc = YAML.parseDocument(config.readRaw())
+    for (const change of body.changes) {
+      const p = String(change.path ?? ''), keys = keysOf(p)
+      if (!/^(providers\.|models\.|defaultModel$|utilityModel$|visionModel$|fallbackModels$|memory\.(enable$|embedding\.)|chat\.(thinking$|thinkingJudge\.)|tools\.(exec|agy|computer|googleLens|webSearch|webFetch)\.)/.test(p) || !schemaAt(keys)) throw fail('设置向导不支持此配置项')
+      const error = validatePath(keys)
+      if (error) throw fail(error)
+      for (let i = 1; i < keys.length; i++) {
+        if (typeof keys[i] === 'number' && !doc.hasIn(keys.slice(0, i))) doc.setIn(keys.slice(0, i), config.read(keys.slice(0, i).join('.')) ?? [])
+      }
+      doc.setIn(keys, change.value)
+    }
+    const user = doc.toJS(), merged = normalize(deepMerge(YAML.parse(fs.readFileSync(DEFAULT_CONFIG_FILE, 'utf8')) ?? {}, structuredClone(user)))
+    const error = validate(SCHEMA, user, merged, merged)
+    if (error) throw fail(error)
+    config.writeRaw(String(doc))
+    return { ok: true }
+  }),
   R('DELETE', '/api/config', ({ query }) => {
     const p = query.get('path') ?? ''
     if (!schemaAt(keysOf(p))) throw fail(`未知配置项：${p}`)
@@ -561,7 +582,13 @@ export const routes: Route[] = [
     if (!removeSticker(params[0])) throw fail('没有这个表情', 404)
   }),
 
-  R('GET', '/api/skills', () => listSkills().map(s => ({ name: s.name, description: s.description, body: s.body }))),
+  R('GET', '/api/skills', async () => {
+    const eff = config.effective()
+    await prepareRuntimeTools(eff)
+    const available = new Set(config.get().skills.enable && eff.tools.enable
+      ? skillsForTools(registry.all().filter(t => !eff.tools.disabled.includes(t.name) && runtimeToolReady(t.name, eff)).map(t => t.name)).map(s => s.name) : [])
+    return listSkills().map(s => ({ name: s.name, description: s.description, body: s.body, requiresTools: s.requiresTools, available: available.has(s.name) }))
+  }),
   R('PUT', '/api/skills/:name', ({ params, body }) => {
     let md = String(body.markdown ?? '').trim()
     if (!md) throw fail('内容不能为空')
@@ -576,9 +603,11 @@ export const routes: Route[] = [
     if (!deleteSkill(params[0])) throw fail('没有这个技能', 404)
   }),
 
-  R('GET', '/api/tools', () => {
+  R('GET', '/api/tools', async () => {
+    const eff = config.effective()
+    await prepareRuntimeTools(eff)
     const disabled = new Set(config.get().tools.disabled)
-    return registry.all().map(t => ({ name: t.name, source: t.source ?? 'builtin', description: t.description, parameters: t.parameters, enabled: !disabled.has(t.name) }))
+    return registry.all().map(t => ({ name: t.name, source: t.source ?? 'builtin', description: t.description, parameters: t.parameters, enabled: !disabled.has(t.name), runtimeReady: runtimeToolReady(t.name, eff) }))
   }),
   R('PUT', '/api/tools/:name', ({ params, body }) => {
     if (!registry.get(params[0])) throw fail('没有这个工具', 404)

@@ -1,5 +1,6 @@
 ---
 name: computer-use
+requires_tools: [computer_task]
 description: Use your persistent pixel desktop to browse sites, inspect images or video, run ongoing PC tasks, or show your desktop. Not needed for ordinary chat or a quick calculation.
 ---
 

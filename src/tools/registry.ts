@@ -3,6 +3,7 @@ import { brief, log } from '../core/log.ts'
 import { truncate } from '../core/util.ts'
 import type { ToolCall, ToolResult, ToolSpec } from '../llm/types.ts'
 import type { ImagePart } from '../llm/types.ts'
+import { prepareRuntimeTools, runtimeToolReady } from '../core/setup.ts'
 
 export interface TurnState {
   toolCalls?: number
@@ -93,7 +94,7 @@ class Registry {
     // Worker data may only be summarized; it must never authorize side effects or bypass privacy filtering.
     if (ctx.turn.asyncResult) return []
     const disabled = new Set(ctx.eff.tools.disabled ?? [])
-    return this.all().filter(d => !disabled.has(d.name) && !hide.has(d.name) && (d.available?.(ctx) ?? true))
+    return this.all().filter(d => !disabled.has(d.name) && !hide.has(d.name) && (d.available?.(ctx) ?? true) && runtimeToolReady(d.name, ctx.eff))
   }
 
   specs(defs: ToolDef[], ctx: ToolCtx): ToolSpec[] {
@@ -104,6 +105,7 @@ class Registry {
   }
 
   async execute(calls: ToolCall[], ctx: ToolCtx, offered: ToolDef[], onResult?: (result: ToolResult, ms: number) => void): Promise<{ results: (ToolResult & { remaining: string; globalRemaining: number })[]; terminal: boolean }> {
+    await prepareRuntimeTools(ctx.eff, calls.map(call => call.name), ctx.isAdmin)
     const allowed = new Map(offered.map(d => [d.name, d]))
     let terminal = false
     const maxCalls = ctx.eff.chat?.maxToolCalls ?? 20
@@ -119,7 +121,7 @@ class Registry {
         if ((ctx.turn.toolCalls ?? 0) >= maxCalls) return done({ id: call.id, name: call.name, content: '所有工具的全局调用次数已用完，请直接给出最终回复', isError: true })
         ctx.turn.toolCalls = (ctx.turn.toolCalls ?? 0) + 1
         const def = allowed.get(call.name)
-        if (!def) {
+        if (!def || (def.available && !def.available(ctx)) || !runtimeToolReady(call.name, ctx.eff)) {
           log.warn(`模型调用了未提供的工具 ${call.name}(${brief(call.args ?? {})})`)
           return done({ id: call.id, name: call.name, content: `工具 ${call.name} 不可用`, isError: true })
         }

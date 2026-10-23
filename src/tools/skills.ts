@@ -6,18 +6,21 @@ import { log } from '../core/log.ts'
 import { SKILLS_DIR } from '../core/paths.ts'
 import { truncate } from '../core/util.ts'
 import { registry } from './registry.ts'
+import type { ToolCtx } from './registry.ts'
+import { runtimeToolReady } from '../core/setup.ts'
 
 export interface Skill {
   name: string
   description: string
   body: string
   dir: string
+  requiresTools?: string[]
 }
 
 let skills: Skill[] = []
 export let skillsVersion = 0
 
-export function parseSkillMarkdown(text: string, fallbackName: string): { name: string; description: string; body: string } {
+export function parseSkillMarkdown(text: string, fallbackName: string): { name: string; description: string; body: string; requiresTools?: string[] } {
   const m = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/.exec(text)
   let meta: any = {}
   let body = text
@@ -29,7 +32,8 @@ export function parseSkillMarkdown(text: string, fallbackName: string): { name: 
   }
   const name = String(meta.name ?? fallbackName).trim()
   const description = String(meta.description ?? body.split('\n').find(l => l.trim())?.replace(/^#+\s*/, '') ?? '').trim()
-  return { name, description, body: body.trim() }
+  const required = Array.isArray(meta.requires_tools) ? meta.requires_tools.filter((name: unknown) => typeof name === 'string') : []
+  return { name, description, body: body.trim(), ...(required.length ? { requiresTools: required } : {}) }
 }
 
 export function loadSkills(): Skill[] {
@@ -54,6 +58,16 @@ export function loadSkills(): Skill[] {
 
 export function listSkills(): Skill[] {
   return skills
+}
+const bundledDependencies: Record<string, string[]> = { 'computer-use': ['computer_task'], 'google-lens': ['google_lens'], agy: ['agy'], 'run-code': ['run_code'] }
+export function skillsForTools(toolNames: Iterable<string>) {
+  const tools = new Set(toolNames)
+  return skills.filter(s => (s.requiresTools ?? bundledDependencies[s.name] ?? []).every(name => tools.has(name)))
+}
+function skillsForTurn(ctx: ToolCtx) {
+  const disabled = new Set(ctx.eff.tools.disabled)
+  const names = registry.all().filter(t => t.name !== 'load_skill' && !disabled.has(t.name) && (t.available?.(ctx) ?? true) && runtimeToolReady(t.name, ctx.eff)).map(t => t.name)
+  return !config.get().skills.enable ? [] : skillsForTools(names)
 }
 
 export function safeSkillName(name: string): string {
@@ -93,10 +107,11 @@ export function registerSkillTool() {
       },
       required: ['name'],
     },
-    available: () => config.get().skills.enable && skills.length > 0,
-    async run(args) {
-      const s = skills.find(x => x.name === args.name)
-      if (!s) return { content: `没有名为「${args.name}」的技能。可用: ${skills.map(x => x.name).join(', ')}`, isError: true }
+    available: ctx => skillsForTurn(ctx).length > 0,
+    async run(args, ctx) {
+      const available = skillsForTurn(ctx)
+      const s = available.find(x => x.name === args.name)
+      if (!s) return { content: `技能不可用。可用: ${available.map(x => x.name).join(', ')}`, isError: true }
       if (args.file) {
         const f = path.resolve(s.dir, String(args.file))
         if (!f.startsWith(s.dir + path.sep) || !fs.existsSync(f)) return { content: '文件不存在', isError: true }

@@ -1,6 +1,7 @@
 import { api, del, get, put } from '../api.js'
 import { menuButton } from '../main.js'
 import { act, badge, card, combo, confirmDanger, empty, h, icon, modal, mount, promptFields, switchEl, tabs, toast } from '../ui.js'
+import { setupWizard } from '../setup-wizard.js'
 
 /**
  * Schema-driven config editor. Every write goes through PUT /api/config (validated server-side with the same
@@ -27,7 +28,7 @@ async function refresh() {
 
 function sections() {
   const fields = state.data.schema.fields
-  return [['basic', '基础'], ...Object.entries(fields).filter(([k, n]) => !BASIC.includes(k) && isContainer(n)).map(([k, n]) => [k, n.label ?? k])]
+  return [['setup', '设置向导'], ['basic', '基础'], ...Object.entries(fields).filter(([k, n]) => !BASIC.includes(k) && isContainer(n)).map(([k, n]) => [k, n.label ?? k])]
 }
 
 function draw() {
@@ -40,6 +41,7 @@ function draw() {
 
   mount(root,
     h('div', { class: 'page-head' }, menuButton(), h('h1', '配置'), h('span', { class: 'spacer' }),
+      h('a', { class: 'btn primary', href: '#/config/setup' }, '设置向导'),
       h('span', { class: 'small muted' }, '修改立即保存到 config.yaml 并热重载')),
     tabs([['form', '表单'], ['yaml', 'config.yaml']], 'form', id => { if (id === 'yaml') location.hash = '#/config/yaml' }),
     h('div', { class: 'cfg' },
@@ -52,6 +54,7 @@ function draw() {
 
 function drawBody(body) {
   const { schema, effective } = state.data
+  if (state.section === 'setup') return mount(body, card(null, setupWizard(state.data, async () => { state.data = await get('/api/config'); return state.data })))
   if (state.search.trim()) return mount(body, card(null, searchResults(state.search.trim().toLowerCase())))
   if (state.section === 'basic')
     return mount(body, card('基础', BASIC.filter(k => schema.fields[k]).map(k => leaf(schema.fields[k], [k], effective[k], effective))))

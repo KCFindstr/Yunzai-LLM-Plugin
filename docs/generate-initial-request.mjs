@@ -68,6 +68,8 @@ try {
   addMemory('group', groupId, '群友约好周六一起看猫')
   const input = { text: '[at:you] 截一下你的桌面给我看看', images: [], imageSegments: [] }
   const ctx = { e: event, eff, model, isAdmin, turn: { commands: 0, searches: 0, fetches: 0, images: [] } }
+  const { prepareRuntimeTools } = await import('../src/core/setup.ts')
+  if (model.toolUse !== false) await prepareRuntimeTools(eff, undefined, isAdmin)
   const offered = model.toolUse === false ? [] : registry.forTurn(ctx)
   const tools = registry.specs(offered, ctx)
   const shared = eff.chat.sessionScope === 'group'

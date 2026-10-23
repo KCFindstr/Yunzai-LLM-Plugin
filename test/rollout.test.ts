@@ -34,7 +34,9 @@ describe('complete initial prompt examples', () => {
     assert.equal(snapshot.context.isAdmin, true)
     assert.match(snapshot.initial.system, /完整人设：你是天津风/)
     assert.match(snapshot.initial.system, /工具最多 20 轮/)
-    assert.match(snapshot.initial.system, /computer-use：/)
+    const computer = snapshot.initial.tools.find((tool: any) => tool.name === 'computer_task')
+    if (computer) assert.match(snapshot.initial.system, /computer-use：/)
+    else assert.doesNotMatch(snapshot.initial.system, /computer-use：/)
     assert.equal(snapshot.initial.messages.length, 5)
     const input = snapshot.initial.messages.at(-1).content[0].text
     assert.match(input, /阿明\(平台ID 1001\)［管理员］/)
@@ -45,10 +47,9 @@ describe('complete initial prompt examples', () => {
     assert.ok(snapshot.initial.tools.every((tool: any) => tool.description && tool.parameters?.type === 'object'))
     assert.ok(snapshot.initial.tools.some((tool: any) => tool.name === 'example_http'))
     assert.ok(!snapshot.initial.tools.some((tool: any) => tool.name === 'computer_result'))
-    if (process.platform === 'win32') {
-      assert.ok(snapshot.initial.tools.some((tool: any) => tool.name === 'google_lens'))
-      assert.ok(snapshot.initial.tools.some((tool: any) => tool.name === 'agy'))
-      const computer = snapshot.initial.tools.find((tool: any) => tool.name === 'computer_task')
+    // Optional runtimes must be provisioned, not merely enabled, before they are advertised.
+    assert.ok(!snapshot.initial.tools.some((tool: any) => tool.name === 'agy'), 'the isolated fixture has no AGY CLI')
+    if (computer) {
       assert.deepEqual(computer.parameters.properties.action.enum, ['start', 'status', 'cancel', 'respond'])
     }
   })

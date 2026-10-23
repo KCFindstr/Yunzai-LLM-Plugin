@@ -1,6 +1,8 @@
 import { detectImageMime, truncate } from '../core/util.ts'
 import { registry, type ToolCtx, type ToolOutput } from './registry.ts'
 import { assertPublicUrl } from './ssrf.ts'
+import { resolveKeys } from '../core/config.ts'
+import { searchReady } from '../core/setup.ts'
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36'
 
@@ -11,7 +13,7 @@ interface SearchHit {
 }
 
 async function searchExternal(query: string, ctx: ToolCtx): Promise<SearchHit[]> {
-  const ws = ctx.eff.tools.webSearch
+  const ws = { ...ctx.eff.tools.webSearch, apiKey: resolveKeys(ctx.eff.tools.webSearch.apiKey)[0] ?? '' }
   const n = Math.min(Math.max(ws.maxResults || 5, 1), 10)
   const timeout = AbortSignal.timeout(20000)
   switch (ws.provider) {
@@ -166,7 +168,7 @@ async function fetchImage(res: Response, contentType: string): Promise<ToolOutpu
 }
 
 export async function fetchPage(url: string, ctx: ToolCtx): Promise<ToolOutput | string> {
-  const wf = ctx.eff.tools.webFetch
+  const wf = { ...ctx.eff.tools.webFetch, jinaKey: resolveKeys(ctx.eff.tools.webFetch.jinaKey)[0] ?? '' }
   const max = wf.maxChars || 6000
   const vision = ctx.model.vision !== false
   // Jina Reader turns images into text: fetch image links directly so a vision model sees the picture.
@@ -212,9 +214,7 @@ export function registerWebTools() {
     },
     available: ctx => {
       const ws = ctx.eff.tools.webSearch
-      if (!ws.enable || ws.provider === 'none' || ws.provider === 'native') return false
-      if (ws.provider === 'searxng') return Boolean(ws.baseUrl)
-      return ws.provider === 'jina' || ws.provider === 'anysearch' || Boolean(ws.apiKey)
+      return ws.provider !== 'native' && searchReady(ctx.eff, ctx.model)
     },
     limit: ctx => `最多调用 ${ctx.eff.tools.webSearch.maxPerTurn ?? 3} 次`,
     remaining: ctx => `剩余 ${Math.max(0, (ctx.eff.tools.webSearch.maxPerTurn ?? 3) - ctx.turn.searches)} 次`,

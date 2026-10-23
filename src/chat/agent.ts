@@ -1,6 +1,7 @@
 import { checkQuota, record, type QuotaBlock, type QuotaCtx } from '../billing/ledger.ts'
 import { computeCost, resolvePrice } from '../billing/pricing.ts'
 import { config } from '../core/config.ts'
+import { prepareRuntimeTools } from '../core/setup.ts'
 import { ensureCatalog } from '../commands/catalog.ts'
 import type { EffectiveConfig, ThinkingLevel } from '../core/configTypes.ts'
 import { brief, log } from '../core/log.ts'
@@ -150,6 +151,7 @@ async function runTurnInner(req: TurnRequest, ref: { turn?: TurnState; rolloutId
     eff.tools.webSearch.provider === 'native' &&
     NATIVE_SEARCH_TYPES.has(provider.type) &&
     model.nativeSearch !== false
+  if (model.toolUse !== false && !dropped.has('tools') && !turn.asyncResult) await prepareRuntimeTools(eff, undefined, isAdmin)
   let offered = model.toolUse === false || dropped.has('tools') ? [] : registry.forTurn(ctx)
   let specs = registry.specs(offered, ctx)
   if (offered.some(tool => tool.name === 'run_bot_command')) await ensureCatalog()

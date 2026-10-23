@@ -4,6 +4,7 @@ import type { ExecToolConfig } from '../core/configTypes.ts'
 import { log } from '../core/log.ts'
 import { truncate } from '../core/util.ts'
 import { MAX_IMAGES_PER_TURN, registry, type ToolCtx } from './registry.ts'
+import { runtimeToolReady } from '../core/setup.ts'
 
 const MAX_CODE = 50_000
 /** concurrent sandbox calls across all chats; each one is a cgroup with its own memory cap */
@@ -96,7 +97,7 @@ async function callRunner(cfg: ExecToolConfig, req: Record<string, any>, hardTim
 /** Whether this turn may use the sandbox (run_code, and render_html inside it). */
 export function sandboxEnabled(ctx: ToolCtx): boolean {
   const c = ctx.eff.tools.exec
-  return c.enable && process.platform === 'win32' && (c.access === 'all' || ctx.isAdmin)
+  return c.enable && process.platform === 'win32' && (c.access === 'all' || ctx.isAdmin) && runtimeToolReady('run_code', ctx.eff)
 }
 
 /**

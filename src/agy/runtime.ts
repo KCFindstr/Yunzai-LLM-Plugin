@@ -9,6 +9,8 @@ import { privateValues, redact } from './privacy.ts'
 import { log } from '../core/log.ts'
 import { agyDiagnosticLogger } from './debug.ts'
 import { agyHistoryText } from './history.ts'
+import { isolatedEnvironment } from './environment.ts'
+export { isolatedEnvironment } from './environment.ts'
 
 export const AGY_MODEL = 'gemini-3.8-flash-medium'
 export const AGY_EFFORT = 'medium'
@@ -46,15 +48,6 @@ function hostDataRoots(workspace: string) {
   roots.push('//wsl.localhost', '//wsl$')
   return roots
 }
-export function isolatedEnvironment(home: string): NodeJS.ProcessEnv {
-  const win = process.env.SystemRoot || 'C:\\Windows'
-  return { SystemRoot: win, WINDIR: win, COMSPEC: path.join(win, 'System32', 'cmd.exe'),
-    PATH: [path.join(win, 'System32'), win, path.join(win, 'System32/WindowsPowerShell/v1.0')].join(';'),
-    SHELL: path.join(win, 'System32/WindowsPowerShell/v1.0/powershell.exe'),
-    USERPROFILE: home, HOME: home, APPDATA: path.join(home, 'appdata'), LOCALAPPDATA: path.join(home, 'localappdata'),
-    TEMP: path.join(home, 'temp'), TMP: path.join(home, 'temp'), AGY_CLI_HIDE_ACCOUNT_INFO: '1' }
-}
-
 function killTree(pid: number | undefined) {
   if (pid) { const killer = spawn('C:\\Windows\\System32\\taskkill.exe', ['/PID', String(pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' }); killer.on('error', () => {}) }
 }
