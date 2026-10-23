@@ -7,7 +7,7 @@ import { it } from 'node:test'
 import { config } from '../src/core/config.ts'
 import { flushAllStores } from '../src/core/store.ts'
 import { runTurn } from '../src/chat/agent.ts'
-import { recentRollouts, recordRolloutEvent, rolloutHistory, startRollout, updateRollout } from '../src/chat/rollouts.ts'
+import { recentRollouts, recordRolloutContext, recordRolloutEvent, rolloutHistory, startRollout, updateRollout } from '../src/chat/rollouts.ts'
 import { recentTurns } from '../src/chat/turnLog.ts'
 import { registry } from '../src/tools/registry.ts'
 
@@ -48,6 +48,11 @@ it('records each live model round and parallel tool result, then persists a filt
     assert.equal(done.status, 'completed')
     assert.equal(done.steps, 2)
     assert.equal(done.reply, '检查完成')
+    assert.ok(done.context!.tools.some(tool => tool.name === 'rollout_quick'))
+    assert.ok(!done.context!.tools.some(tool => tool.name === 'not_offered'))
+    assert.ok(done.context!.messages.at(-1)!.text.includes('检查一下'))
+    assert.ok(done.context!.system)
+    assert.equal((recentRollouts()[0] as any).context, undefined)
     assert.equal(done.thinking, 'off')
     assert.equal(done.thinkingDecision?.source, 'fixed')
     assert.ok(done.events.filter(event => event.kind === 'response').every(event => event.thinking === 'off'))
@@ -65,6 +70,27 @@ it('records each live model round and parallel tool result, then persists a filt
     const persisted = fs.readFileSync(path.join(TMP, 'data/rollouts.json'), 'utf8')
     for (const hidden of [secret, 'alice@example.com', 'provider-private-reasoning']) assert.ok(!persisted.includes(hidden), hidden)
   } finally { release(); await pending; await server.close() }
+})
+
+it('bounds and filters request snapshots without persisting image bytes or provider-native data', () => {
+  const id = startRollout({ conv: 'context', source: 'chat', input: 'inspect', inputImageCount: 1 })
+  recordRolloutContext(id, {
+    system: 'secret-password=do-not-display ' + '系统提示'.repeat(10000),
+    tools: Array.from({ length: 100 }, (_, i) => ({ name: `tool_${i}`, description: '工具描述'.repeat(1000), parameters: { description: '参数'.repeat(3000), apiKey: 'do-not-display' } })),
+    messages: [
+      ...Array.from({ length: 50 }, () => ({ role: 'assistant' as const, content: '历史消息'.repeat(3000), native: { provider: 'openai' as const, model: 'fake', data: { reasoning: 'hidden-native-reasoning' } } })),
+      { role: 'user', content: [{ type: 'text', text: 'current image request' }, { type: 'image', data: 'image-byte-payload', mime: 'image/png' }] },
+    ], nativeSearch: true,
+  })
+  const context = rolloutHistory(id)!.context!
+  const raw = JSON.stringify(context)
+  assert.ok(Buffer.byteLength(raw) <= 128 * 1024)
+  assert.equal(context.truncated, true)
+  assert.ok(context.omittedMessages > 0)
+  assert.equal(context.messages.at(-1)!.imageCount, 1)
+  assert.equal(context.messages.at(-1)!.text, 'current image request')
+  for (const hidden of ['image-byte-payload', 'hidden-native-reasoning', 'do-not-display']) assert.ok(!raw.includes(hidden), hidden)
+  updateRollout(id, { status: 'completed' })
 })
 
 it('retains the Jev response and selected level when the main endpoint requires thinking to be disabled', async () => {

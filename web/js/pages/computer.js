@@ -1,6 +1,6 @@
 import { enc, get, post } from '../api.js'
 import { menuButton } from '../main.js'
-import { act, badge, card, confirmDanger, empty, fmt, h, icon, modal, mount, spinner } from '../ui.js'
+import { act, badge, card, confirmDanger, empty, fmt, h, icon, modal, mount, spinner, textBlock } from '../ui.js'
 
 const STATUS = {
   queued: ['排队中', 'accent'], running: ['执行中', 'accent'], waiting: ['等待回复', 'warn'],
@@ -19,7 +19,7 @@ function screenshot(jobId, image, label) {
   return button
 }
 
-function timelineEvent(job, event, open) {
+function timelineEvent(job, event, open, expanded) {
   const [label, ico] = EVENT[event.kind] ?? ['记录', 'logs']
   const title = h('div', { class: 'computer-event-head' },
     h('strong', label), event.step != null ? badge(`第 ${event.step} 轮`) : null,
@@ -29,7 +29,7 @@ function timelineEvent(job, event, open) {
     h('time', { class: 'small muted', dateTime: new Date(event.at).toISOString() }, fmt.time(event.at)),
   )
   const contents = [
-    event.text ? h('pre', { class: event.isError ? 'small bad' : 'small' }, event.text) : null,
+    event.text ? textBlock(event.text, { key: `computer-text:${event.seq}`, open: expanded.get(`computer-text:${event.seq}`), className: event.isError ? 'small bad' : 'small' }) : null,
     event.tools?.length ? h('div', { class: 'chips' }, event.tools.map(tool => badge(tool.name, 'accent'))) : null,
     event.ms != null ? h('div', { class: 'small muted' }, `${fmt.dur(event.ms)} · 输入 ${fmt.num(event.inputTokens)} / 输出 ${fmt.num(event.outputTokens)} · ${fmt.usd(event.cost)}`) : null,
     event.tools?.length || event.args ? h('details', { class: 'computer-arguments', 'data-seq': event.seq, open }, h('summary', '查看调用参数'),
@@ -76,13 +76,14 @@ export async function render(root, [id]) {
     if (snapshot === key) return
     snapshot = key
     const opened = new Set([...detail.querySelectorAll('details[open][data-seq]')].map(el => Number(el.dataset.seq)))
+    const expanded = new Map([...detail.querySelectorAll('details[data-disclosure]')].map(el => [el.dataset.disclosure, el.open]))
     const [label, kind] = STATUS[job.status] ?? [job.status, '']
     const replies = history.events.filter(event => event.kind === 'reply')
     const sent = replies.flatMap(event => event.images ?? [])
     const missing = replies.reduce((count, event) => count + Math.max(0, (event.imageCount ?? event.images?.length ?? 0) - (event.images?.length ?? 0)), 0)
     mount(detail,
       card(h('span', { class: 'card-title' }, icon('computer'), '任务详情', badge(label, kind)),
-        h('pre', { class: 'computer-task-text' }, job.task),
+        textBlock(job.task, { key: 'computer-request', open: expanded.get('computer-request'), className: 'computer-task-text' }),
         h('div', { class: 'row small muted', style: { marginTop: '12px' } }, `发起者 ${job.owner}`, `创建 ${fmt.time(job.createdAt)}`, `更新 ${fmt.ago(job.updatedAt)}`),
         job.requesterText && job.requesterText !== job.task ? h('details', { class: 'computer-arguments' }, h('summary', '原始用户请求'), h('pre', { class: 'small' }, job.requesterText)) : null,
         job.progress ? h('div', { class: 'computer-progress small' }, icon('clock', 16), job.progress) : null,
@@ -97,9 +98,8 @@ export async function render(root, [id]) {
         sent.length ? h('div', { class: 'computer-images' }, sent.map((image, i) => screenshot(job.id, image, `已发送的截图 ${i + 1}`))) : empty(missing ? '已发送的截图未能保留。' : '此任务还没有已发送的截图。'),
         missing ? h('p', { class: 'small muted' }, `${missing} 张已发送图片超过保留上限或未能保存。`) : null),
       card(h('span', { class: 'card-title' }, icon('chat'), '执行记录', badge(`${history.events.filter(event => event.kind === 'response').length} 轮`)),
-        h('p', { class: 'small muted', style: { marginBottom: '16px' } }, '按时间查看用户请求、代理响应、工具结果与最终对话回复。'),
         history.dropped ? h('p', { class: 'small warn' }, `较早的 ${history.dropped} 条记录已超过保留上限，以下为最近记录。`) : null,
-        history.events.length ? h('div', { class: 'computer-timeline' }, history.events.map(event => timelineEvent(job, event, opened.has(event.seq)))) : empty(history.needsRestart ? '重启机器人后启用执行记录。现有任务摘要仍可查看。' : '此任务没有保存详细记录。新执行或继续的任务将开始记录。'),
+        history.events.length ? h('div', { class: 'computer-timeline' }, history.events.map(event => timelineEvent(job, event, opened.has(event.seq), expanded))) : empty(history.needsRestart ? '重启机器人后启用执行记录。现有任务摘要仍可查看。' : '此任务没有保存详细记录。新执行或继续的任务将开始记录。'),
       ),
     )
   }

@@ -21,6 +21,8 @@ it('uploads only the selected context image directly and filters browser data be
     return { status: 'ok', uploaded: true,
       exact_matches: [{ title: 'Exact artwork alice@example.com', url: 'https://example.org/exact?token=private' }],
       visual_matches: [{ title: 'Artwork alice@example.com', url: 'https://example.org/art?token=private' }],
+      ai_overview: { text: 'The image shows Saiba Momoi from Blue Archive. alice@example.com',
+        sources: [{ title: 'Saiba Momoi - Wiki', url: 'https://example.org/wiki?token=private' }, 'not an object'] },
       image: { data: 'PRIVATE_SCREENSHOT' }, cookies: 'PRIVATE_COOKIES' }
   })
   const ctx = context(), result = await registry.get('google_lens')!.run({ image_index: 2 }, ctx) as any
@@ -38,7 +40,11 @@ it('uploads only the selected context image directly and filters browser data be
   assert.equal(output.exact_matches.length, 1)
   assert.equal(output.visual_matches.length, 1)
   assert.equal(output.description, undefined)
-  assert.equal(output.ai_overview, undefined)
+  assert.equal(output.ai_overview.generated_by_google_ai, true)
+  assert.ok(output.ai_overview.text.startsWith('The image shows Saiba Momoi from Blue Archive.'))
+  assert.equal(output.ai_overview.sources[0].title, 'Saiba Momoi - Wiki')
+  assert.ok(output.ai_overview.sources[0].url.startsWith('https://example.org/wiki'))
+  assert.equal(output.ai_overview.sources.length, 1)
   for (const value of ['alice@example.com', 'PRIVATE_SCREENSHOT', 'PRIVATE_COOKIES', 'token=private']) assert.ok(!result.content.includes(value))
 })
 
@@ -68,7 +74,7 @@ it('reports Google verification blocks without claiming a successful image searc
   assert.equal(result.isError, true)
   const output = JSON.parse(result.content)
   assert.equal(output.status, 'blocked'); assert.equal(output.uploaded, false)
-  assert.equal(output.description, undefined); assert.equal(output.ai_overview, undefined)
+  assert.equal(output.description, undefined); assert.equal(output.ai_overview, null)
   assert.deepEqual(output.exact_matches, [])
   assert.deepEqual(output.visual_matches, [])
 })

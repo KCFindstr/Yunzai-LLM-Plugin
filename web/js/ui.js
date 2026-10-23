@@ -64,6 +64,16 @@ export function mount(root, ...children) {
   append(root, children)
 }
 
+/** Keep long transcripts readable; expanding uses native keyboard-accessible details. */
+export function textBlock(text, { key, open = false, limit = 360, className = 'small' } = {}) {
+  if (!text) return null
+  if (text.length <= limit && text.split('\n').length <= 8) return h('pre', { class: className }, text)
+  return h('details', { class: 'text-disclosure', 'data-disclosure': key, open },
+    h('summary', h('span', { class: 'text-excerpt' }, text.slice(0, Math.min(limit, 180)).trim() + '…'),
+      h('span', { class: 'disclosure-action' }, h('span', { class: 'when-closed' }, '展开全文'), h('span', { class: 'when-open' }, '收起'))),
+    h('pre', { class: className }, text))
+}
+
 export function toast(msg, kind = '') {
   const t = h('div', { class: `toast ${kind}`, role: kind === 'bad' ? 'alert' : 'status' }, icon(kind === 'bad' ? 'alert' : 'check'), msg)
   document.getElementById('toasts').append(t)

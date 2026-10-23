@@ -9,7 +9,9 @@ export async function render(root) {
   let level = ''
   let paused = false
   const box = h('div', { class: 'log' })
-  const line = l => h('div', { class: `l ${l.level}` }, h('span', { class: 't' }, new Date(l.at).toLocaleTimeString('zh-CN', { hour12: false })), l.text)
+  const line = l => h('div', { class: `l ${l.level}` },
+    h('time', { class: 't' }, new Date(l.at).toLocaleTimeString('zh-CN', { hour12: false })),
+    h('span', { class: 'log-level' }, l.level.toUpperCase()), h('span', { class: 'log-message' }, l.text))
 
   const poll = async () => {
     if (paused) return
@@ -28,7 +30,7 @@ export async function render(root) {
     h('div', { class: 'page-head' }, menuButton(), h('h1', '日志'), h('span', { class: 'spacer' }),
       h('select', { onchange: e => { level = e.target.value; restart() } }, LEVELS.map(([v, l]) => h('option', { value: v }, l))),
       pauseBtn, h('button', { class: 'btn', onclick: restart }, '清屏重载')),
-    h('div', { class: 'small muted', style: { marginBottom: '8px' } }, '本插件最近 1000 行日志（调试日志需设置环境变量 YZ_LLM_DEBUG=1）'),
+    h('details', { class: 'quiet-details', style: { marginBottom: '12px' } }, h('summary', '调试设置'), h('p', { style: { marginTop: '6px' } }, '设置 YZ_LLM_DEBUG=1 显示调试日志。')),
     box,
   )
   await poll()

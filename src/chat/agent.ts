@@ -19,7 +19,7 @@ import { memoryHash } from '../memory/store.ts'
 import { appendTurn, getSession, peekSession, indexArchive, pendingArchive, recallSession, setEpisode, setServerState, setSummary, truncateIfNeeded } from './session.ts'
 import { pickModel, utilityCandidates, utilityChat, type Picked } from './utility.ts'
 import { recordTurn } from './turnLog.ts'
-import { recordRolloutEvent, startRollout, updateRollout } from './rollouts.ts'
+import { recordRolloutContext, recordRolloutEvent, startRollout, updateRollout } from './rollouts.ts'
 import { agyHistoryText } from '../agy/history.ts'
 import { localDay, parseDateHints } from './dates.ts'
 import { maintainArchive } from './archiveJobs.ts'
@@ -216,6 +216,8 @@ async function runTurnInner(req: TurnRequest, ref: { turn?: TurnState; rolloutId
   const call = async () => {
     for (;;) {
       try {
+        if (msgs.length === prefix.length + session.messages.length + 1)
+          recordRolloutContext(ref.rolloutId, { system, tools: specs, messages: msgs, nativeSearch })
         return await chat({ model, provider, system, messages: msgs, tools: specs, nativeSearch, thinking, maxTokens, temperature, cacheKey, state })
       } catch (err) {
         // server-side chain expired/unknown: resend the full transcript once

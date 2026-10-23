@@ -3,6 +3,17 @@ import { JsonStore } from '../core/store.ts'
 import { agyHistoryText } from '../agy/history.ts'
 import type { ThinkingLevel } from '../core/configTypes.ts'
 import type { ThinkingDecision } from './thinking.ts'
+import type { Msg, ToolSpec } from '../llm/types.ts'
+
+export interface RolloutContext {
+  system: string
+  tools: { name: string; description: string; parameters: string }[]
+  messages: { role: Msg['role']; text: string; imageCount?: number }[]
+  nativeSearch: boolean
+  omittedMessages: number
+  omittedTools: number
+  truncated: boolean
+}
 
 export interface RolloutEvent {
   seq: number
@@ -33,6 +44,7 @@ export interface Rollout {
   model?: string
   thinking?: ThinkingLevel
   thinkingDecision?: ThinkingDecision
+  context?: RolloutContext
   steps: number
   cost: number
   ms: number
@@ -69,6 +81,48 @@ function cleanThinking(decision: ThinkingDecision): ThinkingDecision {
       outputTokens: decision.judge.outputTokens, cost: decision.judge.cost,
     } : undefined,
   }
+}
+function cleanContext(context: RolloutContext): RolloutContext {
+  return {
+    system: agyHistoryText(context.system, undefined, 16000),
+    tools: context.tools.map(tool => ({ name: agyHistoryText(tool.name, undefined, 100), description: agyHistoryText(tool.description, undefined, 1200), parameters: agyHistoryText(tool.parameters, undefined, 3000) })),
+    messages: context.messages.map(message => ({ role: message.role, text: agyHistoryText(message.text, undefined, 6000), imageCount: message.imageCount })),
+    nativeSearch: context.nativeSearch, omittedMessages: context.omittedMessages, omittedTools: context.omittedTools, truncated: context.truncated,
+  }
+}
+
+/** The logical initial request, without image bytes, provider-native state, or transport credentials. */
+export function recordRolloutContext(id: string, request: { system: string; tools: ToolSpec[]; messages: Msg[]; nativeSearch: boolean }) {
+  const rollout = store.data.rollouts.find(entry => entry.id === id)
+  if (!rollout) return
+  let truncated = false
+  const text = (value: unknown, max: number) => {
+    const safe = agyHistoryText(value, undefined, max + 1)
+    if (safe.length > max) truncated = true
+    return safe.slice(0, max)
+  }
+  const messages = request.messages.slice(-40).map(message => {
+    if (message.role === 'user') return { role: message.role, text: text(message.content.filter(part => part.type === 'text').map(part => part.text).join('\n'), 6000), imageCount: message.content.filter(part => part.type === 'image').length }
+    if (message.role === 'tool') return { role: message.role, text: text(message.results.map(result => `${result.name}: ${result.content}`).join('\n'), 6000) }
+    return { role: message.role, text: text([message.content, ...(message.toolCalls ?? []).map(call => `${call.name}: ${agyHistoryText(call.args)}`)].filter(Boolean).join('\n'), 6000) }
+  })
+  const context: RolloutContext = {
+    system: text(request.system, 16000),
+    tools: request.tools.slice(0, 100).map(tool => ({ name: text(tool.name, 100), description: text(tool.description, 1200), parameters: text(tool.parameters, 3000) })),
+    messages, nativeSearch: request.nativeSearch, omittedMessages: Math.max(0, request.messages.length - 40), omittedTools: Math.max(0, request.tools.length - 100), truncated: false,
+  }
+  const tooLarge = () => Buffer.byteLength(JSON.stringify(context)) > 128 * 1024
+  while (tooLarge() && context.messages.length > 1) { context.messages.shift(); context.omittedMessages++ }
+  if (tooLarge()) {
+    truncated = true
+    context.system = context.system.slice(0, 8000)
+    context.tools = context.tools.map(tool => ({ name: tool.name, description: tool.description.slice(0, 120), parameters: tool.parameters.slice(0, 80) }))
+    context.messages = context.messages.map(message => ({ ...message, text: message.text.slice(0, 2000) }))
+  }
+  context.truncated = truncated || context.omittedMessages > 0 || context.omittedTools > 0
+  rollout.context = context
+  rollout.updatedAt = Date.now()
+  save()
 }
 function save() {
   // Keep running turns even when a burst pushes completed history over its retention limit.
@@ -108,7 +162,7 @@ export function recordRolloutEvent(id: string, event: Omit<RolloutEvent, 'seq' |
   rollout.ms = rollout.updatedAt - rollout.createdAt
   save()
 }
-function summary({ events, seq, dropped, ...rollout }: Rollout) {
+function summary({ events, seq, dropped, context, ...rollout }: Rollout) {
   return { ...rollout, input: agyHistoryText(rollout.input), reply: rollout.reply && agyHistoryText(rollout.reply),
     model: rollout.model && agyHistoryText(rollout.model, undefined, 100),
     thinkingDecision: rollout.thinkingDecision && cleanThinking(rollout.thinkingDecision),
@@ -120,5 +174,5 @@ export function recentRollouts(conv?: string) {
 }
 export function rolloutHistory(id: string) {
   const rollout = store.data.rollouts.find(entry => entry.id === id)
-  return rollout ? { ...summary(rollout), events: rollout.events.map(cleanEvent) } : undefined
+  return rollout ? { ...summary(rollout), context: rollout.context && cleanContext(rollout.context), events: rollout.events.map(cleanEvent) } : undefined
 }

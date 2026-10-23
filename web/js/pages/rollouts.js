@@ -1,6 +1,6 @@
 import { enc, get } from '../api.js'
 import { menuButton } from '../main.js'
-import { badge, card, empty, fmt, h, icon, mount, spinner } from '../ui.js'
+import { badge, card, empty, fmt, h, icon, mount, spinner, textBlock } from '../ui.js'
 
 const STATUS = {
   queued: ['排队中', 'accent'], running: ['执行中', 'accent'], completed: ['已完成', 'ok'],
@@ -14,41 +14,112 @@ const EVENT = {
 const SOURCE = { chat: '聊天', agy: 'AGY 结果回复', computer: '电脑任务结果回复' }
 const THINKING_SOURCE = { fixed: '固定配置', uniform: '各类消息使用相同强度', unsupported: '接口不支持思考强度设置', obvious: '快速判断', model: '模型判断', systemone: 'System One', heuristic: '关键词规则' }
 
-function thinkingDetails(r) {
+function thinkingDetails(r, opened) {
   const decision = r.thinkingDecision
-  return card(h('span', { class: 'card-title' }, icon('models'), '思考强度', r.thinking ? badge(r.thinking, 'accent') : null),
-    decision ? h('div', { class: 'col' },
-      h('div', { class: 'small' }, decision.setting === 'auto' ? `自动 → ${decision.level}` : `固定 ${decision.setting}`),
-      h('div', { class: 'small muted' }, [THINKING_SOURCE[decision.source], decision.kind, decision.judge?.model, fmt.dur(decision.ms)].filter(Boolean).join(' · ')),
+  if (!decision) return null
+  let answer
+  try { answer = JSON.parse(decision.judge?.response ?? '').answers?.kind } catch { /* plain model verdict */ }
+  const probabilities = answer?.probabilities
+  const values = ['casual', 'question', 'complex'].map(kind => {
+    const item = Array.isArray(probabilities) ? probabilities.find(p => (p?.choice ?? p?.name) === kind) : probabilities?.[kind]
+    const value = typeof item === 'object' && item ? item.probability ?? item.score ?? item.prob : item
+    return { kind, value: typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1 ? value : undefined }
+  })
+  const labels = { casual: '闲聊', question: '问题', complex: '复杂任务' }
+  const confidence = answer?.confidence
+  const percent = value => `${Number((value * 100).toFixed(1))}%`
+  return h('div', { class: 'thinking-step' },
+      h('div', { class: 'row small muted' },
+        h('span', decision.setting === 'auto' ? `自动 → ${decision.level}` : `固定 ${decision.setting}`),
+        h('span', decision.judge?.model ?? THINKING_SOURCE[decision.source]),
+        decision.ms ? h('span', fmt.dur(decision.ms)) : null,
+        typeof confidence === 'number' && confidence >= 0 && confidence <= 1 ? badge(`置信度 ${percent(confidence)}`) : null),
+      values.some(p => p.value != null) ? h('div', { class: 'judge-probabilities', 'aria-label': '分类概率' }, values.map(({ kind, value }) =>
+        h('div', { class: `judge-probability ${kind === (decision.judge?.kind ?? decision.kind) ? 'selected' : ''}`, 'data-kind': kind },
+          h('span', labels[kind]),
+          h('div', { class: 'probability-track', role: 'meter', 'aria-label': labels[kind], 'aria-valuemin': 0, 'aria-valuemax': 100,
+            'aria-valuenow': value == null ? undefined : value * 100, 'aria-valuetext': value == null ? '未提供' : percent(value) },
+            value == null ? null : h('span', { style: { width: `${value * 100}%` } })),
+          h('strong', value == null ? '—' : percent(value))))) : null,
       r.thinking && r.thinking !== decision.level ? h('p', { class: 'small warn' }, `模型接口不支持所选强度，实际使用 ${r.thinking}`) : null,
       decision.judge?.kind && decision.kind !== decision.judge.kind ? h('p', { class: 'small muted' }, `判断返回 ${decision.judge.kind}；附带图片，按 ${decision.kind} 处理。`) : null,
       decision.fallbackReason ? h('p', { class: 'small warn' }, `自动判断回退：${decision.fallbackReason}`) : null,
-      decision.judge ? h('div', { class: 'rollout-judge' },
-        h('div', { class: 'small muted' }, '判断响应'),
-        h('pre', { class: 'small mono', style: { marginTop: '8px' } }, decision.judge.response),
+      decision.judge ? h('details', { class: 'rollout-judge quiet-details', 'data-disclosure': 'judge-response', open: opened.get('judge-response') },
+        h('summary', '判断响应'),
+        h('pre', { class: 'small mono' }, decision.judge.response),
         h('p', { class: 'small muted' }, [decision.judge.inputTokens != null ? `输入 ${fmt.num(decision.judge.inputTokens)} / 输出 ${fmt.num(decision.judge.outputTokens)}` : null,
           decision.judge.cost != null ? `判断费用 $${decision.judge.cost.toFixed(6)}` : null].filter(Boolean).join(' · '))) : null,
-    ) : empty('此记录未保存思考强度。'))
+    )
 }
 
-function timelineEvent(event, opened) {
+function timelineEntries(r) {
+  const events = [], tools = new Map()
+  let hasThinking = false
+  for (const event of r.events) {
+    if (['request', 'reply'].includes(event.kind)) continue
+    if (event.kind === 'progress' && ['等待模型响应', '正在判断思考强度'].includes(event.text)) continue
+    if (event.kind === 'thinking') hasThinking = true
+    const key = event.kind === 'tool' && event.callId ? `${event.step ?? ''}:${event.callId}` : undefined
+    if (key && tools.has(key)) {
+      const first = tools.get(key)
+      events[first] = { ...events[first], ...event, seq: events[first].seq, args: event.args || events[first].args }
+    } else {
+      if (key) tools.set(key, events.length)
+      events.push(event)
+    }
+  }
+  if (!hasThinking && r.thinkingDecision) events.unshift({ seq: 'thinking', at: r.createdAt, kind: 'thinking', thinking: r.thinkingDecision.level })
+  return events
+}
+
+function timelineEvent(event, opened, r) {
   const [label, ico] = EVENT[event.kind] ?? ['记录', 'logs']
-  return h('article', { class: `computer-event ${event.isError ? 'event-error' : ''}` },
+  const key = `event:${event.seq}`
+  const argsKey = `args:${event.seq}`
+  const title = h('div', { class: 'computer-event-head' }, h('strong', event.tool || label),
+    event.step != null ? badge(`第 ${event.step} 轮`) : null,
+    event.thinking ? badge(`思考 ${event.thinking}`) : null,
+    event.phase ? badge(event.phase === 'running' ? '执行中' : event.phase === 'skipped' ? '未执行' : event.isError ? '失败' : '已返回', event.isError ? 'bad' : event.phase === 'running' ? 'accent' : '') : null,
+    event.ms != null ? h('span', { class: 'small muted' }, fmt.dur(event.ms)) : null,
+    h('time', { class: 'small muted', dateTime: new Date(event.at).toISOString() }, new Date(event.at).toLocaleTimeString('zh-CN', { hour12: false })))
+  const contents = [
+    event.text ? textBlock(event.text, { key: `text:${event.seq}`, open: opened.get(`text:${event.seq}`), limit: 280, className: event.isError ? 'small bad' : 'small' }) : null,
+    event.inputTokens != null ? h('div', { class: 'small muted' }, `输入 ${fmt.num(event.inputTokens)} / 输出 ${fmt.num(event.outputTokens)}`) : null,
+    event.callId ? h('div', { class: 'small muted mono' }, event.callId) : null,
+    event.args ? h('details', { class: 'computer-arguments', 'data-disclosure': argsKey, open: opened.get(argsKey) },
+      h('summary', '调用参数'), h('pre', { class: 'small mono' }, event.args)) : null,
+  ]
+  return h('article', { class: `computer-event rollout-event ${event.isError ? 'event-error' : ''}`, 'data-kind': event.kind },
     h('span', { class: 'computer-event-icon' }, icon(ico, 16)),
     h('div', { class: 'computer-event-content' },
-      h('div', { class: 'computer-event-head' }, h('strong', label),
-        event.step != null ? badge(`第 ${event.step} 轮`) : null,
-        event.thinking ? badge(`思考 ${event.thinking}`) : null,
-        event.tool ? badge(event.tool) : null,
-        event.phase ? badge(event.phase === 'running' ? '开始执行' : event.phase === 'skipped' ? '未执行' : event.isError ? '失败' : '已返回', event.isError ? 'bad' : event.phase === 'skipped' ? 'warn' : '') : null,
-        h('time', { class: 'small muted', dateTime: new Date(event.at).toISOString() }, fmt.time(event.at))),
-      event.text ? h('pre', { class: event.isError ? 'small bad' : 'small' }, event.text) : null,
-      event.ms != null || event.inputTokens != null ? h('div', { class: 'small muted' },
-        [event.ms != null ? fmt.dur(event.ms) : null, event.inputTokens != null ? `输入 ${fmt.num(event.inputTokens)} / 输出 ${fmt.num(event.outputTokens)}` : null].filter(Boolean).join(' · ')) : null,
-      event.callId ? h('div', { class: 'small muted mono' }, `调用 ${event.callId}`) : null,
-      event.args ? h('details', { class: 'computer-arguments', 'data-seq': event.seq, open: opened.has(event.seq) },
-        h('summary', '查看调用参数'), h('pre', { class: 'small mono' }, event.args)) : null,
+      event.kind === 'tool' ? h('details', { class: 'tool-disclosure', 'data-disclosure': key, open: opened.get(key) ?? event.isError },
+        h('summary', title, h('span', { class: 'tool-preview' }, (event.text ?? '').slice(0, 130))), h('div', { class: 'tool-content' }, contents))
+        : [title, event.kind === 'thinking' ? thinkingDetails(r, opened) : contents],
     ))
+}
+
+function metric(label, value, ico) {
+  return h('div', { class: 'run-metric' }, h('span', icon(ico, 14), label), h('strong', { title: String(value) }, value))
+}
+
+function requestDetails(r, opened) {
+  const context = r.context
+  const disclosure = (key, label, ico, count, content) => h('details', { class: 'request-disclosure', 'data-disclosure': key, open: opened.get(key) },
+    h('summary', icon(ico, 17), h('strong', label), badge(count), icon('chevron', 15)), h('div', { class: 'request-content' }, content))
+  const roleLabel = { user: '用户', assistant: '机器人', tool: '工具' }
+  return h('div', { class: 'request-inspector' },
+    disclosure('available-tools', '可用工具', 'tools', context ? `${context.tools.length}${context.omittedTools ? '+' : ''}` : '—',
+      context ? [context.nativeSearch ? badge('原生搜索', 'accent') : null, context.tools.length ? h('div', { class: 'tool-catalog' }, context.tools.map((tool, index) =>
+        h('details', { class: 'quiet-details', 'data-disclosure': `tool-spec:${index}`, open: opened.get(`tool-spec:${index}`) },
+          h('summary', tool.name), h('p', { class: 'small' }, tool.description), h('pre', { class: 'small mono' }, (() => { try { return JSON.stringify(JSON.parse(tool.parameters), null, 2) } catch { return tool.parameters } })())))) : empty('本轮未提供函数工具。')]
+        : empty('此记录未保存工具列表。')),
+    disclosure('chat-context', '聊天上下文', 'memory', context ? `${context.messages.length}${context.omittedMessages ? '+' : ''}` : '—',
+      context ? [context.truncated ? h('p', { class: 'small warn' }, '部分内容超出保存上限，已截取。') : null,
+        h('details', { class: 'quiet-details', 'data-disclosure': 'system-prompt', open: opened.get('system-prompt') }, h('summary', '系统提示'), h('pre', { class: 'small' }, context.system)),
+        context.messages.map((message, index) => h('div', { class: `context-message ${message.role}` },
+          h('div', { class: 'row small muted' }, badge(roleLabel[message.role] ?? message.role), message.imageCount ? badge(`${message.imageCount} 张图片`) : null),
+          textBlock(message.text, { key: `context:${index}`, open: opened.get(`context:${index}`), limit: 300 })))]
+        : empty('此记录未保存聊天上下文。')))
 }
 
 export async function render(root, [id]) {
@@ -56,7 +127,7 @@ export async function render(root, [id]) {
   let selected = id ?? rollouts[0]?.id
   let stopped = false, busy = false, snapshot = '', listSnapshot = '', filter = ''
   const items = h('div')
-  const list = h('div', { class: 'pane-list computer-job-list' },
+  const list = h('div', { class: 'pane-list computer-job-list rollout-list' },
     h('div', { class: 'section-heading' }, h('h2', '执行列表')),
     h('input', { type: 'search', placeholder: '筛选输入、会话或模型…', 'aria-label': '筛选执行记录', style: { width: '100%', marginBottom: '12px' }, oninput: e => {
       filter = e.target.value.toLowerCase(); drawList()
@@ -93,32 +164,32 @@ export async function render(root, [id]) {
     const key = JSON.stringify(r)
     if (snapshot === key) return
     snapshot = key
-    const opened = new Set([...detail.querySelectorAll('details[open][data-seq]')].map(el => Number(el.dataset.seq)))
+    const opened = new Map([...detail.querySelectorAll('details[data-disclosure]')].map(el => [el.dataset.disclosure, el.open]))
     const [label, kind] = STATUS[r.status] ?? [r.status, '']
-    const execution = r.events.filter(event => event.kind !== 'reply')
+    const execution = timelineEntries(r)
     const progress = r.events.at(-1)
     mount(detail,
       card(h('span', { class: 'card-title' }, icon('layers'), '执行详情', badge(label, kind)),
-        h('pre', { class: 'computer-task-text' }, r.input),
+        textBlock(r.input, { key: 'request', open: opened.get('request'), className: 'computer-task-text', limit: 220 }),
         h('div', { class: 'row small muted', style: { marginTop: '12px' } },
           h('span', r.label), h('span', SOURCE[r.source]), h('time', fmt.time(r.createdAt))),
         h('div', { class: 'row small', style: { marginTop: '10px' } },
-          h('a', { href: `#/conversations/${enc(r.conv)}` }, icon('chat', 14), '对话'),
-          h('a', { href: `#/vectors/${enc(r.conv)}` }, icon('vectors', 14), '向量空间')),
-        h('div', { class: 'small muted', style: { marginTop: '10px' } },
-          [r.model, r.thinking ? `思考 ${r.thinking}` : null, `${r.steps} 轮`, fmt.dur(r.ms), fmt.usd(r.cost), r.inputImageCount ? `${r.inputImageCount} 张输入图片` : null].filter(Boolean).join(' · ')),
-        r.tokens ? h('p', { class: 'small muted' }, `输入 ${fmt.num(r.tokens.input)} / 缓存 ${fmt.num(r.tokens.cacheRead)} / 输出 ${fmt.num(r.tokens.output)}`) : null,
+          h('a', { class: 'btn sm', href: `#/conversations/${enc(r.conv)}` }, icon('chat', 14), '对话'),
+          h('a', { class: 'btn sm', href: `#/vectors/${enc(r.conv)}` }, icon('vectors', 14), '向量空间'),
+          r.inputImageCount ? badge(`${r.inputImageCount} 张图片`) : null),
+        h('div', { class: 'run-metrics' }, metric('模型', r.model ?? '—', 'models'), metric('耗时', fmt.dur(r.ms), 'clock'),
+          metric('费用', fmt.usd(r.cost), 'usage'), metric('轮次', r.steps, 'layers')),
+        r.tokens ? h('div', { class: 'run-usage small muted' }, h('span', `输入 ${fmt.num(r.tokens.input)}`), h('span', `缓存 ${fmt.num(r.tokens.cacheRead)}`), h('span', `输出 ${fmt.num(r.tokens.output)}`)) : null,
         r.tokens?.inputIncomplete ? h('p', { class: 'small warn' }, '上游可能漏报历史输入与缓存用量，花费可能偏低。') : null,
         r.jobId ? h('a', { class: 'small', href: `#/${r.source === 'agy' ? 'agy' : 'computer'}/${enc(r.jobId)}` }, '查看来源任务 →') : null,
         ['running', 'queued'].includes(r.status) ? h('div', { class: 'computer-progress small', role: 'status' }, spinner(),
           r.status === 'queued' ? '等待处理' : progress?.kind === 'tool' ? `${progress.tool} ${progress.phase === 'running' ? '执行中' : '已返回'}` : progress?.text || '正在处理') : null),
-      thinkingDetails(r),
       card(h('span', { class: 'card-title' }, icon('chat'), '最终回复'),
-        r.reply ? h('pre', { class: 'small' }, r.reply) : empty(['queued', 'running'].includes(r.status) ? '执行结束后会显示最终回复。' : '本次执行没有生成最终回复。')),
+        r.reply ? textBlock(r.reply, { key: 'reply', open: opened.get('reply'), limit: 560, className: 'rollout-reply' }) : empty(['queued', 'running'].includes(r.status) ? '执行结束后会显示最终回复。' : '本次执行没有生成最终回复。')),
+      requestDetails(r, opened),
       card(h('span', { class: 'card-title' }, icon('logs'), '执行记录', badge(`${execution.length} 条`)),
-        h('p', { class: 'small muted', style: { marginBottom: '16px' } }, '记录可见响应、工具调用与结果；敏感信息已过滤。'),
         r.dropped ? h('p', { class: 'small warn' }, `较早的 ${r.dropped} 条记录已超过保留上限，以下为最近记录。`) : null,
-        execution.length ? h('div', { class: 'computer-timeline' }, execution.map(event => timelineEvent(event, opened))) : empty('尚无详细执行记录。')),
+        execution.length ? h('div', { class: 'computer-timeline' }, execution.map(event => timelineEvent(event, opened, r))) : empty('尚无详细执行记录。')),
     )
   }
 
