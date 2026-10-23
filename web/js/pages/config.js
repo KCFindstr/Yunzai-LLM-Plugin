@@ -1,6 +1,6 @@
 import { api, del, get, put } from '../api.js'
 import { menuButton } from '../main.js'
-import { act, badge, card, combo, confirmDanger, empty, h, modal, mount, promptFields, switchEl, tabs, toast } from '../ui.js'
+import { act, badge, card, combo, confirmDanger, empty, h, icon, modal, mount, promptFields, switchEl, tabs, toast } from '../ui.js'
 
 /**
  * Schema-driven config editor. Every write goes through PUT /api/config (validated server-side with the same
@@ -56,7 +56,12 @@ function drawBody(body) {
   if (state.section === 'basic')
     return mount(body, card('基础', BASIC.filter(k => schema.fields[k]).map(k => leaf(schema.fields[k], [k], effective[k], effective))))
   const node = schema.fields[state.section]
+  const skillsLink = state.section === 'skills' ? h('div', { class: 'notice', style: { borderColor: 'var(--accent)', background: 'var(--accent-soft)', marginBottom: '16px' } },
+    icon('tools', 18),
+    h('span', '要创建、编写或管理具体的技能内容，请前往「工具与技能 → 技能」页面。'),
+    h('a', { href: '#/tools/skills', class: 'btn sm primary' }, '前往技能管理 →')) : null
   mount(body, card(node.label ?? state.section,
+    skillsLink,
     h('div', { class: 'small muted mono', style: { marginBottom: '6px' } }, state.section),
     descFor([state.section]) ? h('div', { class: 'small muted', style: { whiteSpace: 'pre-wrap', marginBottom: '8px' } }, descFor([state.section])) : null,
     container(node, [state.section], effective[state.section], effective)))

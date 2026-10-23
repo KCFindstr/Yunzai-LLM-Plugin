@@ -71,7 +71,12 @@ it('records each live model round and parallel tool result, then persists a filt
     assert.equal(recentRollouts()[0].status, 'failed')
     assert.ok(rolloutHistory(recentRollouts()[0].id)!.events.some(event => event.kind === 'error'))
     flushAllStores()
-    const persisted = fs.readFileSync(path.join(TMP, 'data/rollouts.json'), 'utf8')
+    const index = fs.readFileSync(path.join(TMP, 'data/rollouts/index.json'), 'utf8')
+    const directory = path.join(TMP, 'data/rollouts')
+    const persisted = fs.readdirSync(directory).filter(file => file.endsWith('.json'))
+      .map(file => fs.readFileSync(path.join(directory, file), 'utf8')).join('\n')
+    assert.ok(!('context' in JSON.parse(index).rollouts[0]))
+    assert.ok(!('events' in JSON.parse(index).rollouts[0]))
     for (const hidden of [secret, 'alice@example.com', 'provider-private-reasoning']) assert.ok(!persisted.includes(hidden), hidden)
   } finally { release(); await pending; await server.close() }
 })
@@ -80,7 +85,7 @@ it('bounds and filters request snapshots without persisting image bytes or provi
   const id = startRollout({ conv: 'context', source: 'chat', input: 'inspect', inputImageCount: 1 })
   recordRolloutContext(id, {
     system: 'secret-password=do-not-display ' + '系统提示'.repeat(10000),
-    current: { heading: '当前发言', text: 'current image request', recent: ['password=do-not-display'], roster: ['alice@example.com'], memory: 'apiKey=do-not-display', quote: '引用内容' },
+    current: { heading: '当前发言', text: 'current image request', recent: Array.from({ length: 100 }, () => 'password=do-not-display ' + '群聊'.repeat(1000)), roster: ['alice@example.com'], memory: 'apiKey=do-not-display', quote: '引用内容' },
     tools: Array.from({ length: 100 }, (_, i) => ({ name: `tool_${i}`, description: '工具描述'.repeat(1000), parameters: { description: '参数'.repeat(3000), apiKey: 'do-not-display' } })),
     messages: [
       ...Array.from({ length: 50 }, () => ({ role: 'assistant' as const, content: '历史消息'.repeat(3000), native: { provider: 'openai' as const, model: 'fake', data: { reasoning: 'hidden-native-reasoning' } } })),

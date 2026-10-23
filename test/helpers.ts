@@ -21,6 +21,15 @@ process.env.YZ_LLM_SKILLS_DIR = path.join(TMP, 'skills')
 process.env.YZ_LLM_TOOLS_DIR = path.join(TMP, 'tools')
 process.env.YZ_LLM_QUIET = '1'
 
+// Run after test hooks and browser/child-process shutdown, before leaving test data behind.
+process.once('beforeExit', async () => {
+  const { flushAllStores } = await import('../src/core/store.ts')
+  const { closeUsageHistory } = await import('../src/billing/history.ts')
+  flushAllStores()
+  closeUsageHistory()
+  fs.rmSync(TMP, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 })
+})
+
 export function writeUserConfig(yaml: string) {
   fs.writeFileSync(path.join(TMP, 'config', 'config.yaml'), yaml, 'utf8')
 }

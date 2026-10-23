@@ -292,6 +292,7 @@ export function normalize(raw: any): PluginConfig {
   for (const k of ['prefixes', 'groupWhitelist', 'groupBlacklist', 'userBlacklist']) c.trigger[k] = asArray(c.trigger[k])
   c.trigger.priority = Number(c.trigger.priority ?? 99999)
   c.chat = isPlainObject(c.chat) ? c.chat : {}
+  c.chat.groupContext = Math.min(100, Math.max(0, Math.floor(Number(c.chat.groupContext ?? 6) || 0)))
   c.chat.maxToolCalls = Math.min(1000, Math.max(0, Math.floor(Number(c.chat.maxToolCalls ?? 20) || 0)))
   c.quota = isPlainObject(c.quota) ? c.quota : {}
   c.quota.defaultScope ??= 'user'

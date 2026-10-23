@@ -13,7 +13,8 @@ interface Line {
   conv?: string
 }
 
-const MAX_LINES = 40
+// Room for a 100-message context plus the trigger and messages queued after it.
+const MAX_LINES = 200
 const logs = new Map<string, Line[]>()
 
 const keyOf = (e: any) => `${e?.self_id}:${e?.group_id}`
@@ -100,6 +101,7 @@ export function markHandled(e: any, conv: string) {
 
 /** Keep overlapping exchanges: removing them loses how bot conversations interleave with group chatter. */
 export function recentLines(e: any, n: number, maxChars: number, conv?: string, withinMs = 30 * 60_000): string[] {
+  n = Math.min(100, Math.max(0, Math.floor(n)))
   if (!e?.group_id || n <= 0) return []
   const list = logs.get(keyOf(e)) ?? []
   const mid = e.message_id != null ? String(e.message_id) : undefined

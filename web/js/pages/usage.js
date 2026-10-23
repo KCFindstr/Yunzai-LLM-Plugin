@@ -1,13 +1,12 @@
 import { enc, get, post } from '../api.js'
 import { menuButton } from '../main.js'
-import { act, bars, card, confirmDanger, empty, fmt, h, meter, mount, promptFields } from '../ui.js'
+import { act, card, confirmDanger, empty, fmt, h, meter, mount, promptFields } from '../ui.js'
 import { usageBreakdown } from '../usage-breakdown.js'
 
 const WINDOWS = [['window5h', 'used5h', '5小时'], ['weekly', 'usedWeek', '每周']]
 
 export async function render(root) {
   const u = await get('/api/usage')
-  const days = u.daily.map(([d, per]) => [d.slice(5), Object.values(per).reduce((a, b) => a + b, 0)])
   const models = Object.entries(u.totals).sort((a, b) => b[1].cost - a[1].cost)
   const incomplete = new Set(u.incompleteModels ?? [])
   const usageNote = 'Gemini 服务端会话可能漏报历史输入和缓存 token；花费与额度按已报告用量计算，可能偏低，不能保证实际消费上限。实际费用以服务商账单为准。'
@@ -32,7 +31,6 @@ export async function render(root) {
     ),
     incomplete.size ? card('用量报告不完整', h('p', { class: 'small muted' }, `${[...incomplete].join('、')}：${usageNote}`)) : null,
     usageBreakdown([...Object.keys(u.totals), ...u.models.map(model => model.id)]),
-    card('最近 14 天花费', bars(days, fmt.usd)),
     h('div', { class: 'grid cols-2', style: { marginTop: '16px' } },
       card('全局额度（按模型）',
         u.models.length ? h('div', { class: 'col', style: { gap: '14px' } }, u.models.map(m => h('div',

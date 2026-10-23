@@ -160,6 +160,8 @@ async function runTurnInner(req: TurnRequest, ref: { turn?: TurnState; rolloutId
     buildSystemPrompt({ isGroup: Boolean(e.group_id), botName, eff, tools: offered.map(t => t.name), nativeSearch, markdown })
   let system = makeSystem()
   const session = getSession(convKey, eff.chat.sessionTimeout)
+  // Apply lowered limits and recover from skipped post-reply housekeeping before building a request.
+  truncateIfNeeded(convKey, eff.chat)
   const text = input.text || (input.images.length ? '（发了图片）' : '（只@了你，没说话）')
 
   // Long-term memory: a stable prefix message (cache-friendly; only changes when memory changes). In a shared
@@ -219,7 +221,8 @@ async function runTurnInner(req: TurnRequest, ref: { turn?: TurnState; rolloutId
     for (;;) {
       try {
         if (msgs.length === prefix.length + session.messages.length + 1)
-          recordRolloutContext(ref.rolloutId, { system, tools: specs, messages: msgs, nativeSearch, messageSources, current: { ...header.context, text } })
+          recordRolloutContext(ref.rolloutId, { system, tools: specs, messages: msgs, nativeSearch, messageSources, current: { ...header.context, text },
+            history: { turns: session.messages.length / 2, messages: session.messages.length, maxTurns: eff.chat.historyMaxTurns } })
         return await chat({ model, provider, system, messages: msgs, tools: specs, nativeSearch, thinking, maxTokens, temperature, cacheKey, state })
       } catch (err) {
         // server-side chain expired/unknown: resend the full transcript once

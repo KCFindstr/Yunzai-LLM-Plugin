@@ -4,7 +4,7 @@ import path from 'node:path'
 import { DATA_DIR } from '../core/paths.ts'
 import { detectImageMime, sha1 } from '../core/util.ts'
 import { log } from '../core/log.ts'
-import { JsonStore } from '../core/store.ts'
+import { RolloutFileStore } from './rolloutStore.ts'
 import { agyHistoryText } from '../agy/history.ts'
 import type { ThinkingLevel } from '../core/configTypes.ts'
 import type { JudgeResponse, ThinkingDecision } from './thinking.ts'
@@ -17,6 +17,7 @@ export interface RolloutContext {
   tools: { name: string; description: string; parameters: string }[]
   messages: { role: Msg['role']; text: string; imageCount?: number; source?: 'memory' | 'summary' | 'history' | 'current' }[]
   current?: TurnPromptContext & { text: string }
+  history?: { turns: number; messages: number; maxTurns: number }
   nativeSearch: boolean
   omittedMessages: number
   omittedTools: number
@@ -64,35 +65,40 @@ export interface Rollout {
   dropped: number
   events: RolloutEvent[]
 }
-const store = new JsonStore<{ v: 1; rollouts: Rollout[] }>('rollouts.json', { v: 1, rollouts: [] })
 const active = (rollout: Pick<Rollout, 'status'>) => ['queued', 'running'].includes(rollout.status)
+const store = new RolloutFileStore(path.join(DATA_DIR, 'rollouts'), indexSummary)
 export const ROLLOUT_RETENTION_MS = 30 * 86400_000
 const IMAGE_ROOT = path.join(DATA_DIR, 'rollout-images')
 const imageDirectory = (id: string) => /^[a-f0-9]{16}$/.test(id) ? path.join(IMAGE_ROOT, id) : undefined
 
 function pruneExpired() {
   const cutoff = Date.now() - ROLLOUT_RETENTION_MS
-  const expired = store.data.rollouts.filter(r => !active(r) && r.updatedAt < cutoff)
+  const expired = store.list().filter(r => !active(r) && r.updatedAt < cutoff)
   if (!expired.length) return
-  const ids = new Set(expired.map(r => r.id))
-  store.data.rollouts = store.data.rollouts.filter(r => !ids.has(r.id))
-  for (const id of ids) {
+  for (const { id } of expired) {
+    store.remove(id)
     const directory = imageDirectory(id)
     if (directory) try { fs.rmSync(directory, { recursive: true, force: true }) } catch (error: any) { log.warn(`清理执行图片失败：${error.message}`) }
   }
-  store.save()
+  store.flush()
 }
 
 // A process restart cannot resume an in-flight main-model request.
-for (const rollout of store.data.rollouts) {
-  if (active(rollout)) { rollout.status = 'interrupted'; store.save() }
+for (const entry of store.list()) {
+  if (active(entry)) {
+    const rollout = store.get(entry.id)
+    if (rollout) {
+      if (active(rollout)) rollout.status = 'interrupted'
+      store.put(rollout)
+    }
+  }
 }
 pruneExpired()
 setInterval(pruneExpired, 3600_000).unref()
 
 /** Keep local raster bytes only; never fetch arbitrary image URLs during history recording. */
 export function recordRolloutImages(id: string, images: ImagePart[] = []) {
-  const rollout = store.data.rollouts.find(r => r.id === id), directory = imageDirectory(id)
+  const rollout = store.get(id), directory = imageDirectory(id)
   const saved: NonNullable<RolloutEvent['images']> = []
   if (!rollout || !directory) return saved
   const existing = new Map(rollout.events.flatMap(e => e.images ?? []).map(image => [image.id, image.bytes]))
@@ -114,7 +120,7 @@ export function readRolloutImage(id: string, imageId: string) {
   pruneExpired()
   const directory = imageDirectory(id)
   if (!directory || !/^[a-f0-9]{40}$/.test(imageId)) return
-  const image = store.data.rollouts.find(r => r.id === id)?.events.flatMap(e => e.images ?? []).find(i => i.id === imageId)
+  const image = store.get(id)?.events.flatMap(e => e.images ?? []).find(i => i.id === imageId)
   if (!image) return
   try {
     const raw = fs.readFileSync(path.join(directory, `${imageId}.image`))
@@ -172,6 +178,7 @@ function cleanContext(context: RolloutContext): RolloutContext {
     tools: context.tools.map(tool => ({ name: agyHistoryText(tool.name, undefined, 100), description: agyHistoryText(tool.description, undefined, 1200), parameters: agyHistoryText(tool.parameters, undefined, 3000) })),
     messages: context.messages.map(message => ({ role: message.role, text: agyHistoryText(message.text, undefined, 6000), imageCount: message.imageCount, source: message.source })),
     current: context.current && cleanCurrent(context.current),
+    history: context.history && { turns: context.history.turns, messages: context.history.messages, maxTurns: context.history.maxTurns },
     nativeSearch: context.nativeSearch, omittedMessages: context.omittedMessages, omittedTools: context.omittedTools, truncated: context.truncated,
   }
 }
@@ -179,14 +186,14 @@ function cleanCurrent(current: TurnPromptContext & { text: string }) {
   return {
     heading: agyHistoryText(current.heading, undefined, 500), text: agyHistoryText(current.text, undefined, 6000),
     roster: current.roster.slice(0, 40).map(line => agyHistoryText(line, undefined, 200)),
-    recent: current.recent.slice(0, 30).map(line => agyHistoryText(line, undefined, 500)),
+    recent: current.recent.slice(0, 100).map(line => agyHistoryText(line, undefined, 500)),
     memory: agyHistoryText(current.memory, undefined, 6000), quote: agyHistoryText(current.quote, undefined, 1000),
   }
 }
 
 /** The logical initial request, without image bytes, provider-native state, or transport credentials. */
-export function recordRolloutContext(id: string, request: { system: string; tools: ToolSpec[]; messages: Msg[]; nativeSearch: boolean; messageSources?: RolloutContext['messages'][number]['source'][]; current?: RolloutContext['current'] }) {
-  const rollout = store.data.rollouts.find(entry => entry.id === id)
+export function recordRolloutContext(id: string, request: { system: string; tools: ToolSpec[]; messages: Msg[]; nativeSearch: boolean; messageSources?: RolloutContext['messages'][number]['source'][]; current?: RolloutContext['current']; history?: RolloutContext['history'] }) {
+  const rollout = store.get(id)
   if (!rollout) return
   let truncated = false
   const text = (value: unknown, max: number) => {
@@ -194,8 +201,8 @@ export function recordRolloutContext(id: string, request: { system: string; tool
     if (safe.length > max) truncated = true
     return safe.slice(0, max)
   }
-  const messages = request.messages.slice(-40).map((message, index) => {
-    const source = request.messageSources?.[Math.max(0, request.messages.length - 40) + index]
+  const messages = request.messages.slice(-200).map((message, index) => {
+    const source = request.messageSources?.[Math.max(0, request.messages.length - 200) + index]
     if (message.role === 'user') return { role: message.role, source, text: text(message.content.filter(part => part.type === 'text').map(part => part.text).join('\n'), 6000), imageCount: message.content.filter(part => part.type === 'image').length }
     if (message.role === 'tool') return { role: message.role, source, text: text(message.results.map(result => `${result.name}: ${result.content}`).join('\n'), 6000) }
     return { role: message.role, source, text: text([message.content, ...(message.toolCalls ?? []).map(call => `${call.name}: ${agyHistoryText(call.args)}`)].filter(Boolean).join('\n'), 6000) }
@@ -203,8 +210,9 @@ export function recordRolloutContext(id: string, request: { system: string; tool
   const context: RolloutContext = {
     system: text(request.system, 16000),
     current: request.current && cleanCurrent(request.current),
+    history: request.history,
     tools: request.tools.slice(0, 100).map(tool => ({ name: text(tool.name, 100), description: text(tool.description, 1200), parameters: text(tool.parameters, 3000) })),
-    messages, nativeSearch: request.nativeSearch, omittedMessages: Math.max(0, request.messages.length - 40), omittedTools: Math.max(0, request.tools.length - 100), truncated: false,
+    messages, nativeSearch: request.nativeSearch, omittedMessages: Math.max(0, request.messages.length - 200), omittedTools: Math.max(0, request.tools.length - 100), truncated: false,
   }
   const tooLarge = () => Buffer.byteLength(JSON.stringify(context)) > 128 * 1024
   while (tooLarge() && context.messages.length > 1) { context.messages.shift(); context.omittedMessages++ }
@@ -213,35 +221,43 @@ export function recordRolloutContext(id: string, request: { system: string; tool
     context.system = context.system.slice(0, 8000)
     context.tools = context.tools.map(tool => ({ name: tool.name, description: tool.description.slice(0, 120), parameters: tool.parameters.slice(0, 80) }))
     context.messages = context.messages.map(message => ({ ...message, text: message.text.slice(0, 2000) }))
+    if (context.current) {
+      context.current.text = context.current.text.slice(0, 2000)
+      context.current.memory = context.current.memory.slice(0, 2000)
+      context.current.roster = context.current.roster.slice(0, 20).map(line => line.slice(0, 120))
+      context.current.recent = context.current.recent.map(line => line.slice(0, 160))
+      while (tooLarge() && context.current.recent.length) context.current.recent.shift()
+    }
+    while (tooLarge() && context.tools.length) { context.tools.pop(); context.omittedTools++ }
   }
   context.truncated = truncated || context.omittedMessages > 0 || context.omittedTools > 0
   rollout.context = context
   rollout.updatedAt = Date.now()
-  save()
+  save(rollout)
 }
-function save() {
+function save(rollout: Rollout) {
   pruneExpired()
-  store.save()
+  store.put(rollout)
 }
 export function startRollout(input: Pick<Rollout, 'conv' | 'input' | 'inputImageCount' | 'source' | 'jobId'>): string {
   const id = randomBytes(8).toString('hex'), now = Date.now()
-  store.data.rollouts.push({ ...input, input: agyHistoryText(input.input), id, createdAt: now, updatedAt: now,
+  store.put({ ...input, input: agyHistoryText(input.input), id, createdAt: now, updatedAt: now,
     status: 'queued', steps: 0, cost: 0, ms: 0, seq: 0, dropped: 0, events: [] })
   recordRolloutEvent(id, { kind: 'request', text: input.input })
   return id
 }
 export function updateRollout(id: string, patch: Partial<Pick<Rollout, 'status' | 'model' | 'thinking' | 'thinkingDecision' | 'steps' | 'cost' | 'tokens' | 'reply'>>) {
-  const rollout = store.data.rollouts.find(entry => entry.id === id)
+  const rollout = store.get(id)
   if (!rollout) return
   Object.assign(rollout, patch, { updatedAt: Date.now() })
   if (patch.model) rollout.model = agyHistoryText(patch.model, undefined, 100)
   if (patch.reply) rollout.reply = agyHistoryText(patch.reply)
   if (patch.thinkingDecision) rollout.thinkingDecision = cleanThinking(patch.thinkingDecision)
   rollout.ms = rollout.updatedAt - rollout.createdAt
-  save()
+  save(rollout)
 }
 export function recordRolloutEvent(id: string, event: Omit<RolloutEvent, 'seq' | 'at'>) {
-  const rollout = store.data.rollouts.find(entry => entry.id === id)
+  const rollout = store.get(id)
   if (!rollout) return
   rollout.events.push(cleanEvent({ ...event, seq: ++rollout.seq, at: Date.now() }))
   while (rollout.events.length > 500 || Buffer.byteLength(JSON.stringify(rollout.events)) > 256 * 1024) {
@@ -250,7 +266,7 @@ export function recordRolloutEvent(id: string, event: Omit<RolloutEvent, 'seq' |
   }
   rollout.updatedAt = Date.now()
   rollout.ms = rollout.updatedAt - rollout.createdAt
-  save()
+  save(rollout)
 }
 function summary({ events, seq, dropped, context, ...rollout }: Rollout) {
   return { ...rollout, input: agyHistoryText(rollout.input), reply: rollout.reply && agyHistoryText(rollout.reply),
@@ -258,13 +274,18 @@ function summary({ events, seq, dropped, context, ...rollout }: Rollout) {
     thinkingDecision: rollout.thinkingDecision && cleanThinking(rollout.thinkingDecision),
     ms: active(rollout) ? Date.now() - rollout.createdAt : rollout.ms, dropped }
 }
+function indexSummary(rollout: Rollout) {
+  const { reply, thinkingDecision, ...entry } = summary(rollout)
+  return { ...entry, input: entry.input.slice(0, 300) }
+}
 /** Summaries only: polling the list never transfers every tool result. */
 export function recentRollouts(conv?: string) {
   pruneExpired()
-  return store.data.rollouts.filter(rollout => !conv || rollout.conv === conv).slice().reverse().map(summary)
+  return store.list().filter(rollout => !conv || rollout.conv === conv).reverse()
+    .map(rollout => ({ ...rollout, ms: active(rollout) ? Date.now() - rollout.createdAt : rollout.ms }))
 }
 export function rolloutHistory(id: string) {
   pruneExpired()
-  const rollout = store.data.rollouts.find(entry => entry.id === id)
+  const rollout = store.get(id)
   return rollout ? { ...summary(rollout), context: rollout.context && cleanContext(rollout.context), events: rollout.events.map(cleanEvent) } : undefined
 }

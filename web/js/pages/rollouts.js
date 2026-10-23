@@ -1,8 +1,9 @@
 import { enc, get } from '../api.js'
 import { menuButton } from '../main.js'
-import { badge, card, empty, fmt, h, icon, mount, spinner, textBlock } from '../ui.js'
+import { badge, card, empty, fmt, h, icon, modal, mount, spinner, textBlock } from '../ui.js'
 import { parseRolloutJson } from '../rollout-data.js'
 import { contextInspector } from '../context-inspector.js'
+import { initialPromptText } from '../context-view.js'
 
 const STATUS = {
   queued: ['排队中', 'accent'], running: ['执行中', 'accent'], completed: ['已完成', 'ok'],
@@ -121,17 +122,20 @@ function metric(label, value, ico) {
 
 function requestDetails(r, opened) {
   const context = r.context
-  const disclosure = (key, label, ico, count, content) => h('details', { class: 'request-disclosure', 'data-disclosure': key, open: opened.get(key) },
-    h('summary', icon(ico, 17), h('strong', label), badge(count), icon('chevron', 15)), h('div', { class: 'request-content' }, content))
+  const disclosure = (key, label, ico, count, content, action) => h('details', { class: 'request-disclosure', 'data-disclosure': key, open: opened.get(key) },
+    h('summary', icon(ico, 17), h('strong', label), badge(count), action, icon('chevron', 15)), h('div', { class: 'request-content' }, content))
   return h('div', { class: 'request-inspector' },
     disclosure('available-tools', '可用工具', 'tools', context ? `${context.tools.length}${context.omittedTools ? '+' : ''}` : '—',
       context ? [context.nativeSearch ? badge('原生搜索', 'accent') : null, context.tools.length ? h('div', { class: 'tool-catalog' }, context.tools.map((tool, index) =>
         h('details', { class: 'quiet-details', 'data-disclosure': `tool-spec:${index}`, open: opened.get(`tool-spec:${index}`) },
           h('summary', tool.name), h('p', { class: 'small' }, tool.description), h('pre', { class: 'small mono' }, (() => { try { return JSON.stringify(JSON.parse(tool.parameters), null, 2) } catch { return tool.parameters } })())))) : empty('本轮未提供函数工具。')]
         : empty('此记录未保存工具列表。')),
-    disclosure('chat-context', '聊天上下文', 'memory', context ? `${context.messages.length}${context.omittedMessages ? '+' : ''}` : '—',
+    disclosure('chat-context', '聊天上下文', 'memory', context ? `${context.messages.length}${context.omittedMessages ? '+' : ''} 条消息` : '—',
       context ? contextInspector(context, opened)
-        : empty('此记录未保存聊天上下文。')))
+        : empty('此记录未保存聊天上下文。'), context ? h('button', { class: 'btn sm', type: 'button', 'aria-label': '查看初始提示原文', onclick: event => {
+          event.preventDefault(); event.stopPropagation()
+          modal('初始提示原文', h('textarea', { class: 'code raw-prompt-text', readOnly: true, spellcheck: false, rows: 24, 'aria-label': '初始提示原文' }, initialPromptText(context)))
+        } }, '原文') : null))
 }
 
 export async function render(root, [id]) {

@@ -3,6 +3,8 @@ import assert from 'node:assert/strict'
 import http from 'node:http'
 import { after, before, beforeEach, describe, it } from 'node:test'
 import { extractInput } from '../src/chat/message.ts'
+import { buildHeader } from '../src/chat/prompt.ts'
+import { config } from '../src/core/config.ts'
 
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9ZlWQAAAAASUVORK5CYII=', 'base64')
 const requests: string[] = []
@@ -22,6 +24,27 @@ before(async () => {
 })
 beforeEach(() => { requests.length = 0 })
 after(() => new Promise<void>(resolve => server.close(() => resolve())))
+
+describe('quoted sender identity', () => {
+  it('preserves the quoted sender ID in both the sent and stored prompt, even for duplicate names', async () => {
+    for (const userId of [42001, 42002]) {
+      const e = { self_id: 10000, user_id: 20001, reply_id: 'original', getReply: async () => ({ sender: { user_id: userId, nickname: '同名群友' }, message: [{ type: 'text', text: '引用内容' }] }) }
+      const input = await extractInput(e, { ...opts, includeImages: false })
+      assert.equal(input.quoted!.senderId, String(userId))
+      const header = buildHeader(e, config.effective(), input, false)
+      for (const value of [header.sent, header.stored, header.context.quote]) assert.match(value, new RegExp(`引用同名群友\\(平台ID ${userId}\\) 的消息`))
+    }
+  })
+  it('includes the bot ID on bot quotes and does not invent an ID or bot identity when unknown', async () => {
+    const e = { self_id: 10000, user_id: 20001, reply_id: 'original', getReply: async () => ({ user_id: 10000, message: [{ type: 'text', text: '之前的回答' }] }) }
+    const input = await extractInput(e, { ...opts, includeImages: false })
+    assert.equal(input.quoted!.fromBot, true)
+    assert.match(buildHeader(e, config.effective(), input, false).sent, /引用你\(平台ID 10000\)之前发的消息/)
+    const unknown = await extractInput({ reply_id: 'original', getReply: async () => ({ message: [] }) }, { ...opts, includeImages: false })
+    assert.equal(unknown.quoted!.senderId, undefined)
+    assert.equal(unknown.quoted!.fromBot, false)
+  })
+})
 
 describe('image input budget', () => {
   it('counts successful loads, not failed URLs, toward the image limit', async () => {

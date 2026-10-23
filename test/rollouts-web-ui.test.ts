@@ -46,8 +46,8 @@ it('serves authenticated rollout history and renders live timelines, links and s
       { role: 'user', content: [{ type: 'text', text: '【之前对话的摘要】\n聊过图片出处' }] },
       { role: 'user', content: [{ type: 'text', text: '【2026-10-22｜群「测试」｜发言人 A】\n上一轮消息' }] },
       { role: 'assistant', content: '上一轮回复' },
-      { role: 'user', content: [{ type: 'text', text: '【2026-10-23｜群「测试」｜发言人 A】\n【最近群友·仅身份参考】\nA\nB\n【最近群聊】\n[12:00] A: 这张图好眼熟\n[12:01] B: 像是一张插画\n【相关旧聊天·参考】\n之前提到过作者\n【引用 B 消息】像是一张插画\n【消息】\n查找这张图片的原始出处' }, { type: 'image', data: 'private-image-bytes', mime: 'image/png' }] },
-    ], nativeSearch: true,
+      { role: 'user', content: [{ type: 'text', text: '【最近群友·仅身份参考】\nA\nB\n【最近群聊】\n[12:00] A: 这张图好眼熟\n[12:01] B: 像是一张插画\n【相关旧聊天·参考】\n之前提到过作者\n【引用 B 消息】像是一张插画\n【消息｜2026-10-23｜群「测试」｜发言人 A】\n查找这张图片的原始出处' }, { type: 'image', data: 'private-image-bytes', mime: 'image/png' }] },
+    ], nativeSearch: true, history: { turns: 1, messages: 2, maxTurns: 20 },
   })
   log.info('rollout-theme-info')
   log.warn('rollout-theme-warning')
@@ -124,6 +124,22 @@ it('serves authenticated rollout history and renders live timelines, links and s
     assert.equal(await page.evaluate(() => (window as any).__rollout_xss), undefined)
     assert.ok(!body.includes('alice@example.com')); assert.ok(!body.includes('secret-password'))
     assert.equal(await page.$$eval('.request-inspector > details', (elements: HTMLDetailsElement[]) => elements.every(el => !el.open)), true)
+    assert.equal(await page.$eval('button[aria-label="查看初始提示原文"]', (el: Element) => el.textContent), '原文')
+    await page.click('button[aria-label="查看初始提示原文"]')
+    await page.waitForSelector('.raw-prompt-text')
+    assert.equal(await page.$eval('.modal', (el: Element) => el.getAttribute('aria-label')), '初始提示原文')
+    const raw = await page.$eval('.raw-prompt-text', (el: HTMLTextAreaElement) => ({ value: el.value, readOnly: el.readOnly }))
+    assert.equal(raw.readOnly, true)
+    for (const expected of ['[system]', '[tools]', 'search_web', '上一轮消息', '上一轮回复', '【最近群聊】', '查找这张图片的原始出处', '未保存原始图片字节']) assert.ok(raw.value.includes(expected), expected)
+    for (const hidden of ['secret-password', 'private-image-bytes']) assert.ok(!raw.value.includes(hidden), hidden)
+    await screenshot(page, 'raw-prompt-popup.png')
+    await page.setViewport({ width: 390, height: 844 })
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false)
+    assert.ok(await page.$eval('.modal', (el: Element) => el.getBoundingClientRect().width <= innerWidth))
+    await page.keyboard.press('Escape')
+    assert.equal(await page.$('.modal-bg'), null)
+    assert.equal(await page.$eval('[data-disclosure="chat-context"]', (el: HTMLDetailsElement) => el.open), false)
+    await page.setViewport({ width: 1440, height: 1050 })
     await page.click('[data-disclosure="available-tools"] > summary')
     await page.click('.tool-catalog details > summary')
     assert.ok(await page.$eval('.tool-catalog', (el: Element) => el.textContent!.includes('搜索公开网页') && el.textContent!.includes('query')))
@@ -135,6 +151,7 @@ it('serves authenticated rollout history and renders live timelines, links and s
     await page.click('[data-disclosure="context-recent"] > summary')
     assert.equal(await page.$$eval('[data-disclosure="context-recent"] li', (els: Element[]) => els.length), 2)
     await page.click('[data-disclosure="context-history"] > summary')
+    assert.ok(await page.$eval('[data-disclosure="context-history"] > summary', (el: Element) => el.textContent!.includes('1 轮 · 2 条消息')))
     assert.equal(await page.$$eval('[data-disclosure="context-history"] .context-message', (els: Element[]) => els.length), 2)
     await screenshot(page, 'context-desktop.png')
     await page.setViewport({ width: 390, height: 844 })

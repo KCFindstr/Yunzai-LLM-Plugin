@@ -9,15 +9,26 @@ export async function render(root, [sub]) {
 
   if (mode === 'tools') {
     const tools = await get('/api/tools')
-    return mount(root, head, t, card(null, h('div', { class: 'table-wrap' }, h('table',
-      h('thead', h('tr', h('th', '启用'), h('th', '工具'), h('th', '说明'), h('th', ''))),
-      h('tbody', tools.map(x => h('tr',
+    let filter = ''
+    const tbody = h('tbody')
+    const draw = () => {
+      const visible = tools.filter(x => !filter || `${x.name} ${x.description} ${x.source}`.toLowerCase().includes(filter))
+      mount(tbody, visible.length ? visible.map(x => h('tr',
         h('td', switchEl(x.enabled, on => act(() => put(`/api/tools/${enc(x.name)}`, { enabled: on }), `${x.name} 已${on ? '启用' : '禁用'}`))),
         h('td', h('b', { class: 'mono' }, x.name), h('div', badge(x.source))),
         h('td', { class: 'small' }, x.description),
         h('td', h('button', { class: 'btn sm ghost', onclick: () => modal(x.name, h('pre', JSON.stringify(x.parameters, null, 2))) }, '参数')),
-      ))),
-    ))), h('div', { class: 'small muted', style: { marginTop: '10px' } }, '联网搜索、运行代码、电脑等工具的详细设置在「配置 → 工具」。'))
+      )) : h('tr', h('td', { colspan: 4, class: 'muted text-center', style: { padding: '16px' } }, '没有找到匹配的工具')))
+    }
+    draw()
+    return mount(root, head, t,
+      h('div', { class: 'row', style: { marginBottom: '12px', justifyContent: 'space-between' } },
+        h('span', { class: 'small muted' }, `共 ${tools.length} 个工具`),
+        h('input', { type: 'search', placeholder: '搜索工具名称或说明…', 'aria-label': '搜索工具', style: { width: '240px' }, oninput: e => { filter = e.target.value.toLowerCase(); draw() } })),
+      card(null, h('div', { class: 'table-wrap' }, h('table',
+        h('thead', h('tr', h('th', '启用'), h('th', '工具'), h('th', '说明'), h('th', ''))),
+        tbody))),
+      h('div', { class: 'small muted', style: { marginTop: '10px' } }, '联网搜索、运行代码、电脑等工具的详细设置在「配置 → 工具」。'))
   }
 
   if (mode === 'skills') {

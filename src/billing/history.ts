@@ -8,6 +8,10 @@ import { resolvePrice, type Price } from './pricing.ts'
 
 let connection: DatabaseSync | undefined
 let insert: StatementSync
+export function closeUsageHistory() {
+  connection?.close()
+  connection = undefined
+}
 function database() {
   if (connection) return connection
   fs.mkdirSync(DATA_DIR, { recursive: true })

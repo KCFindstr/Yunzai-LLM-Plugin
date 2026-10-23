@@ -5,6 +5,7 @@ import type { ImagePart } from '../llm/types.ts'
 const MAX_IMAGE_BYTES = 3_700_000
 
 export interface QuotedMessage {
+  senderId?: string
   fromBot: boolean
   name: string
   text: string
@@ -97,7 +98,8 @@ export async function getQuoted(e: any): Promise<QuotedMessage | undefined> {
         const segs = r.message ?? []
         const uid = r.sender?.user_id ?? r.user_id
         q = {
-          fromBot: String(uid) === String(e.self_id),
+          senderId: uid != null ? String(uid) : undefined,
+          fromBot: uid != null && e.self_id != null && String(uid) === String(e.self_id),
           name: String(r.sender?.card || r.sender?.nickname || uid || '某人'),
           text: segmentsToText(segs, e.self_id),
           imageUrls: segs.map(imageUrl).filter((url: string | undefined): url is string => Boolean(url)),

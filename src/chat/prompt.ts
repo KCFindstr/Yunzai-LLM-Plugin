@@ -82,8 +82,8 @@ export function buildHeader(e: any, eff: EffectiveConfig, input: ExtractedInput,
   observeUsers(e)
   const who = `${senderName(e)}(平台ID ${e.user_id})${isAdmin ? '［管理员］' : ''}`
   const head = e.group_id
-    ? `【${formatNow()}｜群「${truncate(String(e.group_name ?? e.group_id), 20)}」｜发言人 ${who}】`
-    : `【${formatNow()}｜私聊｜对方 ${who}】`
+    ? `【消息｜${formatNow()}｜群「${truncate(String(e.group_name ?? e.group_id), 20)}」｜发言人 ${who}】`
+    : `【消息｜${formatNow()}｜私聊｜对方 ${who}】`
   const ambient: string[] = []
   const context: TurnPromptContext = { heading: head, roster: [], recent: [], memory: opts.memory ?? '', quote: '' }
   if (e.group_id) {
@@ -92,17 +92,18 @@ export function buildHeader(e: any, eff: EffectiveConfig, input: ExtractedInput,
     if (roster.length) ambient.push('【最近群友·仅身份参考】', ...roster)
     const recent = recentLines(e, eff.chat.groupContext, eff.chat.groupContextMaxChars, opts.conv)
     context.recent = recent
-    if (recent.length) ambient.push('【最近群聊】', '以下按群内实际先后排列，可能与前面的对话历史重叠；重叠内容是同一次发言，并非再次发生。用此处判断群聊顺序，只回应末尾【消息】中的当前请求。', ...recent)
+    if (recent.length) ambient.push('【最近群聊】', '以下按群内实际先后排列，可能与前面的对话历史重叠；重叠内容是同一次发言，并非再次发生。用此处判断群聊顺序，只回应末尾消息段中的当前请求。', ...recent)
   }
   const quote: string[] = []
   if (input.quoted) {
-    const src = input.quoted.fromBot ? '你之前发的' : `${input.quoted.name} 的`
+    const id = input.quoted.senderId ? `(平台ID ${input.quoted.senderId})` : ''
+    const src = input.quoted.fromBot ? `你${id}之前发的` : `${input.quoted.name}${id} 的`
     quote.push(`【引用${src}消息】${truncate(input.quoted.text || '[非文本消息]', 300)}`)
   }
-  const render = (lines: string[]) => (lines.length > 1 ? `${[...lines, '【消息】'].join('\n')}\n` : `${lines[0]}\n`)
+  const render = (lines: string[]) => `${[...lines, head].join('\n')}\n`
   const memory = opts.memory ? [opts.memory] : []
   context.quote = quote.join('\n')
-  return { sent: render([head, ...ambient, ...memory, ...quote]), stored: render([head, ...quote]), context }
+  return { sent: render([...ambient, ...memory, ...quote]), stored: render(quote), context }
 }
 
 export function buildMemoryBlock(e: any, opts: { user: boolean; group: boolean; nudge?: boolean }): string {

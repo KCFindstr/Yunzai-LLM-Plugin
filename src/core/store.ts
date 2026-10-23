@@ -3,7 +3,13 @@ import path from 'node:path'
 import { DATA_DIR } from './paths.ts'
 import { log } from './log.ts'
 
-const stores = new Set<JsonStore<any>>()
+const stores = new Set<{ flush(): void }>()
+
+/** Include non-JsonStore persistence in the normal shutdown flush. */
+export function registerFlushable(store: { flush(): void }) {
+  stores.add(store)
+  return () => stores.delete(store)
+}
 
 /** Small JSON file store with debounced atomic writes. Good for KB–MB sized state. */
 export class JsonStore<T> {

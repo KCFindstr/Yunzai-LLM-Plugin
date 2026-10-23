@@ -60,7 +60,7 @@ describe('config CLI subcommands', () => {
     assert.equal(typo.code, 1)
     assert.match(typo.out, /未知配置项.*chat\.groupContext/)
     assert.match(runFail(['set', 'reply.quote', 'sometimes']).out, /可选值：auto \/ always \/ never/)
-    assert.match(runFail(['set', 'chat.groupContext', '99']).out, /不能大于 30/)
+    assert.match(runFail(['set', 'chat.groupContext', '101']).out, /不能大于 100/)
     assert.match(runFail(['set', 'defaultModel', 'nope']).out, /可选值：sonnet/)
     assert.match(runFail(['set', 'groups.abc.enable', 'true']).out, /键名格式不正确|格式/)
     assert.equal(userYaml(), '# 空\n', 'nothing written on rejected input')
@@ -72,6 +72,13 @@ describe('config CLI subcommands', () => {
     run(['set', 'defaultModel', '小克'])
     assert.equal(YAML.parse(userYaml()).defaultModel, '小克')
     assert.notEqual(runFail(['set', 'models.1.id', '小 克']).code, 0)
+  })
+
+  it('accepts a recent group context window of 100', () => {
+    writeUserConfig('')
+    run(['set', 'chat.groupContext', '100'])
+    assert.equal(YAML.parse(userYaml()).chat.groupContext, 100)
+    assert.match(run(['get', 'chat.groupContext']), /^100/)
   })
 
   it('list shows valid keys that are not set yet, filtered by provider type', () => {

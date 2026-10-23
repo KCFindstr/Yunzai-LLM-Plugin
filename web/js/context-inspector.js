@@ -22,7 +22,10 @@ export function contextInspector(context, opened) {
       current.quote ? disclosure('context-quote', '引用的消息', null, text(current.quote, 'quote-text')) : null),
     current.recent.length ? disclosure('context-recent', '最近群聊', current.recent.length,
       h('ol', { class: 'context-group-lines' }, current.recent.map((line, i) => h('li', text(line.replace(/^\d+\.\s*/, ''), `recent:${i}`, 350))))) : null,
-    disclosure('context-history', '历史对话', view.history.length, view.history.length ? view.history.map(message) : h('p', { class: 'small muted' }, '本次没有携带历史对话。')),
+    disclosure('context-history', '历史对话', context.history ? `${context.history.turns} 轮 · ${context.history.messages} 条消息` : `${view.history.length} 条消息`, [
+      h('p', { class: 'small muted' }, `${context.history ? `配置上限 ${context.history.maxTurns} 轮。` : ''}一轮 = 用户消息和机器人回复各一条。`,
+        context.history && view.history.length < context.history.messages ? ` 当前快照只保留了其中 ${view.history.length} 条。` : ''),
+      view.history.length ? view.history.map(message) : h('p', { class: 'small muted' }, '本次没有携带历史对话。')]),
     view.summary.length ? disclosure('context-summary', '对话摘要', null, view.summary.map((entry, i) => text(entry.text, `summary:${i}`))) : null,
     current.memory || view.memory.length ? disclosure('context-memory', '长期记忆与检索结果', null,
       [...view.memory.map((entry, i) => text(entry.text, `memory:${i}`)), current.memory ? text(current.memory, 'current-memory') : null]) : null,
