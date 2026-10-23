@@ -21,26 +21,43 @@ admins: []
 # 建议私聊机器人发送 #llm设置密钥 <提供商> <Key> 设置，不要在群里发 Key。
 # --------------------------------------------------------------------------
 providers:
+  # 提供商名称，模型的 provider 引用这个键
   anthropic:
+    # 接口协议，见上方 type 列表
     type: anthropic
+    # API 根地址，兼容服务可换成自己的地址
     baseUrl: https://api.anthropic.com
+    # 服务密钥；支持列表和 env:变量名，留空则不可用
     apiKey: ''
     # 缓存时长 5m / 1h（1h 写入价格为 2 倍，适合聊天间隔较长的群）
     cacheTtl: 5m
+  # OpenAI 提供商配置
   openai:
+    # Responses 协议；Chat Completions 兼容服务用 openai
     type: openai-responses
+    # API 根地址，保留服务要求的 /v1 前缀
     baseUrl: https://api.openai.com/v1
+    # 服务密钥；支持列表和 env:变量名
     apiKey: ''
+  # Gemini 提供商配置
   gemini:
+    # Gemini Interactions 协议
     type: gemini
+    # API 根地址
     baseUrl: https://generativelanguage.googleapis.com
+    # 服务密钥；支持列表和 env:变量名
     apiKey: ''
     # 使用服务端会话状态(previous_interaction_id)，减少重复上传历史
     serverState: true
+  # DeepSeek 提供商配置
   deepseek:
+    # 使用 OpenAI Chat Completions 兼容协议
     type: openai
+    # API 根地址
     baseUrl: https://api.deepseek.com
+    # 服务密钥；支持列表和 env:变量名
     apiKey: ''
+    # 余额查询适配器；可选 deepseek/openrouter/moonshot/siliconflow/none
     balance: deepseek
 
 # --------------------------------------------------------------------------
@@ -57,41 +74,82 @@ providers:
 # 模型名均为各家官方 API 的模型 ID（2026-10 核对）；价格自动从价格表获取。
 models:
   # Anthropic：claude-sonnet-5-5（$2/$10）、claude-haiku-5-5（$0.1/$0.5），另有 claude-opus-5-5
+  # 本地模型别名，供指令、默认模型和备用列表引用
   - id: sonnet
+    # 对应 providers 中的提供商名称
     provider: anthropic
+    # 实际发送给上游 API 的模型 ID
     model: claude-sonnet-5-5
+    # 本模型的思考强度，覆盖 chat.thinking；支持 auto
     thinking: low
+    # 本模型的滚动费用限额，单位美元
     quota:
-      user: { window5h: 1, weekly: 2 }
+      # 每人 5 小时 $1、7 天 $2；0 表示不限
+      user:
+        # 每人滚动 5 小时费用上限，单位美元；0 表示不限
+        window5h: 1
+        # 每人滚动 7 天费用上限，单位美元；0 表示不限
+        weekly: 2
+  # 本地模型别名
   - id: haiku
+    # 提供商配置名称
     provider: anthropic
+    # 上游 API 的模型 ID
     model: claude-haiku-5-5
+    # 本模型的思考强度
     thinking: low
   # OpenAI：gpt-6.1-sol（$2/$10）、gpt-6-luna（$0.1/$0.5），另有 gpt-6-astra
+  # 本地模型别名
   - id: gpt
+    # 提供商配置名称
     provider: openai
+    # 上游 API 的模型 ID
     model: gpt-6.1-sol
+    # 本模型的思考强度
     thinking: low
+    # 本模型的滚动费用限额，单位美元
     quota:
-      user: { window5h: 1, weekly: 2 }
+      # 每人 5 小时 $1、7 天 $2；0 表示不限
+      user:
+        # 每人滚动 5 小时费用上限，单位美元；0 表示不限
+        window5h: 1
+        # 每人滚动 7 天费用上限，单位美元；0 表示不限
+        weekly: 2
+  # 本地模型别名
   - id: luna
+    # 提供商配置名称
     provider: openai
+    # 上游 API 的模型 ID
     model: gpt-6-luna
+    # 本模型的思考强度
     thinking: low
   # Gemini：gemini-4-argon（$2/$10）、gemini-3.8-flash（$0.75/$3.75）、gemini-3.5-flash-lite（$0.3/$2.5）
+  # 本地模型别名
   - id: flash
+    # 提供商配置名称
     provider: gemini
+    # 上游 API 的模型 ID
     model: gemini-3.8-flash
+    # 本模型的思考强度
     thinking: low
+  # 本地模型别名
   - id: flash-lite
+    # 提供商配置名称
     provider: gemini
+    # 上游 API 的模型 ID
     model: gemini-3.5-flash-lite
+    # 本模型的思考强度
     thinking: minimal
   # DeepSeek：deepseek-flash（便宜，分峰谷计价，按高峰价统计）、deepseek-v4-pro
+  # 本地模型别名
   - id: deepseek
+    # 提供商配置名称
     provider: deepseek
+    # 上游 API 的模型 ID
     model: deepseek-flash
+    # 关闭思考；off 必须保留为字符串
     thinking: 'off'
+    # 不支持直接图片输入，图片可交给 visionModel 识别
     vision: false
 
 # 默认模型 id。留空 = 自动选择第一个配置了 Key 的模型
@@ -107,9 +165,13 @@ visionModel: ''
 # 人设。{botName} 会被替换为机器人昵称（persona.botName 留空则用 QQ 昵称）
 # --------------------------------------------------------------------------
 persona:
+  # 机器人显示名；留空使用平台昵称
   botName: ''
+  # 当前使用的人设名称，对应 presets 的键
   active: default
+  # 人设名 -> 人设正文；可添加多个供群配置选择
   presets:
+    # 默认人设正文，支持 {botName} 占位符
     default: |
       你是「{botName}」，平时混在QQ群里的一个普通群友。性格开朗随和，有点小幽默，懂游戏（尤其是原神、崩坏：星穹铁道、绝区零）和动漫，也乐意帮大家查资料、解答问题。
       说话像真人：口语化、简洁，偶尔用点网络用语，但不刻意卖萌；不会每句话都加表情或语气词。
@@ -154,8 +216,11 @@ trigger:
   private: master
   # 只@不说话时随机回一句“在呢”之类（不消耗 token）
   emptyAtReply: true
+  # 仅允许这些群触发；空列表表示不限制
   groupWhitelist: []
+  # 禁止触发的群号，优先于白名单
   groupBlacklist: []
+  # 禁止触发的用户平台 ID
   userBlacklist: []
   # 插件优先级，务必保持最低（数字最大），这样不会抢其它插件的指令
   priority: 99999
@@ -168,17 +233,22 @@ trigger:
 chat:
   # user = 群里每个人独立记忆；group = 全群共享一段记忆
   sessionScope: user
-  # 多久没聊天后清空记忆（分钟）
+  # 多久没聊天后重置当前对话（分钟）；旧聊天档案和长期记忆仍保留
   sessionTimeout: 180
   # 记忆上限（超过后一次性丢弃较早的一半，比逐条滑动更省 token：缓存前缀保持不变）
-  historyMaxTurns: 20          # 一轮 = 一条用户消息 + 一条机器人回复；20 轮最多 40 条历史消息
+  # 一轮 = 一条用户消息 + 一条机器人回复；20 轮最多 40 条历史消息
+  historyMaxTurns: 10
+  # 同一会话最多排队多少条请求；超出时提示繁忙
   maxPending: 20
+  # 最近群友身份条数，0 关闭，最大 30；只列称呼与 ID
   rosterSize: 12
+  # 已保存对话历史的估算 token 上限，与轮数限制共同生效
   historyMaxTokens: 6000
   # 丢弃的历史用便宜模型压缩成摘要保留
   summarize: true
   # 附带的最近群聊条数，0–100（帮助理解语境；不会写入长期记忆）
   groupContext: 6
+  # 每条最近群聊最多附带多少字符
   groupContextMaxChars: 80
   # 单次回复最多调用几轮工具
   maxToolRounds: 4
@@ -191,23 +261,34 @@ chat:
   # 默认思考强度（模型可单独设置）：off / minimal / low / medium / high / xhigh / max，
   # 或 auto = 按消息自动选择（闲聊用 casual，提问用 question，需要分析/计算/写代码/查资料用 complex）
   thinking: low
+  # 自动判断的消息类型 -> 实际思考强度
   autoThinking:
+    # 闲聊、寒暄
     casual: low
+    # 普通提问
     question: medium
+    # 复杂分析、计算、编程或检索
     complex: high
   # auto 模式怎样判断消息类型（出错或超时自动退回 heuristic）：
   #   heuristic = 本地关键词规则（零延迟、零成本，较粗糙）
   #   model     = 用一个便宜的模型判断（约 0.6~1s，每条约 200 token；推荐 gemini-3.5-flash-lite 或 deepseek-flash，关闭思考）
   #   systemone = TypeSafe Jev（需申请 Key），或自建 Kev（url 填 http://127.0.0.1:8009/v1/systemone）
   thinkingJudge:
+    # 判断方式：heuristic / model / systemone
     mode: model
-    model: ''                  # 留空 = utilityModel → 默认模型
+    # 留空 = utilityModel → 默认模型
+    model: ''
+    # System One 分类接口的完整地址
     url: https://api.typesafe.ai/v1/systemone
+    # Jev 服务密钥，支持 env:变量名；本地 Kev 可不需要
     apiKey: ''
+    # System One 使用的分类模型名称
     systemoneModel: jev-latest
+    # 分类请求超时，单位毫秒；失败自动退回关键词判断
     timeoutMs: 5000
   # 是否把用户发的图片给模型看
   includeImages: true
+  # 每轮最多传给模型几张图片（含引用图片）
   maxImages: 2
   # 是否读取用户引用的那条消息
   includeQuoted: true
@@ -235,6 +316,7 @@ reply:
   maxBubbles: 2
   # 超过这个字数：forward = 合并转发一条发送 / truncate = 截断
   maxChars: 500
+  # 超过 maxChars 的处理方式：forward / truncate
   longText: forward
   # 去掉 Markdown 符号（QQ 不渲染 Markdown）
   stripMarkdown: true
@@ -243,16 +325,29 @@ reply:
   markdown: false
   # 模拟打字的延迟（毫秒），已经花在思考上的时间会被扣除
   typing:
+    # 估算打字速度，每秒字符数
     charsPerSecond: 12
+    # 最短打字延迟，毫秒
     minDelay: 600
+    # 最长打字延迟，毫秒
     maxDelay: 5000
   # 发送频率上限（条/秒数）。超出时合并或放弃，绝不刷屏
-  groupRate: { count: 6, perSeconds: 60 }
-  globalRate: { count: 30, perSeconds: 60 }
+  groupRate:
+    # 每个群在时间窗口内最多发送几条消息
+    count: 6
+    # 每群发送频率的时间窗口，单位秒
+    perSeconds: 60
+  # 全局每 60 秒最多发送 30 条
+  globalRate:
+    # 全部会话在时间窗口内合计最多发送几条消息
+    count: 30
+    # 全局发送频率的时间窗口，单位秒
+    perSeconds: 60
   # 同时进行的 LLM 请求数
   concurrency: 3
   # 出错时是否提示（有冷却）
   errorNotice: true
+  # 同一错误提示的冷却时间，单位秒
   errorCooldown: 600
   # 私聊时显示“对方正在输入…”（NapCat）
   privateTyping: true
@@ -261,6 +356,7 @@ reply:
 # 表情包
 # --------------------------------------------------------------------------
 sticker:
+  # 是否启用表情包选择与发送
   enable: true
   # 模型想发表情时实际发送的概率（模型本身也被要求“偶尔才发”）
   probability: 0.6
@@ -279,30 +375,41 @@ sticker:
 # 工具
 # --------------------------------------------------------------------------
 tools:
+  # 所有模型工具的总开关
   enable: true
+  # 联网搜索，与网页读取独立配置
   webSearch:
+    # 是否启用搜索；还需有效的服务或模型配置
     enable: true
     # native = 使用模型自带搜索（anthropic / openai-responses / gemini 类型支持）
     # anysearch = AnySearch（apiKey 可选，不填用匿名额度、限速更低）
     # tavily / brave 需要 apiKey；jina 的 apiKey 可选；searxng 需要 baseUrl；none = 关闭
     provider: native
+    # 外部搜索服务密钥，支持 env:变量名
     apiKey: ''
+    # SearXNG 实例地址；其他搜索服务通常不需要
     baseUrl: ''
+    # 每次搜索最多返回几条结果
     maxResults: 5
     # 每轮最多搜索次数
     maxPerTurn: 3
+  # 展开网页链接的正文内容
   webFetch:
+    # 是否允许模型读取网页
     enable: true
     # 返回给模型的最大字符数
     maxChars: 6000
+    # 单次网页读取超时，单位秒
     timeout: 15
     # direct = 直接抓取 / jina = 通过 r.jina.ai 读取（可选 jinaKey）
     reader: direct
+    # Jina Reader 密钥，可选；支持 env:变量名
     jinaKey: ''
     # 允许访问内网地址（危险，默认禁止）
     allowPrivateNetwork: false
     # 每轮最多打开网页次数
     maxPerTurn: 3
+  # 把自然语言请求转换为已验证的机器人插件指令
   botCommand:
     # 允许把自然语言转成当前已启用插件的指令执行
     enable: true
@@ -330,48 +437,86 @@ tools:
   http: []
   # 模型可把 HTML 渲染成图片发送（用于表格、多维对比、排版复杂的内容；代码、命令、链接和普通长文仍发文字）。页面脚本被禁用，只能加载公网资源
   renderHtml:
+    # 是否启用 HTML 转图片工具
     enable: true
+    # 截图页面宽度，单位像素
     width: 720
+    # 截图最大高度，单位像素
     maxHeight: 6000
+    # 是否允许页面加载公网图片、字体等资源
     allowNetwork: true
   # 运行代码（Python / Node / Bash），在专用 WSL 发行版里用 bubblewrap 隔离执行：
   # 看不到 Windows 磁盘和机器人文件，只能访问公网（内网/本机/路由器都被防火墙拦截），有内存/时间/磁盘上限。
   # 先在服务器上运行 `npm run exec-setup -- --install` 创建并配置发行版，再开启。
   exec:
+    # 安装完成并通过检查后再启用代码工具
     enable: false
+    # 专用 WSL 发行版名称
     distro: yunzai-sandbox
-    access: admin              # admin=仅管理员可触发；all=所有人
+    # admin=仅管理员可触发；all=所有人
+    access: admin
+    # 允许执行的语言；空列表禁用执行
     languages: [python, node, bash]
-    timeout: 20                # 每次运行最多秒数（≤50）
+    # 每次运行最多秒数（≤50）
+    timeout: 20
+    # 单次运行的内存上限，单位 MB
     memoryMB: 512
+    # 单次运行的临时磁盘上限，单位 MB
     diskMB: 128
-    maxOutput: 4000            # 返回给模型的输出字符数
+    # 返回给模型的输出字符数
+    maxOutput: 4000
+    # 每次聊天回复最多执行几次代码
     maxRunsPerTurn: 3
+  # 持久电脑代理：先 npm run computer-setup -- --distro <发行版>，任务使用独立队列
   computer:
+    # 是否启用异步电脑操作工具
     enable: false
+    # 安装了持久桌面的 WSL 发行版
     distro: yunzai-sandbox
+    # admin=仅管理员；all=所有人共享同一桌面
     access: admin
-    model: ''                 # 独立视觉/工具模型 id；留空使用默认模型
-    maxSteps: 100              # 独立于 chat.maxToolRounds
+    # 独立视觉/工具模型 id；留空使用默认模型
+    model: ''
+    # 独立于 chat.maxToolRounds
+    maxSteps: 100
+    # 每个电脑任务最长运行时间，单位分钟
     maxMinutes: 20
-    maxInputTokens: 150000     # 每个任务累计输入（含缓存）
+    # 每个任务累计输入（含缓存）
+    maxInputTokens: 150000
+    # 每个任务累计输出 token 上限
     maxOutputTokens: 30000
+    # 全局等待队列最多容纳的任务数
     maxQueue: 8
-    recentScreenshots: 2       # 旧截图从工作上下文移除
+    # 旧截图从工作上下文移除
+    recentScreenshots: 2
+    # 每一步模型请求的最大输出 token
     maxTokensPerStep: 1200
+    # 电脑代理自己的思考强度，默认关闭以节省输出
     thinking: 'off'
-    checkpointSteps: 8         # Claude 使用追加式上下文，定期检查点以保留缓存命中
-  # 主聊天模型直接调用 Google Lens，上传本轮/引用的原图
+    # Claude 使用追加式上下文，定期检查点以保留缓存命中
+    checkpointSteps: 8
+  # 主聊天模型直接调用 Google Lens，上传本轮/引用的原图；先 npm run lens-setup
+  # 复用持久桌面浏览器，无需 AGY CLI、AGY 登录或 AGY 服务，也无需启用 computer 工具
   googleLens:
+    # 是否允许上传本轮原图到 Google Lens 反搜
     enable: false
+    # admin=仅管理员；all=所有人
     access: admin
+    # 安装了桌面及 Lens 浏览器依赖的 WSL 发行版
     distro: yunzai-sandbox
+  # AGY 异步代理：需要 agy-setup 和本机已登录的 Antigravity 账号
   agy:
+    # 是否启用 AGY 任务委托工具
     enable: false
+    # admin=仅管理员；all=所有人
     access: admin
+    # 安装了 AGY 桥接和隔离环境的 WSL 发行版
     distro: yunzai-sandbox
-    executable: ''              # 留空使用 data/agy-setup/agy.exe
+    # 留空使用 data/agy-setup/agy.exe
+    executable: ''
+    # 每个 AGY 任务最长运行时间，单位分钟
     maxMinutes: 10
+    # 全局等待队列最多容纳的 AGY 任务数
     maxQueue: 8
   # 禁用的工具名（#llm工具列表 查看）
   disabled: []
@@ -382,12 +527,15 @@ tools:
 # 用户可发送 #llm记忆 查看、#llm忘记我 清空自己的长期记忆。
 # --------------------------------------------------------------------------
 memory:
+  # 长期事实记忆总开关
   enable: true
   # 每个人最多几条 / 总字数
   userMaxEntries: 15
+  # 每个人全部事实记忆合计最多字符数
   userMaxChars: 800
   # 每个群最多几条 / 总字数
   groupMaxEntries: 25
+  # 每个群全部事实记忆合计最多字符数
   groupMaxChars: 1500
   # 每条最多字数
   entryMaxChars: 100
@@ -405,37 +553,46 @@ memory:
   # 只记录启用了插件的群，过滤敏感信息；需要后台模型（utilityModel）额外花费少量 token。关闭后只整理和机器人的对话
   groupChatArchive: true
   # 每次检索旧聊天（recall 工具、每轮自动回忆、网页面板的向量查询）最多返回几条，1-100。
-  # 越大模型看到的旧聊天越多，但每轮的 token 也越多；自动回忆另外只取 2-3 条
+  # 越大模型看到的旧聊天越多，但每轮的 token 也越多；自动回忆另外只取 2-3 条，无明确主题时跳过
   recallLimit: 5
-  # 旧聊天档案的向量检索（与关键词检索混合）。没有 API Key 时自动只用关键词，不报错
+  # 旧聊天档案优先按向量相似度检索；未配置 Key 或向量接口失败时退回关键词检索
   embedding:
+    # 是否优先使用向量检索旧聊天；关闭后仍可用关键词
     enable: true
     # voyage = Voyage AI；openai = OpenAI 兼容的 /embeddings
     type: voyage
+    # 向量服务的 API 根地址
     baseUrl: https://api.voyageai.com/v1
     # 可写 env:VOYAGE_API_KEY 从环境变量读取
     apiKey: ''
+    # 向量模型 ID，独立于聊天模型
     model: voyage-4-lite
     # voyage-4 系列支持 256 / 512 / 1024 / 2048；改模型或维度后旧向量会自动重建
     dimensions: 512
+    # 单次向量请求超时，单位秒
     timeout: 10
     # 余弦相似度达到此值即视为相关（即使没有共同关键词）
     minScore: 0.5
 
 # 技能：plugins/Yunzai-LLM-Plugin/skills/<名称>/SKILL.md
 skills:
+  # 是否向模型提供技能说明与 load_skill 工具；依赖未就绪时隐藏该技能
   enable: true
 
 # 价格表来源（自动获取模型价格，按天刷新）
 pricing:
+  # 自动价格数据源，按配置的来源获取并合并
   sources: [litellm, openrouter]
+  # 价格表刷新间隔，单位小时
   refreshHours: 24
 
 # 网页管理面板：插件加载时自动启动，浏览器打开 http://127.0.0.1:6190
 web:
+  # 是否启动网页管理面板
   enable: true
   # 127.0.0.1 = 只允许本机访问；需要远程访问时改为 0.0.0.0，并务必设置强密码
   host: 127.0.0.1
+  # 网页面板监听端口
   port: 6190
   # 登录密码。留空则首次启动时随机生成，保存在 data/web-auth.json 并打印在日志中
   password: ''

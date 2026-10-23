@@ -1,5 +1,7 @@
 import { detectImageMime, fetchBuffer, truncate } from '../core/util.ts'
 import type { ImagePart } from '../llm/types.ts'
+import { knownName } from './roster.ts'
+import { cachedMessageSender } from './groupLog.ts'
 
 /** Max raw bytes per image so base64 stays under common 5MB provider limits. */
 const MAX_IMAGE_BYTES = 3_700_000
@@ -90,23 +92,37 @@ function imageUrl(segment: any): string | undefined {
 
 export async function getQuoted(e: any): Promise<QuotedMessage | undefined> {
   if (e._llmQuoted !== undefined) return e._llmQuoted || undefined
-  let q: QuotedMessage | undefined
-  try {
-    if (e.reply_id && typeof e.getReply === 'function') {
-      const r = await e.getReply()
-      if (r) {
-        const segs = r.message ?? []
-        const uid = r.sender?.user_id ?? r.user_id
-        q = {
-          senderId: uid != null ? String(uid) : undefined,
-          fromBot: uid != null && e.self_id != null && String(uid) === String(e.self_id),
-          name: String(r.sender?.card || r.sender?.nickname || uid || '某人'),
-          text: segmentsToText(segs, e.self_id),
-          imageUrls: segs.map(imageUrl).filter((url: string | undefined): url is string => Boolean(url)),
-        }
-      }
+  const reply = (e.message ?? []).find((segment: any) => segment?.type === 'reply')
+  const metadata = reply?.data ?? reply
+  const replyId = e.reply_id ?? metadata?.id ?? metadata?.message_id ?? e.source?.message_id
+  let response: any
+  if (replyId != null && typeof e.getReply === 'function') {
+    try { response = await e.getReply() } catch { /* Source metadata and the exact group-log entry may still identify it. */ }
+  }
+  // OneBot returns the message directly; other adapters return {data:{message:{sender_id,segments}}}.
+  const envelope = response?.data && typeof response.data === 'object' ? response.data : response
+  const body = envelope?.message && !Array.isArray(envelope.message) && typeof envelope.message === 'object' ? envelope.message : envelope
+  const identity = (message: any): string | undefined => {
+    for (const value of [message?.sender?.user_id, message?.user_id, message?.sender_id, message?.sender?.id,
+      message?.sender?.uin, message?.sender?.qq, message?.sender?.uid, message?.sender_uin, message?.sender_uid]) {
+      if ((typeof value === 'string' || typeof value === 'number') && String(value).trim() && !['0', 'undefined', 'null'].includes(String(value))) return String(value).trim()
     }
-  } catch {}
+  }
+  const uid = identity(body) ?? identity(envelope) ?? identity(response) ?? identity(e.source) ?? identity(metadata)
+    ?? cachedMessageSender(e, replyId)
+  let q: QuotedMessage | undefined
+  if (body || e.source || reply || uid) {
+    const raw = body?.message ?? body?.segments ?? e.source?.message ?? []
+    const segs = Array.isArray(raw) ? raw.map((segment: any) => ({ ...segment, ...segment?.data })) : typeof raw === 'string' ? [{ type: 'text', text: raw }] : []
+    const sender = body?.sender ?? envelope?.sender ?? e.source?.sender
+    q = {
+      senderId: uid,
+      fromBot: uid != null && e.self_id != null && uid === String(e.self_id),
+      name: (uid && knownName(e, uid)) || String(sender?.card || sender?.nickname || sender?.name || uid || '某人'),
+      text: segmentsToText(segs, e.self_id),
+      imageUrls: segs.map(imageUrl).filter((url: string | undefined): url is string => Boolean(url)),
+    }
+  }
   e._llmQuoted = q ?? null
   return q
 }

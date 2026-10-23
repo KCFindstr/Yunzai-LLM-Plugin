@@ -126,6 +126,12 @@ export function messagesSince(e: any): number {
   return list.slice(idx + 1).filter(l => !l.bot).length
 }
 
+/** Exact message-id match in this bot/group only; never infer a quote's author from the current speaker. */
+export function cachedMessageSender(e: any, messageId: unknown): string | undefined {
+  if (!e?.group_id || messageId == null) return undefined
+  return logs.get(keyOf(e))?.find(line => line.mid === String(messageId))?.uid
+}
+
 export function clearGroupLogs() {
   logs.clear()
 }

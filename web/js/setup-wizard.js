@@ -1,7 +1,7 @@
 import { get, post, put } from './api.js'
 import { badge, h, mount, toast } from './ui.js'
 
-const STEPS = [['models', '聊天模型'], ['search', '联网与阅读'], ['embedding', '向量检索'], ['jev', '思考判断 / Jev'], ['budgets', '用量预算'], ['sandbox', '代码沙盒'], ['computer', '电脑操作'], ['lens', '图片反搜'], ['agy', 'AGY']]
+const STEPS = [['models', '提供商与模型'], ['search', '联网与阅读'], ['embedding', '向量检索'], ['jev', '思考判断 / Jev'], ['budgets', '用量预算'], ['sandbox', '代码沙盒'], ['computer', '电脑操作'], ['lens', '图片反搜'], ['agy', 'AGY']]
 const change = (path, value) => ({ path, value })
 const keyValue = value => value.includes(',') ? value.split(',').map(s => s.trim()).filter(Boolean) : value
 
@@ -65,7 +65,7 @@ export function setupWizard(initialData, onChange) {
     })
     const upstream = field('上游模型 ID', '', { required: true, placeholder: '填写提供商的模型名称' })
     const alias = field('模型别名', '', { placeholder: '留空自动使用模型名称' })
-    return [h('p', { class: 'muted' }, '先选择默认模型，或添加提供商与模型。测试连接会发送一次简短请求。'), existing, test, modelRoles(),
+    return [h('p', { class: 'muted' }, '先填写提供商 API Key，再选择或添加聊天模型。测试连接会发送一次简短请求。'), providerCredentials(), existing, test, modelRoles(),
       h('details', { class: 'quiet-details', open: !status?.models.ready }, h('summary', '添加聊天模型'), form([
         provider.view, newProvider, grid(upstream.view, alias.view),
       ], async () => {
@@ -77,6 +77,32 @@ export function setupWizard(initialData, onChange) {
         changes.push(change(`models.${models.length}`, { id, provider: p, model: upstream.control.value.trim(), pricing: 'auto' }), change('defaultModel', id))
         await save(changes)
       }, '添加并设为默认模型'))]
+  }
+
+  function providerCredentials() {
+    const providers = data.effective.providers ?? {}, names = Object.keys(providers)
+    if (!names.length) return null
+    const currentModel = data.effective.models.find(m => m.id === (status?.models.modelId || data.effective.defaultModel))
+    const selected = field('提供商', currentModel?.provider || names[0], { name: 'credentialProvider', options: names.map(name => [name, `${name} · ${providers[name].apiKey?.set ? '已配置 Key' : '未配置 Key'}`]) })
+    const type = field('接口类型', '', { name: 'credentialType', options: data.schema.fields.providers.value.fields.type.values.map(v => [v, v]) })
+    const url = field('接口地址', '', { name: 'credentialUrl', required: true, type: 'url' })
+    const key = secret('提供商 API Key')
+    key.control.name = 'credentialKey'
+    const sync = () => {
+      const p = providers[selected.control.value]
+      type.control.value = p.type; url.control.value = p.baseUrl
+      key.control.value = ''; key.control.required = !p.apiKey?.set
+      key.control.placeholder = p.apiKey?.set ? '已配置，留空保留原值' : 'API Key 或 env:变量名'
+    }
+    selected.control.addEventListener('change', sync); sync()
+    return h('details', { class: 'quiet-details', open: !status?.models.ready }, h('summary', '提供商与 API Key'),
+      h('p', { class: 'small muted' }, '可填写或更新已有提供商的 Key；多个 Key 用英文逗号分隔。留空保留已保存的 Key。'),
+      form(grid(selected.view, type.view, url.view, key.view), () => {
+        const prefix = `providers.${selected.control.value}`
+        const changes = [change(`${prefix}.type`, type.control.value), change(`${prefix}.baseUrl`, url.control.value.trim())]
+        if (key.control.value.trim()) changes.push(change(`${prefix}.apiKey`, keyValue(key.control.value.trim())))
+        return save(changes)
+      }, '保存提供商'))
   }
 
   function modelRoles() {
@@ -213,8 +239,8 @@ export function setupWizard(initialData, onChange) {
     const checks = state?.checks?.map(check => h('li', badge(check.ok ? '通过' : '待配置', check.ok ? 'ok' : 'warn'), check.label))
     const commands = kind === 'sandbox' ? [h('p', '在机器人所在电脑的插件目录运行：'), command(`npm run exec-setup -- --install --distro ${c.distro}`)] : [
       h('p', kind === 'agy' ? 'AGY 需要桌面环境和本机已登录的 Antigravity 账号。在插件目录依次运行：'
-        : kind === 'lens' ? '图片反搜可独立启用，复用桌面和浏览器环境。在插件目录运行：' : '先完成代码沙盒的发行版安装，再在插件目录配置持久桌面：'),
-      command(`npm run computer-setup -- --distro ${c.distro}`), kind !== 'computer' ? command(`npm run agy-setup -- ${c.distro}`) : null,
+        : kind === 'lens' ? '图片反搜只需要桌面浏览器，无需 AGY CLI、登录或 AGY 服务。在插件目录运行：' : '先完成代码沙盒的发行版安装，再在插件目录配置持久桌面：'),
+      command(`npm run computer-setup -- --distro ${c.distro}`), kind === 'agy' ? command(`npm run agy-setup -- ${c.distro}`) : kind === 'lens' ? command(`npm run lens-setup -- --distro ${c.distro}`) : null,
       h('p', { class: 'small muted' }, '已有正常运行的环境可直接检查。安装命令可能需要几分钟，并会短暂重启桌面服务。'),
     ]
     return [h('p', { class: 'muted' }, '此步骤可跳过。环境未就绪时，对应工具和依赖它的技能不会提供给模型。'),

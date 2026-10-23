@@ -1,7 +1,7 @@
 import { config } from '../core/config.ts'
 import { JsonStore } from '../core/store.ts'
 import { truncate } from '../core/util.ts'
-import { isSensitive, renderMemory } from '../memory/store.ts'
+import { isSensitive } from '../memory/store.ts'
 
 interface Profile {
   id: string
@@ -98,11 +98,10 @@ export function rosterSnapshot() {
   })
 }
 
-export function rosterLines(event: any, max: number, memory = false): string[] {
+export function rosterLines(event: any, max: number): string[] {
   return (store.data[scopeKey(event)] ?? []).filter(profile => Date.now() - profile.seen < 30 * 86400_000).slice(0, max).map(profile => {
     const name = knownName(event, profile.id)
-    const facts = memory && profile.id === String(event.user_id) ? renderMemory('user', profile.id).slice(-2).map(fact => truncate(fact, 100)).join('；') : ''
-    return `${name || '称呼未知'} [at:${profile.id}]${facts ? `：${facts}` : ''}`
+    return `${name || '称呼未知'} [at:${profile.id}]`
   })
 }
 

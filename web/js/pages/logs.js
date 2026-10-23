@@ -2,38 +2,72 @@ import { get } from '../api.js'
 import { menuButton } from '../main.js'
 import { h, mount } from '../ui.js'
 
-const LEVELS = [['', '全部'], ['error', '错误'], ['warn', '警告'], ['mark', '重要'], ['info', '信息']]
+const LEVELS = [['', '全部级别'], ['error', '错误 · ERROR'], ['warn', '警告 · WARN'], ['mark', '重要 · MARK'], ['info', '信息 · INFO'], ['debug', '调试 · DEBUG']]
 
 export async function render(root) {
-  let after = 0
-  let level = ''
-  let paused = false
-  const box = h('div', { class: 'log' })
-  const line = l => h('div', { class: `l ${l.level}` },
-    h('time', { class: 't' }, new Date(l.at).toLocaleTimeString('zh-CN', { hour12: false })),
-    h('span', { class: 'log-level' }, l.level.toUpperCase()), h('span', { class: 'log-message' }, l.text))
-
-  const poll = async () => {
-    if (paused) return
-    const lines = await get(`/api/logs?after=${after}${level ? `&level=${level}` : ''}`).catch(() => [])
-    if (!lines.length) return
-    after = lines.at(-1).seq
-    const stick = box.scrollTop + box.clientHeight >= box.scrollHeight - 30
-    box.append(...lines.map(line))
-    while (box.childElementCount > 1500) box.firstChild.remove()
-    if (stick) box.scrollTop = box.scrollHeight
+  let after = 0, level = '', search = '', paused = false, stopped = false, busy = false, generation = 0, lines = [], reload = false
+  const box = h('div', { class: 'log', 'aria-label': '日志内容' })
+  const status = h('span', { class: 'small muted log-status', role: 'status' })
+  const nodes = new Map()
+  function highlighted(text) {
+    if (!search) return text
+    const pieces = [], lower = text.toLowerCase()
+    let offset = 0, found
+    while ((found = lower.indexOf(search, offset)) !== -1) {
+      pieces.push(text.slice(offset, found), h('mark', text.slice(found, found + search.length)))
+      offset = found + search.length
+    }
+    return [...pieces, text.slice(offset)]
   }
-  const restart = () => { after = 0; box.replaceChildren(); poll() }
-  const pauseBtn = h('button', { class: 'btn', onclick: () => { paused = !paused; pauseBtn.textContent = paused ? '▶ 继续' : '❚❚ 暂停' } }, '❚❚ 暂停')
-
+  function draw() {
+    if (stopped) return
+    const stick = box.scrollTop + box.clientHeight >= box.scrollHeight - 30, scroll = box.scrollTop
+    const visible = lines.filter(line => (!level || line.level === level) && (!search || line.text.toLowerCase().includes(search)))
+    mount(box, visible.length ? visible.map(line => {
+      if (!nodes.has(line.seq)) nodes.set(line.seq, h('div', { class: `l ${line.level}`, 'data-seq': line.seq },
+        h('time', { class: 't' }, new Date(line.at).toLocaleTimeString('zh-CN', { hour12: false })),
+        h('span', { class: 'log-level' }, line.level.toUpperCase()), h('span', { class: 'log-message' }, highlighted(line.text))))
+      return nodes.get(line.seq)
+    }) : h('div', { class: 'empty' }, lines.length ? '没有匹配的日志' : '暂无日志'))
+    status.textContent = `显示 ${visible.length} / ${lines.length} 条 · ${paused ? '已暂停接收' : '每 2 秒更新'}`
+    box.scrollTop = stick ? box.scrollHeight : scroll
+  }
+  async function poll(force = false) {
+    if (stopped || busy || (paused && !force)) return
+    busy = true
+    const current = generation
+    try {
+      // Advance across every level; changing filters never discards or refetches other levels.
+      const batch = await get(`/api/logs?after=${after}`)
+      if (stopped || current !== generation) return
+      if (batch.length) {
+        after = batch.at(-1).seq
+        lines = [...lines, ...batch].slice(-1000)
+        const retained = new Set(lines.map(line => line.seq))
+        for (const key of nodes.keys()) if (!retained.has(key)) nodes.delete(key)
+      }
+      draw()
+    } catch (error) { if (!stopped && current === generation) status.textContent = `更新失败：${error.message}` }
+    finally { busy = false; if (reload && !stopped) { reload = false; void poll(true) } }
+  }
+  const pauseBtn = h('button', { class: 'btn', onclick: () => {
+    paused = !paused; pauseBtn.textContent = paused ? '继续接收' : '暂停接收'; draw(); if (!paused) void poll()
+  } }, '暂停接收')
+  const clearBtn = h('button', { class: 'btn', onclick: () => {
+    generation++; after = 0; lines = []; nodes.clear(); draw()
+    if (busy) reload = true; else void poll(true)
+  } }, '清屏重载')
+  const searchInput = h('input', { type: 'search', placeholder: '搜索日志内容…', 'aria-label': '搜索日志内容', oninput: e => {
+    search = e.target.value.trim().toLowerCase(); nodes.clear(); draw()
+  } })
   mount(root,
-    h('div', { class: 'page-head' }, menuButton(), h('h1', '日志'), h('span', { class: 'spacer' }),
-      h('select', { onchange: e => { level = e.target.value; restart() } }, LEVELS.map(([v, l]) => h('option', { value: v }, l))),
-      pauseBtn, h('button', { class: 'btn', onclick: restart }, '清屏重载')),
-    h('details', { class: 'quiet-details', style: { marginBottom: '12px' } }, h('summary', '调试设置'), h('p', { style: { marginTop: '6px' } }, '设置 YZ_LLM_DEBUG=1 显示调试日志。')),
-    box,
-  )
+    h('div', { class: 'page-head' }, menuButton(), h('h1', '日志'), h('span', { class: 'spacer' }), pauseBtn, clearBtn),
+    h('div', { class: 'log-toolbar' },
+      h('label', h('span', { class: 'small muted' }, '日志级别'), h('select', { 'aria-label': '日志级别', onchange: e => { level = e.target.value; draw() } }, LEVELS.map(([value, label]) => h('option', { value }, label)))),
+      h('label', { class: 'log-search' }, h('span', { class: 'small muted' }, '内容搜索'), searchInput),
+      h('button', { class: 'btn ghost', onclick: () => { searchInput.value = ''; search = ''; nodes.clear(); draw(); searchInput.focus() } }, '清除搜索')),
+    h('div', { class: 'log-meta' }, status, h('details', { class: 'quiet-details' }, h('summary', '调试设置'), h('p', '设置 YZ_LLM_DEBUG=1 后重启机器人以记录调试日志。'))), box)
   await poll()
-  const timer = setInterval(poll, 2000)
-  return () => clearInterval(timer)
+  const timer = setInterval(() => void poll(), 2000)
+  return () => { stopped = true; generation++; clearInterval(timer) }
 }

@@ -251,6 +251,19 @@ describe('vector recall', () => {
     assert.equal(calls[0].body.input.length, 2)
   })
 
+  it('does not let keyword overlap override a low vector similarity', async () => {
+    const key = '10000:p70004'
+    seed(key)
+    const archive = peekSession(key)!.archive!
+    // A long unrelated keyword dominates the old additive lexical score, while vectors prefer the topic.
+    archive[1].text = '显卡驱动怎么装 unrelated-keyword'
+    config.get().memory.embedding = embeddingConfig()
+    const hits = await recallSession(key, '周末 unrelated-keyword', 3)
+    assert.equal(hits.length, 1)
+    assert.match(hits[0], /薄荷猫/)
+    assert.doesNotMatch(hits[0], /显卡/)
+  })
+
   it('falls back to keyword matching when the embedding API fails', async () => {
     const key = '10000:p70003'
     seed(key)

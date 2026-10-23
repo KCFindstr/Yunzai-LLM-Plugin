@@ -9,6 +9,7 @@ import { decodeVector, dot, embed, embedGroups, embeddingContextual, embeddingRe
 import type { AssistantMsg, Msg, UserMsg } from '../llm/types.ts'
 import { partsToText } from '../llm/types.ts'
 import { addDays, localDay, type DayRange } from './dates.ts'
+import { automaticRecallQuery, recallText } from './recallText.ts'
 
 /** Persisted history contains only plain user/assistant text — no tool transcripts, images or provider-raw data. */
 export interface ArchiveEntry {
@@ -354,6 +355,8 @@ export async function indexArchive(key: string, signal?: AbortSignal) {
 }
 
 export interface RecallOptions {
+  /** Per-turn recall skips requests without a topic instead of browsing old history. */
+  automatic?: boolean
   /** Only entries from these days (inclusive). Within a range every entry counts as relevant; digests come first. */
   range?: DayRange
   /** Other sessions to search as well (opt-in cross-chat recall), with a label shown on their results. */
@@ -364,21 +367,27 @@ export interface RecallOptions {
 const hhmm = (ts: number) => new Date(ts + 8 * 3600_000).toISOString().slice(11, 16)
 
 /**
- * Search a session's archive and daily digests (plus `extra` sessions). Lexical (bigram + keyword) scoring
- * always runs; with an embedding model configured, cosine similarity is added and also admits hits that share
- * no words with the query. Embedding failures (or the signal timing out) fall back to lexical-only results.
+ * Shared by automatic context and the recall tool. Prefer vector similarity when embeddings are available;
+ * use lexical search only without usable embeddings or after a provider failure. Date ranges admit all
+ * entries from those days, with daily digests first.
  */
 export async function recallSession(key: string, query: string, count = 3, opts: RecallOptions = {}): Promise<string[]> {
   const { range, extra = [], signal } = opts
+  const original = query
+  query = opts.automatic ? automaticRecallQuery(query) : recallText(query)
+  if (!range && !query && (opts.automatic || original.trim())) return []
   const sources = [{ key, label: '' }, ...extra.filter(x => x.key !== key)]
-  const entries = sources.flatMap(src => searchable(src.key).map(entry => ({ ...entry, key: src.key, label: src.label })))
+  const gather = () => sources.flatMap(src => searchable(src.key).map(entry => ({ ...entry, key: src.key, label: src.label })))
     .filter(entry => !range || (entry.day >= range.from && entry.day <= range.to))
+  let entries = gather()
   if (!entries.length) return []
   const terms = query.toLowerCase().match(/[a-z0-9_-]{3,}|[\p{Script=Han}]{2,}/gu) ?? []
   const cosine = new Map<(typeof entries)[number], number>()
   if (query.trim().length >= 2 && embeddingReady()) {
     try {
       for (const src of sources) await indexArchive(src.key, signal)
+      // Indexing can assign IDs to legacy entries; compare against their newly created vectors immediately.
+      entries = gather()
       const [q] = await embed([query], 'query', signal)
       for (const entry of entries) {
         // vectors from another model share the dimension but not the space: never compare across them
@@ -386,16 +395,19 @@ export async function recallSession(key: string, query: string, count = 3, opts:
         if (vec) cosine.set(entry, dot(q, decodeVector(vec)))
       }
     } catch (err: any) {
+      cosine.clear()
       log.warn(`旧聊天向量检索失败，改用关键词: ${err?.message ?? err}`)
     }
   }
   const minScore = config.get().memory.embedding.minScore
+  const semantic = cosine.size > 0
   return entries.map(entry => {
-    const lexical = similarity(query, entry.text) + terms.reduce((score, term) => score + (entry.text.toLowerCase().includes(term) ? 0.2 : 0), 0)
+    const text = recallText(entry.text)
+    const lexical = similarity(query, text) + terms.reduce((score, term) => score + (text.toLowerCase().includes(term) ? 0.2 : 0), 0)
     // asked about a date: that day's digest is the best overview of it
-    return { entry, lexical, cos: cosine.get(entry), score: lexical + (cosine.get(entry) ?? 0) + (range && entry.kind === 'day' ? 1 : 0) }
+    return { entry, lexical, cos: cosine.get(entry), score: (semantic ? cosine.get(entry) ?? -1 : lexical) + (range && entry.kind === 'day' ? 1 : 0) }
   })
-    .filter(hit => range || !query.trim() || hit.lexical >= 0.06 || (hit.cos ?? -1) >= minScore)
+    .filter(hit => range || !query.trim() || (semantic ? (hit.cos ?? -1) >= minScore : hit.lexical >= 0.06))
     .sort((a, b) => b.score - a.score || b.entry.at - a.entry.at)
     .slice(0, Math.min(config.get().memory.recallLimit, Math.max(1, count)))
     .map(({ entry }) => {

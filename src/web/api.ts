@@ -641,7 +641,7 @@ export const routes: Route[] = [
     computerQueue.cancel(job)
   }),
 
-  R('GET', '/api/logs', ({ query }) => recentLogs(Number(query.get('after')) || 0, query.get('level') || undefined)),
+  R('GET', '/api/logs', ({ query }) => recentLogs(Number(query.get('after')) || 0, query.get('level') || undefined, query.get('q') || '')),
 
   R('GET', '/api/agy', () => [...agyQueue.jobs].reverse().map(agyJobView)),
   R('GET', '/api/agy/:id/history', ({ params }) => {

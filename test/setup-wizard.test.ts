@@ -71,6 +71,25 @@ it('saves wizard changes atomically and keeps stored keys when omitted', async (
   assert.equal(config.defaultModelId(), 'second')
 })
 
+it('offers Lens without AGY installation, login or service', async t => {
+  const platform = Object.getOwnPropertyDescriptor(process, 'platform')!
+  Object.defineProperty(process, 'platform', { value: 'win32' })
+  t.after(() => Object.defineProperty(process, 'platform', platform))
+  const probes: string[] = []
+  t.mock.method(setupRuntime, 'exec', async (file: string, args: string[]) => {
+    assert.equal(file, 'wsl.exe', 'Lens must not probe an AGY executable')
+    probes.push(args.at(-1)!)
+    return { stdout: '[true,true]', stderr: '' }
+  })
+  writeUserConfig(base + 'tools:\n  googleLens: { enable: true, distro: lens-without-agy }\n  agy: { enable: false }\n')
+  config.load()
+  const eff = config.effective(), state = await checkRuntime('lens', eff, true)
+  assert.equal(state.ready, true)
+  assert.equal(runtimeToolReady('google_lens', eff), true)
+  assert.equal(runtimeToolReady('agy', eff), false)
+  assert.ok(probes.every(script => !script.includes('llm-agy.service') && !script.includes('exec.py')))
+})
+
 it('detects incomplete search settings and resolves search keys from the environment', async t => {
   writeUserConfig(base + 'tools:\n  webSearch: { provider: brave, apiKey: "env:WIZARD_SEARCH_TEST_KEY" }\n'); config.load()
   registerWebTools()
@@ -124,6 +143,15 @@ it('walks existing configuration, saves embeddings, preserves keys and skips opt
       await page.click(selector); await saved
       await page.waitForFunction(() => !(document.querySelector('.setup-form button[type=submit]') as HTMLButtonElement)?.disabled)
     }
+    await page.$eval('details:has([name=credentialProvider])', (el: HTMLDetailsElement) => { el.open = true })
+    await page.select('[name=credentialProvider]', 'mock')
+    assert.equal(await page.$eval('[name=credentialKey]', (el: HTMLInputElement) => el.value), '')
+    await page.type('[name=credentialKey]', 'updated-provider-secret')
+    await submit('details:has([name=credentialProvider]) button[type=submit]')
+    assert.equal(config.getProvider('mock')!.apiKey, 'updated-provider-secret')
+    await page.$eval('details:has([name=credentialProvider])', (el: HTMLDetailsElement) => { el.open = true })
+    await submit('details:has([name=credentialProvider]) button[type=submit]')
+    assert.equal(config.getProvider('mock')!.apiKey, 'updated-provider-secret', 'blank input preserves an existing key')
     await page.$eval('details:has([name=utilityModel])', (el: HTMLDetailsElement) => { el.open = true })
     await page.select('[name=utilityModel]', 'main'); await page.select('[name=visionModel]', 'main')
     await page.$eval('[name=fallbackModels]', (el: HTMLInputElement) => { el.value = 'main' })
@@ -170,7 +198,14 @@ it('walks existing configuration, saves embeddings, preserves keys and skips opt
       assert.deepEqual(overflowing, [], 'wizard sections must wrap within the mobile viewport')
       await (await page.$('.setup-wizard'))!.screenshot({ path: path.join(process.env.YZ_LLM_UI_SCREENSHOTS, 'setup-mobile.png') })
     }
-    for (const step of ['computer', 'lens', 'agy']) { await clickText('跳过此步骤'); await page.waitForSelector(`[data-setup-step="${step}"]`) }
+    for (const step of ['computer', 'lens', 'agy']) {
+      await clickText('跳过此步骤'); await page.waitForSelector(`[data-setup-step="${step}"]`)
+      if (step === 'lens') {
+        const commands = await page.$$eval('.setup-command code', (els: Element[]) => els.map(el => el.textContent))
+        assert.ok(commands.some((command: string) => command.includes('lens-setup')))
+        assert.ok(commands.every((command: string) => !command.includes('agy-setup')))
+      }
+    }
     await clickText('跳过此步骤'); await page.waitForFunction(() => location.hash === '#/config/basic')
     assert.equal(config.get().tools.exec.enable, false); assert.equal(config.get().tools.agy.enable, false)
     assert.deepEqual(errors, [])

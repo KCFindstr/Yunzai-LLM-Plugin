@@ -17,11 +17,11 @@ const scripts: Record<RuntimeKind, string[]> = {
   sandbox: ['test -r /opt/llm-sandbox/runner.py', 'command -v bwrap >/dev/null && command -v node >/dev/null && id sbx >/dev/null 2>&1', 'systemctl is-active --quiet llm-sandbox-firewall.service'],
   computer: ['test -r /opt/llm-desktop/client.py', 'systemctl is-active --quiet llm-desktop.service'],
   agy: ['test -r /opt/llm-agy/exec.py && test -r /opt/llm-agy/mount.sh', 'systemctl is-active --quiet llm-agy.service', 'systemctl is-active --quiet llm-desktop.service'],
-  lens: ['test -r /opt/llm-agy/google-image-search.py && test -d /usr/local/lib/agy-browser/playwright', 'systemctl is-active --quiet llm-agy.service', 'systemctl is-active --quiet llm-desktop.service'],
+  lens: ['test -r /opt/llm-agy/google-image-search.py && test -d /usr/local/lib/agy-browser/playwright', 'systemctl is-active --quiet llm-desktop.service'],
 }
 const labels: Record<RuntimeKind, string[]> = {
   sandbox: ['代码运行器', '隔离环境与运行语言', '沙盒网络隔离服务'], computer: ['桌面客户端', '桌面服务'],
-  agy: ['AGY 沙盒桥接', 'AGY 隔离服务', '桌面与共享目录服务'], lens: ['图片搜索与浏览器依赖', 'AGY 隔离服务', '桌面服务'],
+  agy: ['AGY 沙盒桥接', 'AGY 隔离服务', '桌面与共享目录服务'], lens: ['图片搜索与浏览器依赖', '桌面服务'],
 }
 const settings = (kind: RuntimeKind, eff: EffectiveConfig) => eff.tools[kind === 'sandbox' ? 'exec' : kind === 'lens' ? 'googleLens' : kind]
 const keyFor = (kind: RuntimeKind, eff: EffectiveConfig) => `${kind}:${settings(kind, eff).distro}:${kind === 'agy' ? eff.tools.agy.executable : ''}`

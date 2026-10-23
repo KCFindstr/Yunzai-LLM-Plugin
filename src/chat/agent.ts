@@ -178,6 +178,7 @@ async function runTurnInner(req: TurnRequest, ref: { turn?: TurnState; rolloutId
   const range = parseDateHints(input.text)
   const dated = range && !(range.from === localDay() && range.to === localDay()) ? range : undefined
   const recalled = (await recallSession(convKey, input.text, dated ? 3 : 2, {
+    automatic: true,
     range: dated,
     extra: recallSources(e, eff.chat.sessionScope),
     signal: AbortSignal.timeout(2500),

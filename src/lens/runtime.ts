@@ -1,11 +1,15 @@
 import { spawn } from 'node:child_process'
+import { readFileSync } from 'node:fs'
+import path from 'node:path'
+import { PLUGIN_DIR } from '../core/paths.ts'
 
 /** Fixed-purpose VM bridge. No model-supplied commands, URLs, or host paths. */
 export function lensBridge(distro: string, request: Record<string, unknown>, signal: AbortSignal): Promise<any> {
   if (!/^[\w.-]+$/.test(distro) || !/^[a-f0-9]{10}$/.test(String(request.job))) throw Error('Invalid Lens workspace')
   return new Promise((resolve, reject) => {
     if (signal.aborted) { reject(Error('Google Lens 操作已取消')); return }
-    const child = spawn('wsl.exe', ['-d', distro, '-u', 'root', '-e', 'python3', '/opt/llm-agy/exec.py'], { windowsHide: true, stdio: ['pipe', 'pipe', 'ignore'] })
+    const script = readFileSync(path.join(PLUGIN_DIR, 'desktop/lens-bridge.py'), 'utf8')
+    const child = spawn('wsl.exe', ['-d', distro, '-u', 'root', '-e', 'python3', '-c', script], { windowsHide: true, stdio: ['pipe', 'pipe', 'ignore'] })
     let output = '', settled = false
     const finish = (error?: Error, result?: unknown) => {
       if (settled) return

@@ -5,6 +5,7 @@ import { after, before, beforeEach, describe, it } from 'node:test'
 import { extractInput } from '../src/chat/message.ts'
 import { buildHeader } from '../src/chat/prompt.ts'
 import { config } from '../src/core/config.ts'
+import { recordGroupMessage, clearGroupLogs } from '../src/chat/groupLog.ts'
 
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9ZlWQAAAAASUVORK5CYII=', 'base64')
 const requests: string[] = []
@@ -22,10 +23,43 @@ before(async () => {
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
   origin = `http://127.0.0.1:${(server.address() as any).port}`
 })
-beforeEach(() => { requests.length = 0 })
+beforeEach(() => { requests.length = 0; clearGroupLogs() })
 after(() => new Promise<void>(resolve => server.close(() => resolve())))
 
 describe('quoted sender identity', () => {
+  it('normalizes wrapped replies and alternate sender identity fields', async () => {
+    for (const [index, response] of [
+      { sender_id: 'opaque-user', message: [{ type: 'text', text: '引用内容' }] },
+      { sender: { uid: 'opaque-user' }, message: [{ type: 'text', text: '引用内容' }] },
+      { retcode: 0, data: { message: { sender_id: 'opaque-user', segments: [{ type: 'text', data: { text: '引用内容' } }] } } },
+    ].entries()) {
+      const input = await extractInput({ self_id: 'bot', user_id: 'current', reply_id: `wrapped-${index}`, getReply: async () => response }, { ...opts, includeImages: false })
+      assert.equal(input.quoted!.senderId, 'opaque-user')
+      assert.equal(input.quoted!.text, '引用内容')
+      assert.match(buildHeader({ self_id: 'bot', user_id: 'current' }, config.effective(), input, false).sent, /平台ID opaque-user/)
+    }
+  })
+  it('keeps the quoted sender from source metadata when the fetched payload omits it or fetching fails', async () => {
+    for (const getReply of [async () => ({ message: [{ type: 'text', text: '引用内容' }] }), async () => { throw Error('unavailable') }]) {
+      const e = { self_id: 'bot', user_id: 'current', reply_id: 'source', source: { user_id: 'original', message: [{ type: 'text', text: '引用内容' }] }, getReply }
+      const input = await extractInput(e, { ...opts, includeImages: false })
+      assert.equal(input.quoted!.senderId, 'original')
+      assert.match(buildHeader(e, config.effective(), input, false).stored, /平台ID original/)
+    }
+    const input = await extractInput({ self_id: 'bot', user_id: 'current', message: [{ type: 'reply', data: { id: 'ref', user_id: 'original' } }] }, { ...opts, includeImages: false })
+    assert.equal(input.quoted!.senderId, 'original')
+  })
+  it('recovers missing sender IDs by exact message ID in the same bot and group only', async () => {
+    recordGroupMessage({ self_id: 10000, group_id: 42500, user_id: 42501, message_id: 'original-image', sender: { nickname: '原发言人' }, message: [image('quoted')] })
+    const e = { self_id: 10000, group_id: 42500, user_id: 42502, reply_id: 'original-image', getReply: async () => ({ message: [image('quoted')] }) }
+    const input = await extractInput(e, { ...opts, includeImages: false })
+    assert.equal(input.quoted!.senderId, '42501')
+    assert.match(buildHeader(e, config.effective(), input, false).sent, /引用原发言人\(平台ID 42501\) 的消息/)
+    for (const other of [{ ...e, group_id: 42503 }, { ...e, self_id: 10001 }]) {
+      delete (other as any)._llmQuoted
+      assert.equal((await extractInput(other, { ...opts, includeImages: false })).quoted!.senderId, undefined)
+    }
+  })
   it('preserves the quoted sender ID in both the sent and stored prompt, even for duplicate names', async () => {
     for (const userId of [42001, 42002]) {
       const e = { self_id: 10000, user_id: 20001, reply_id: 'original', getReply: async () => ({ sender: { user_id: userId, nickname: '同名群友' }, message: [{ type: 'text', text: '引用内容' }] }) }

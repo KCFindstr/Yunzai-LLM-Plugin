@@ -87,7 +87,7 @@ export function buildHeader(e: any, eff: EffectiveConfig, input: ExtractedInput,
   const ambient: string[] = []
   const context: TurnPromptContext = { heading: head, roster: [], recent: [], memory: opts.memory ?? '', quote: '' }
   if (e.group_id) {
-    const roster = rosterLines(e, eff.chat.rosterSize, config.get().memory.enable)
+    const roster = rosterLines(e, eff.chat.rosterSize)
     context.roster = roster
     if (roster.length) ambient.push('【最近群友·仅身份参考】', ...roster)
     const recent = recentLines(e, eff.chat.groupContext, eff.chat.groupContextMaxChars, opts.conv)

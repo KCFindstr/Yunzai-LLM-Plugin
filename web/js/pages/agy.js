@@ -1,6 +1,6 @@
 import { enc, get, post } from '../api.js'
 import { menuButton } from '../main.js'
-import { act, badge, card, confirmDanger, empty, fmt, h, icon, mount, spinner, textBlock } from '../ui.js'
+import { act, badge, card, confirmDanger, empty, fmt, h, icon, mount, spinner, textBlock, mentionText, markdownSwitch } from '../ui.js'
 
 const STATUS = {
   queued: ['排队中', 'accent'], running: ['执行中', 'accent'], waiting: ['等待回复', 'warn'],
@@ -58,7 +58,7 @@ function timelineEvent(event, opened, job) {
     h('time', { class: 'small muted', dateTime: new Date(event.at).toISOString() }, new Date(event.at).toLocaleTimeString('zh-CN', { hour12: false })),
   )
   const contents = [
-    event.text ? textBlock(event.text, { key: `agy-text:${event.seq}`, open: opened.get(`agy-text:${event.seq}`), limit: 280, className: event.isError ? 'small bad' : 'small' }) : null,
+    event.text ? textBlock(event.text, { key: `agy-text:${event.seq}`, open: opened.get(`agy-text:${event.seq}`), limit: 280, markdown: ['response', 'reply'].includes(event.kind) ? 'auto' : false, className: event.isError ? 'small bad' : 'small' }) : null,
     event.model || event.inputTokens != null ? h('div', { class: 'small muted' },
       [event.model, (event.inputTokens != null || event.outputTokens != null) ? `输入 ${fmt.num(event.inputTokens)} / 输出 ${fmt.num(event.outputTokens)}` : null].filter(Boolean).join(' · ')) : null,
     event.args ? h('details', { class: 'computer-arguments', 'data-disclosure': argsKey, 'data-seq': event.seq, open: opened.get(argsKey) },
@@ -102,7 +102,7 @@ export async function render(root, [id]) {
       const [label, kind] = STATUS[job.status] ?? [job.status, '']
       return h('a', { class: `list-item computer-job ${job.id === selected?.id ? 'sel' : ''}`, href: `#/agy/${enc(job.id)}`, 'aria-current': job.id === selected?.id ? 'page' : undefined },
         h('div', { class: 'row' }, badge(label, kind), h('span', { class: 'small muted right' }, fmt.short(job.createdAt))),
-        h('strong', { class: 'clamp' }, job.task),
+        h('strong', { class: 'clamp' }, mentionText(job.task)),
         h('span', { class: 'small muted mono clamp' }, job.id),
         h('span', { class: 'small muted' }, [job.modelId, job.steps != null ? `${job.steps} 轮` : null, (job.inputTokens != null || job.outputTokens != null) ? `${fmt.num((job.inputTokens ?? 0) + (job.outputTokens ?? 0))} tokens` : null].filter(Boolean).join(' · ')))
     }) : empty(filter ? '没有匹配的异步代理任务' : '还没有异步代理任务'))
@@ -159,7 +159,7 @@ export async function render(root, [id]) {
           }
         } }, '取消任务')) : null),
       card(h('span', { class: 'card-title' }, icon('check'), '执行结果'),
-        job.report ? textBlock(job.report, { key: 'agy-report', open: opened.get('agy-report'), limit: 560, className: 'rollout-reply' }) : empty(['queued', 'running'].includes(job.status) ? '执行结束后会显示结果。' : '此任务没有保存执行结果。')),
+        job.report ? textBlock(job.report, { key: 'agy-report', open: opened.get('agy-report'), limit: 560, className: 'rollout-reply', markdown: 'auto' }) : empty(['queued', 'running'].includes(job.status) ? '执行结束后会显示结果。' : '此任务没有保存执行结果。')),
       card(h('span', { class: 'card-title' }, icon('chat'), '对话回复', replies.length ? badge(`${replies.length} 条`) : null),
         replies.length ? h('div', { class: 'computer-timeline' }, replies.map(event => timelineEvent(event, opened, job))) : empty(job.progress && !['queued', 'running'].includes(job.status) ? '正在整理并发送回复…' : '还没有保存对话回复。')),
       card(h('span', { class: 'card-title' }, icon('logs'), '执行记录', badge(`${execution.length} 条`)),
@@ -184,7 +184,7 @@ export async function render(root, [id]) {
     finally { busy = false; refreshButton.disabled = false }
   }
 
-  mount(root, h('div', { class: 'page-head' }, menuButton(), h('h1', '异步代理'), h('span', { class: 'spacer' }), connection, refreshButton),
+  mount(root, h('div', { class: 'page-head' }, menuButton(), h('h1', '异步代理'), h('span', { class: 'spacer' }), markdownSwitch(), connection, refreshButton),
     h('p', { class: 'small muted', role: 'note' }, '异步代理任务在后台执行，可在这里查看执行过程、对话回复与结果。'),
     h('div', { class: 'split computer-split' }, list, detail))
   drawList()

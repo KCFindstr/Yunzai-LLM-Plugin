@@ -1,4 +1,32 @@
 /** Tiny DOM helpers: h() builds elements, plus toast / modal / formatting. No framework. */
+import { mentionText, richText } from './rich-text.js'
+export { mentionText, richText } from './rich-text.js'
+
+export function markdownEnabled() {
+  try { return localStorage.getItem('render-markdown') !== 'false' } catch { return true }
+}
+
+function paintResponse(el, enabled) {
+  el.classList.toggle('rich-text', enabled)
+  el.classList.toggle('plain-text', !enabled)
+  el.replaceChildren(richText(el._responseText, { markdown: enabled }))
+}
+
+export function responseText(text, className = '') {
+  const el = h('div', { class: `formatted-text ${className}`, 'data-rich-response': '' })
+  el._responseText = text
+  paintResponse(el, markdownEnabled())
+  return el
+}
+
+export function markdownSwitch(onChange = () => {}) {
+  return h('label', { class: 'markdown-switch' }, h('input', { type: 'checkbox', role: 'switch', checked: markdownEnabled(), 'aria-label': '渲染 Markdown', onchange: e => {
+    try { localStorage.setItem('render-markdown', String(e.target.checked)) } catch {}
+    document.querySelectorAll('[data-rich-response]').forEach(el => paintResponse(el, e.target.checked))
+    document.querySelectorAll('input[aria-label="渲染 Markdown"]').forEach(el => { el.checked = e.target.checked })
+    onChange(e.target.checked)
+  } }), h('span', '渲染 Markdown'))
+}
 
 const ICONS = {
   overview: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
@@ -65,13 +93,16 @@ export function mount(root, ...children) {
 }
 
 /** Keep long transcripts readable; expanding uses native keyboard-accessible details. */
-export function textBlock(text, { key, open = false, limit = 360, className = 'small' } = {}) {
+export function textBlock(text, { key, open = false, limit = 360, className = 'small', markdown = false, mentions = true } = {}) {
   if (!text) return null
-  if (text.length <= limit && text.split('\n').length <= 8) return h('pre', { class: className }, text)
+  const content = () => markdown === 'auto' ? responseText(text, className) : h(markdown ? 'div' : 'pre', { class: `${className}${markdown ? ' rich-text' : ''}` }, richText(text, { markdown, mentions }))
+  if (text.length <= limit && text.split('\n').length <= 8) return content()
+  const excerpt = text.slice(0, Math.min(limit, 180)).trim() + '…'
+  const preview = markdown === 'auto' ? responseText(excerpt, 'text-excerpt') : h(markdown ? 'div' : 'span', { class: `text-excerpt${markdown ? ' rich-text' : ''}` }, richText(excerpt, { markdown, mentions }))
   return h('details', { class: 'text-disclosure', 'data-disclosure': key, open },
-    h('summary', h('span', { class: 'text-excerpt' }, text.slice(0, Math.min(limit, 180)).trim() + '…'),
+    h('summary', preview,
       h('span', { class: 'disclosure-action' }, h('span', { class: 'when-closed' }, '展开全文'), h('span', { class: 'when-open' }, '收起'))),
-    h('pre', { class: className }, text))
+    content())
 }
 
 export function toast(msg, kind = '') {

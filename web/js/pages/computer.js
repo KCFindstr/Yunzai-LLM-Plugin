@@ -1,6 +1,6 @@
 import { enc, get, post } from '../api.js'
 import { menuButton } from '../main.js'
-import { act, badge, card, confirmDanger, empty, fmt, h, icon, modal, mount, spinner, textBlock } from '../ui.js'
+import { act, badge, card, confirmDanger, empty, fmt, h, icon, modal, mount, spinner, textBlock, mentionText, markdownSwitch } from '../ui.js'
 
 const STATUS = {
   queued: ['排队中', 'accent'], running: ['执行中', 'accent'], waiting: ['等待回复', 'warn'],
@@ -46,7 +46,7 @@ function timelineEvent(job, event, open, expanded) {
     h('time', { class: 'small muted', dateTime: new Date(event.at).toISOString() }, fmt.time(event.at)),
   )
   const contents = [
-    event.text ? textBlock(event.text, { key: `computer-text:${event.seq}`, open: expanded.get(`computer-text:${event.seq}`), className: event.isError ? 'small bad' : 'small' }) : null,
+    event.text ? textBlock(event.text, { key: `computer-text:${event.seq}`, open: expanded.get(`computer-text:${event.seq}`), markdown: ['response', 'reply'].includes(event.kind) ? 'auto' : false, className: event.isError ? 'small bad' : 'small' }) : null,
     event.tools?.length ? h('div', { class: 'chips' }, event.tools.map(tool => badge(tool.name, 'accent'))) : null,
     (event.inputTokens != null || event.cost != null) ? h('div', { class: 'small muted' },
       [event.inputTokens != null ? `输入 ${fmt.num(event.inputTokens)} / 输出 ${fmt.num(event.outputTokens)}` : null, event.cost != null ? fmt.usd(event.cost) : null].filter(Boolean).join(' · ')) : null,
@@ -89,7 +89,7 @@ export async function render(root, [id]) {
       const [label, kind] = STATUS[job.status] ?? [job.status, '']
       return h('a', { class: `list-item computer-job ${job.id === selected?.id ? 'sel' : ''}`, href: `#/computer/${enc(job.id)}`, 'aria-current': job.id === selected?.id ? 'page' : undefined },
         h('div', { class: 'row' }, badge(label, kind), h('span', { class: 'small muted right' }, fmt.short(job.createdAt))),
-        h('strong', { class: 'clamp' }, job.task),
+        h('strong', { class: 'clamp' }, mentionText(job.task)),
         h('span', { class: 'small muted mono clamp' }, job.id),
         h('span', { class: 'small muted' }, [job.modelId, job.steps != null ? `${job.steps} 轮` : null, job.costUsd != null ? fmt.usd(job.costUsd) : null].filter(Boolean).join(' · ')),
       )
@@ -136,7 +136,7 @@ export async function render(root, [id]) {
           job.outputTokens != null ? h('span', `输出 ${fmt.num(job.outputTokens)}`) : null,
           job.costUsd != null ? h('span', `费用 ${fmt.usd(job.costUsd)}`) : null) : null,
         job.report ? h('details', { class: 'quiet-details', 'data-disclosure': 'report-details', open: job.status === 'waiting' || expanded.get('report-details') },
-          h('summary', job.status === 'waiting' ? '等待用户回复的问题' : '最新代理报告'), h('pre', { class: 'small' }, job.report)) : null,
+          h('summary', job.status === 'waiting' ? '等待用户回复的问题' : '最新代理报告'), textBlock(job.report, { key: 'report-text', open: true, markdown: 'auto' })) : null,
         job.deliveryError ? h('p', { class: 'small bad' }, '结果未能完整送达聊天，请查看下方发送记录。') : null,
         ['running', 'queued', 'waiting'].includes(job.status) ? h('div', { class: 'computer-progress small', role: 'status' }, spinner(),
           job.status === 'queued' ? '等待处理' : job.progress || '正在处理') : (job.progress ? h('div', { class: 'computer-progress small', role: 'status' }, icon('clock', 16), job.progress) : null),
@@ -169,7 +169,7 @@ export async function render(root, [id]) {
     finally { busy = false; refreshButton.disabled = false }
   }
 
-  mount(root, h('div', { class: 'page-head' }, menuButton(), h('h1', '电脑任务'), h('span', { class: 'spacer' }), connection, refreshButton),
+  mount(root, h('div', { class: 'page-head' }, menuButton(), h('h1', '电脑任务'), h('span', { class: 'spacer' }), markdownSwitch(), connection, refreshButton),
     h('p', { class: 'small muted', role: 'note' }, '电脑任务由电脑代理在后台执行，可在此查看操作步骤与截图。'),
     h('div', { class: 'split computer-split' }, list, detail))
   drawList()

@@ -18,12 +18,13 @@ function remember(level: string, args: any[]) {
   if (recent.length > 1000) recent.splice(0, recent.length - 1000)
 }
 
-export function recentLogs(after = 0, level?: string): LogLine[] {
-  return recent.filter(line => line.seq > after && (!level || line.level === level))
+export function recentLogs(after = 0, level?: string, query = ''): LogLine[] {
+  const search = query.trim().toLowerCase()
+  return recent.filter(line => line.seq > after && (!level || line.level === level) && (!search || line.text.toLowerCase().includes(search)))
 }
 
-function sink(level: string, args: any[]) {
-  if (level !== 'debug' || verbose) remember(level, args)
+function sink(level: string, args: any[], recordedLevel = level) {
+  if (level !== 'debug' || verbose) remember(recordedLevel, args)
   const l = globalThis.logger
   if (l && typeof l[level] === 'function') return l[level](TAG, ...args)
   if (process.env.YZ_LLM_QUIET) return
@@ -33,7 +34,7 @@ function sink(level: string, args: any[]) {
 
 export const log = {
   verbose,
-  debug: (...a: any[]) => (verbose ? sink('info', ['[debug]', ...a]) : sink('debug', a)),
+  debug: (...a: any[]) => (verbose ? sink('info', ['[debug]', ...a], 'debug') : sink('debug', a)),
   info: (...a: any[]) => sink('info', a),
   mark: (...a: any[]) => sink('mark', a),
   warn: (...a: any[]) => sink('warn', a),
