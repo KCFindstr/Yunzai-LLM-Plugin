@@ -1,11 +1,11 @@
 import { badge, h, textBlock, mentionText } from './ui.js'
 import { contextView } from './context-view.js'
 
-export function contextInspector(context, opened, { markdown = false } = {}) {
+export function contextInspector(context, opened) {
   const view = contextView(context)
   const disclosure = (key, label, count, children) => h('details', { class: 'context-section quiet-details', 'data-disclosure': key, open: opened.get(key) },
     h('summary', label, count != null ? badge(count) : null), h('div', { class: 'context-section-body' }, children))
-  const text = (value, key, limit = 400, formatted = false) => textBlock(value, { key, open: opened.get(key), limit, markdown: formatted && markdown })
+  const text = (value, key, limit = 400, formatted = false) => textBlock(value, { key, open: opened.get(key), limit, markdown: formatted })
   const roles = { user: '用户', assistant: '机器人', tool: '工具' }
   const message = (entry, i) => h('div', { class: `context-message ${entry.role}` },
     h('div', { class: 'row small muted' }, badge(roles[entry.role] ?? entry.role), entry.imageCount ? badge(`${entry.imageCount} 张图片`) : null),

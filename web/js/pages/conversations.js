@@ -1,6 +1,6 @@
 import { del, enc, get } from '../api.js'
 import { menuButton } from '../main.js'
-import { act, badge, card, confirmDanger, empty, fmt, h, icon, modal, mount, tabs, mentionText, responseText, markdownSwitch } from '../ui.js'
+import { act, badge, card, confirmDanger, empty, fmt, h, icon, modal, mount, tabs, mentionText, responseText } from '../ui.js'
 
 /** Recent turns table, shared with the overview page. */
 export function turnList(turns, { showConv = true } = {}) {
@@ -30,8 +30,7 @@ function showTurn(t) {
       badge(`费用 ${fmt.usd(t.cost)}`),
       t.tokens ? h('span', `输入 ${fmt.num(t.tokens.input)} / 缓存 ${fmt.num(t.tokens.cacheRead)} / 输出 ${fmt.num(t.tokens.output)}`) : null),
     t.tokens?.inputIncomplete ? h('p', { class: 'small warn' }, '上游可能漏报历史输入和缓存 token，以上花费可能偏低；实际费用以服务商账单为准。') : null,
-    markdownSwitch(),
-    h('div', { class: 'chat' }, h('div', { class: 'bubble user' }, mentionText(t.input)), t.reply ? responseText(t.reply, 'bubble assistant') : null),
+    h('div', { class: 'chat' }, h('div', { class: 'bubble user' }, mentionText(t.input)), t.reply ? responseText(t.reply, 'bubble assistant', `turn:${t.rolloutId || `${t.conv}:${t.at}`}`) : null),
     t.tools.length ? h('div', { class: 'chips' }, h('span', { class: 'small muted' }, '工具调用：'), t.tools.map(tool => badge(tool, 'accent'))) : null,
     t.rolloutId ? h('a', { class: 'btn primary sm', style: { alignSelf: 'flex-start' }, href: `#/rollouts/${enc(t.rolloutId)}`, onclick: e => e.currentTarget.closest('.modal-bg')?.querySelector('header button')?.click() }, icon('layers', 14), ' 查看完整执行记录 →') : null,
     t.error ? h('pre', { class: 'bad' }, t.error) : null,
@@ -42,7 +41,7 @@ const kindLabel = { group: '群聊', member: '群成员', private: '私聊' }
 
 export async function render(root, [sub]) {
   const mode = sub === 'turns' ? 'turns' : 'sessions'
-  const head = h('div', { class: 'page-head' }, menuButton(), h('h1', '对话'), h('span', { class: 'spacer' }), markdownSwitch())
+  const head = h('div', { class: 'page-head' }, menuButton(), h('h1', '对话'))
   const switcher = tabs([['sessions', '会话'], ['turns', '最近对话']], mode, id => { location.hash = id === 'turns' ? '#/conversations/turns' : '#/conversations' })
 
   if (mode === 'turns') {
@@ -129,7 +128,7 @@ async function drawDetail(el, key, refresh) {
       )) : empty('还没有档案'),
     ),
     card(h('span', { class: 'card-title' }, icon('chat'), `当前上下文（${s.messages.length / 2} 轮）`),
-      s.messages.length ? h('div', { class: 'chat' }, s.messages.map(m => m.role === 'assistant' ? responseText(m.text, 'bubble assistant') : h('div', { class: `bubble ${m.role}` }, mentionText(m.text)))) : empty('当前没有上下文（空闲超时后会重新开始）'),
+      s.messages.length ? h('div', { class: 'chat' }, s.messages.map((m, i) => m.role === 'assistant' ? responseText(m.text, 'bubble assistant', `message:${i}`) : h('div', { class: `bubble ${m.role}` }, mentionText(m.text)))) : empty('当前没有上下文（空闲超时后会重新开始）'),
     ),
     card(h('span', { class: 'card-title' }, icon('logs'), '最近对话'), turnList(s.turns, { showConv: false })),
   )

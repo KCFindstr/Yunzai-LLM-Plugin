@@ -1,6 +1,6 @@
 import { enc, get, post } from '../api.js'
 import { menuButton } from '../main.js'
-import { act, badge, card, confirmDanger, empty, fmt, h, icon, mount, spinner, textBlock, mentionText, markdownSwitch } from '../ui.js'
+import { act, badge, card, confirmDanger, empty, fmt, h, icon, mount, spinner, textBlock, mentionText } from '../ui.js'
 
 const STATUS = {
   queued: ['排队中', 'accent'], running: ['执行中', 'accent'], waiting: ['等待回复', 'warn'],
@@ -184,7 +184,7 @@ export async function render(root, [id]) {
     finally { busy = false; refreshButton.disabled = false }
   }
 
-  mount(root, h('div', { class: 'page-head' }, menuButton(), h('h1', '异步代理'), h('span', { class: 'spacer' }), markdownSwitch(), connection, refreshButton),
+  mount(root, h('div', { class: 'page-head' }, menuButton(), h('h1', '异步代理'), h('span', { class: 'spacer' }), connection, refreshButton),
     h('p', { class: 'small muted', role: 'note' }, '异步代理任务在后台执行，可在这里查看执行过程、对话回复与结果。'),
     h('div', { class: 'split computer-split' }, list, detail))
   drawList()

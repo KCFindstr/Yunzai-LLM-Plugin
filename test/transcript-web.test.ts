@@ -9,7 +9,7 @@ import { startWeb, stopWeb } from '../src/web/server.ts'
 import { startRollout, updateRollout, recordRolloutEvent } from '../src/chat/rollouts.ts'
 import { log } from '../src/core/log.ts'
 
-it('renders safe Markdown and mention chips, persists the view switch, and filters paused/live logs', async () => {
+it('renders safe Markdown and mention chips with independent response switches, and filters paused/live logs', async () => {
   const port = await new Promise<number>(resolve => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const p = (s.address() as net.AddressInfo).port; s.close(() => resolve(p)) }) })
   writeUserConfig(`web: { host: 127.0.0.1, port: ${port}, password: fixture-password }\n`); config.load()
   fs.cpSync(path.join(PLUGIN_ROOT, 'web'), path.join(TMP, 'web'), { recursive: true })
@@ -41,6 +41,10 @@ it('renders safe Markdown and mention chips, persists the view switch, and filte
     await page.setViewport({ width: 1440, height: 1050 })
     await page.goto(origin + `/#/rollouts/${id}`)
     await page.waitForSelector('.rollout-reply h2')
+    const finalSwitch = '[data-response-key=reply] input[aria-label="渲染 Markdown"]'
+    const modelSwitch = '.rollout-event[data-kind=response] input[aria-label="渲染 Markdown"]'
+    assert.equal(await page.$('.page-head .markdown-switch'), null)
+    assert.equal(await page.$eval(modelSwitch, (el: HTMLInputElement) => el.checked), true)
     assert.equal(await page.$eval('.rollout-reply h2', (el: Element) => el.textContent), '核对结果')
     assert.equal(await page.$$eval('.rollout-reply .markdown-table tbody tr', (els: Element[]) => els.length), 1)
     assert.equal(await page.$$eval('.rollout-list strong .mention-chip', (els: Element[]) => els.length), 2)
@@ -53,12 +57,23 @@ it('renders safe Markdown and mention chips, persists the view switch, and filte
     await page.click('[data-disclosure=reply] > summary')
     await page.evaluate(() => { document.documentElement.dataset.theme = 'light' })
     await shot(page, 'markdown-light.png')
-    await page.click('input[aria-label="渲染 Markdown"]')
+    await page.click(finalSwitch)
     await page.waitForFunction(() => !document.querySelector('.rollout-reply h2'))
     assert.ok((await page.$eval('.rollout-reply', (el: Element) => el.textContent!)).includes('## 核对结果'))
+    assert.equal(await page.$eval(modelSwitch, (el: HTMLInputElement) => el.checked), true)
+    assert.ok(await page.$('.rollout-event[data-kind=response] .rich-text strong'))
     await page.reload(); await page.waitForSelector('.rollout-reply')
-    assert.equal(await page.$eval('input[aria-label="渲染 Markdown"]', (el: HTMLInputElement) => el.checked), false)
-    await page.click('input[aria-label="渲染 Markdown"]'); await page.waitForSelector('.rollout-reply h2')
+    assert.equal(await page.$eval(finalSwitch, (el: HTMLInputElement) => el.checked), false)
+    assert.equal(await page.$eval(modelSwitch, (el: HTMLInputElement) => el.checked), true)
+    await page.click(modelSwitch)
+    assert.equal(await page.$('.rollout-event[data-kind=response] .rich-text'), null)
+    await page.click(finalSwitch); await page.waitForSelector('.rollout-reply h2')
+    assert.equal(await page.$eval(modelSwitch, (el: HTMLInputElement) => el.checked), false)
+    recordRolloutEvent(id, { kind: 'progress', text: 'fixture refresh' })
+    await page.click('.page-head .btn:not(.menu-btn)')
+    await page.waitForFunction(() => document.querySelector('.rollout-detail')?.textContent?.includes('fixture refresh'))
+    assert.equal(await page.$eval(modelSwitch, (el: HTMLInputElement) => el.checked), false)
+    assert.equal(await page.$eval(finalSwitch, (el: HTMLInputElement) => el.checked), true)
     await page.evaluate(() => { document.documentElement.dataset.theme = 'dark' })
     await shot(page, 'markdown-dark.png')
     await page.setViewport({ width: 390, height: 1000 })

@@ -399,6 +399,10 @@ details[open] > summary .when-open { display: inline; }
 .markdown-switch { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: 12px; cursor: pointer; white-space: nowrap; }
 .markdown-switch input { width: 30px; height: 16px; margin: 0; accent-color: var(--accent); cursor: pointer; }
 .formatted-text { min-width: 0; }
+.response-block, .response-content { min-width: 0; }
+.response-controls { display: flex; justify-content: flex-end; margin-bottom: 8px; }
+.response-controls .markdown-switch { font-size: 11px; }
+.context-message > .response-block, .computer-event-content > .response-block { margin-top: 8px; }
 .plain-text { white-space: pre-wrap; overflow-wrap: anywhere; }
 .rich-text { color: inherit; white-space: normal; overflow-wrap: anywhere; line-height: 1.8; min-width: 0; }
 .rich-text > :first-child { margin-top: 0; }

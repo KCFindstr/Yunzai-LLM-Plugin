@@ -237,7 +237,7 @@ chat:
   sessionTimeout: 180
   # 记忆上限（超过后一次性丢弃较早的一半，比逐条滑动更省 token：缓存前缀保持不变）
   # 一轮 = 一条用户消息 + 一条机器人回复；20 轮最多 40 条历史消息
-  historyMaxTurns: 10
+  historyMaxTurns: 20
   # 同一会话最多排队多少条请求；超出时提示繁忙
   maxPending: 20
   # 最近群友身份条数，0 关闭，最大 30；只列称呼与 ID

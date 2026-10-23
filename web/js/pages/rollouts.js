@@ -1,6 +1,6 @@
 import { enc, get } from '../api.js'
 import { menuButton } from '../main.js'
-import { badge, card, empty, fmt, h, icon, modal, mount, spinner, textBlock, mentionText, markdownEnabled, markdownSwitch } from '../ui.js'
+import { badge, card, empty, fmt, h, icon, modal, mount, spinner, textBlock, mentionText } from '../ui.js'
 import { parseRolloutJson } from '../rollout-data.js'
 import { contextInspector } from '../context-inspector.js'
 import { initialPromptText } from '../context-view.js'
@@ -81,7 +81,7 @@ function expandIndicator() {
     icon('chevron', 12))
 }
 
-function timelineEvent(event, opened, r, markdown) {
+function timelineEvent(event, opened, r) {
   const [label, ico] = EVENT[event.kind] ?? ['记录', 'logs']
   const key = `event:${event.seq}`
   const argsKey = `args:${event.seq}`
@@ -101,7 +101,7 @@ function timelineEvent(event, opened, r, markdown) {
       return h('a', { href: url, target: '_blank', rel: 'noopener' }, h('img', { src: url, loading: 'lazy', alt: `${event.tool ?? '工具'} 返回的图片 ${index + 1}` }))
     })) : null,
     event.omittedImages ? h('p', { class: 'small warn' }, `${event.omittedImages} 张图片无法保存或超出图片保存上限。`) : null,
-    event.text ? textBlock(event.text, { key: `text:${event.seq}`, open: opened.get(`text:${event.seq}`), limit: 280, markdown: markdown && event.kind === 'response', className: event.isError ? 'small bad' : 'small' }) : null,
+    event.text ? textBlock(event.text, { key: `text:${event.seq}`, open: opened.get(`text:${event.seq}`), limit: 280, markdown: event.kind === 'response', className: event.isError ? 'small bad' : 'small' }) : null,
     event.inputTokens != null ? h('div', { class: 'small muted' }, `输入 ${fmt.num(event.inputTokens)} / 输出 ${fmt.num(event.outputTokens)}`) : null,
     event.callId ? h('div', { class: 'small muted mono' }, event.callId) : null,
     event.args ? h('details', { class: 'computer-arguments', 'data-disclosure': argsKey, open: opened.get(argsKey) },
@@ -120,7 +120,7 @@ function metric(label, value, ico) {
   return h('div', { class: 'run-metric' }, h('span', icon(ico, 14), label), h('strong', { title: String(value) }, value))
 }
 
-function requestDetails(r, opened, markdown) {
+function requestDetails(r, opened) {
   const context = r.context
   const disclosure = (key, label, ico, count, content, action) => h('details', { class: 'request-disclosure', 'data-disclosure': key, open: opened.get(key) },
     h('summary', icon(ico, 17), h('strong', label), badge(count), action, icon('chevron', 15)), h('div', { class: 'request-content' }, content))
@@ -131,7 +131,7 @@ function requestDetails(r, opened, markdown) {
           h('summary', tool.name), h('p', { class: 'small' }, tool.description), h('pre', { class: 'small mono' }, (() => { try { return JSON.stringify(JSON.parse(tool.parameters), null, 2) } catch { return tool.parameters } })())))) : empty('本轮未提供函数工具。')]
         : empty('此记录未保存工具列表。')),
     disclosure('chat-context', '聊天上下文', 'memory', context ? `${context.messages.length}${context.omittedMessages ? '+' : ''} 条消息` : '—',
-      context ? contextInspector(context, opened, { markdown })
+      context ? contextInspector(context, opened)
         : empty('此记录未保存聊天上下文。'), context ? h('button', { class: 'btn sm', type: 'button', 'aria-label': '查看初始提示原文', onclick: event => {
           event.preventDefault(); event.stopPropagation()
           modal('初始提示原文', h('textarea', { class: 'code raw-prompt-text', readOnly: true, spellcheck: false, rows: 24, 'aria-label': '初始提示原文' }, initialPromptText(context)))
@@ -142,8 +142,6 @@ export async function render(root, [id]) {
   let rollouts = await get('/api/rollouts')
   let selected = id ?? rollouts[0]?.id
   let stopped = false, busy = false, snapshot = '', listSnapshot = '', filter = ''
-  let markdown = markdownEnabled(), lastDetail
-  const presentation = markdownSwitch(value => { markdown = value; snapshot = ''; void drawDetail(lastDetail) })
   const items = h('div')
   const list = h('div', { class: 'pane-list computer-job-list rollout-list' },
     h('div', { class: 'section-heading' }, h('h2', '执行列表')),
@@ -169,17 +167,16 @@ export async function render(root, [id]) {
     }) : empty(filter ? '没有匹配的执行记录' : '还没有执行记录。新的聊天请求会自动记录。'))
   }
 
-  async function drawDetail(cached) {
+  async function drawDetail() {
     if (!selected) return mount(detail, card(null, empty('新的聊天请求会在这里显示模型响应、工具调用与最终回复。此前的对话摘要仍可在“对话”中查看。')))
     let r
-    try { r = cached ?? await get(`/api/rollouts/${enc(selected)}/history`) }
+    try { r = await get(`/api/rollouts/${enc(selected)}/history`) }
     catch (error) {
       if (error.status !== 404) throw error
       if (!stopped) mount(detail, card(null, empty('执行记录不存在或已清理')))
       return
     }
     if (stopped) return
-    lastDetail = r
     const key = JSON.stringify(r)
     if (snapshot === key) return
     snapshot = key
@@ -204,11 +201,11 @@ export async function render(root, [id]) {
         ['running', 'queued'].includes(r.status) ? h('div', { class: 'computer-progress small', role: 'status' }, spinner(),
           r.status === 'queued' ? '等待处理' : progress?.kind === 'tool' ? `${progress.tool} ${progress.phase === 'running' ? '执行中' : '已返回'}` : progress?.text || '正在处理') : null),
       card(h('span', { class: 'card-title' }, icon('chat'), '最终回复'),
-        r.reply ? textBlock(r.reply, { key: 'reply', open: opened.get('reply'), limit: 560, className: 'rollout-reply', markdown }) : empty(['queued', 'running'].includes(r.status) ? '执行结束后会显示最终回复。' : '本次执行没有生成最终回复。')),
-      requestDetails(r, opened, markdown),
+        r.reply ? textBlock(r.reply, { key: 'reply', open: opened.get('reply'), limit: 560, className: 'rollout-reply', markdown: true }) : empty(['queued', 'running'].includes(r.status) ? '执行结束后会显示最终回复。' : '本次执行没有生成最终回复。')),
+      requestDetails(r, opened),
       card(h('span', { class: 'card-title' }, icon('logs'), '执行记录', badge(`${execution.length} 条`)),
         r.dropped ? h('p', { class: 'small warn' }, `较早的 ${r.dropped} 条记录已超过保留上限，以下为最近记录。`) : null,
-        execution.length ? h('div', { class: 'computer-timeline' }, execution.map(event => timelineEvent(event, opened, r, markdown))) : empty('尚无详细执行记录。')),
+        execution.length ? h('div', { class: 'computer-timeline' }, execution.map(event => timelineEvent(event, opened, r))) : empty('尚无详细执行记录。')),
     )
   }
 
@@ -226,7 +223,7 @@ export async function render(root, [id]) {
     finally { busy = false; refreshButton.disabled = false }
   }
 
-  mount(root, h('div', { class: 'page-head' }, menuButton(), h('h1', '执行记录'), h('span', { class: 'spacer' }), presentation, connection, refreshButton),
+  mount(root, h('div', { class: 'page-head' }, menuButton(), h('h1', '执行记录'), h('span', { class: 'spacer' }), connection, refreshButton),
     h('p', { class: 'small warn', role: 'note' }, '执行记录及工具返回的图片保留 30 天，到期自动删除。'),
     h('div', { class: 'split computer-split' }, list, detail))
   drawList()

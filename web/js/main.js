@@ -73,7 +73,7 @@ function login(message) {
   }
   document.title = '登录 · Yunzai LLM'
   mount(app, h('div', { class: 'login' },
-    h('div', { class: 'login-brand' }, h('img', { src: 'favicon.svg', alt: '', width: 40, height: 40 }), h('span', 'Yunzai LLM')),
+    h('div', { class: 'login-brand' }, h('img', { src: 'favicon.png', alt: '', width: 40, height: 40 }), h('span', 'Yunzai LLM')),
     h('form', { class: 'card login-card', onsubmit: submit },
       h('div', { class: 'eyebrow' }, '管理工作区'),
       h('h1', '欢迎回来'),
@@ -114,7 +114,7 @@ function shell() {
   }
   side = h('aside', { class: 'side', id: 'sidebar', 'aria-label': '工作区导航' },
     h('a', { class: 'brand', href: '#/overview', 'aria-label': 'Yunzai LLM 概览' },
-      h('img', { src: 'favicon.svg', alt: '' }), h('div', h('strong', 'Yunzai LLM'), h('span', '机器人管理工作区'))),
+      h('img', { src: 'favicon.png', alt: '' }), h('div', h('strong', 'Yunzai LLM'), h('span', '机器人管理工作区'))),
     h('button', { class: 'btn side-close', 'aria-label': '关闭导航', onclick: () => setMenu(false, true) }, icon('close', 16)),
     h('div', { class: 'nav-search' }, icon('search', 16), search),
     nav, noResults,
