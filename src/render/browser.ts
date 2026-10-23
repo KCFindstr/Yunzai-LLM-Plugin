@@ -1,6 +1,7 @@
 import { log } from '../core/log.ts'
 import { getYunzaiRenderer } from '../core/yunzai.ts'
 import { assertPublicUrl } from '../tools/ssrf.ts'
+import { imageSize } from 'image-size'
 
 let ownBrowser: Promise<any> | undefined
 
@@ -29,6 +30,30 @@ export async function closeOwnBrowser() {
   const b = await ownBrowser?.catch(() => undefined)
   ownBrowser = undefined
   await b?.close?.().catch(() => {})
+}
+
+/** Validate both raster headers and a real browser decode; keep the original bytes for delivery. */
+export async function decodeRasterImage(buffer: Buffer, mime: string, signal?: AbortSignal): Promise<{ width: number; height: number }> {
+  const size = imageSize(buffer)
+  if (!size.width || !size.height || size.width > 16384 || size.height > 16384 || size.width * size.height > 40_000_000) throw new Error('图片尺寸超出上限')
+  signal?.throwIfAborted()
+  const browser = await getBrowser()
+  const page = await browser.newPage()
+  const abort = () => { void page.close().catch(() => {}) }
+  signal?.addEventListener('abort', abort, { once: true })
+  try {
+    signal?.throwIfAborted()
+    await page.setRequestInterception(true)
+    page.on('request', (request: any) => request.url().startsWith('data:') || request.url() === 'about:blank' ? request.continue().catch(() => {}) : request.abort().catch(() => {}))
+    const decoded = await page.evaluate(async (src: string) => {
+      const image = new Image()
+      image.src = src
+      await image.decode()
+      return { width: image.naturalWidth, height: image.naturalHeight }
+    }, `data:${mime};base64,${buffer.toString('base64')}`)
+    if (!decoded.width || !decoded.height) throw new Error('图片无法解码')
+    return decoded
+  } finally { signal?.removeEventListener('abort', abort); await page.close().catch(() => {}) }
 }
 
 export interface RenderOptions {

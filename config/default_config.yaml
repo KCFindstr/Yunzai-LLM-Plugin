@@ -182,6 +182,8 @@ chat:
   groupContextMaxChars: 80
   # 单次回复最多调用几轮工具
   maxToolRounds: 4
+  # 所有工具合计最多调用次数（同一轮的并行调用分别计数；0 禁用工具调用）
+  maxToolCalls: 20
   # 单次最大输出 token（含思考）
   maxOutputTokens: 2048
   # 温度，null = 不发送该参数（推荐，部分新模型不支持自定义温度）

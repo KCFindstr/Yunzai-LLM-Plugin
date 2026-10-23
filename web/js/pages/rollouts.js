@@ -2,6 +2,7 @@ import { enc, get } from '../api.js'
 import { menuButton } from '../main.js'
 import { badge, card, empty, fmt, h, icon, mount, spinner, textBlock } from '../ui.js'
 import { parseRolloutJson } from '../rollout-data.js'
+import { contextInspector } from '../context-inspector.js'
 
 const STATUS = {
   queued: ['排队中', 'accent'], running: ['执行中', 'accent'], completed: ['已完成', 'ok'],
@@ -72,11 +73,21 @@ function timelineEntries(r) {
   return events
 }
 
+function expandIndicator() {
+  return h('span', { class: 'step-expand-badge', 'aria-hidden': 'true' },
+    h('span', { class: 'when-closed' }, '展开详情'),
+    h('span', { class: 'when-open' }, '收起'),
+    icon('chevron', 12))
+}
+
 function timelineEvent(event, opened, r) {
   const [label, ico] = EVENT[event.kind] ?? ['记录', 'logs']
   const key = `event:${event.seq}`
   const argsKey = `args:${event.seq}`
-  const title = h('div', { class: 'computer-event-head' }, h('strong', event.tool || label),
+  const isExpandable = event.kind === 'tool'
+  const title = h('div', { class: 'computer-event-head' },
+    h('strong', event.tool || label),
+    isExpandable ? expandIndicator() : null,
     event.images?.length ? badge(`${event.images.length} 张图片`) : null,
     event.step != null ? badge(`第 ${event.step} 轮`) : null,
     event.thinking ? badge(`思考 ${event.thinking}`) : null,
@@ -112,7 +123,6 @@ function requestDetails(r, opened) {
   const context = r.context
   const disclosure = (key, label, ico, count, content) => h('details', { class: 'request-disclosure', 'data-disclosure': key, open: opened.get(key) },
     h('summary', icon(ico, 17), h('strong', label), badge(count), icon('chevron', 15)), h('div', { class: 'request-content' }, content))
-  const roleLabel = { user: '用户', assistant: '机器人', tool: '工具' }
   return h('div', { class: 'request-inspector' },
     disclosure('available-tools', '可用工具', 'tools', context ? `${context.tools.length}${context.omittedTools ? '+' : ''}` : '—',
       context ? [context.nativeSearch ? badge('原生搜索', 'accent') : null, context.tools.length ? h('div', { class: 'tool-catalog' }, context.tools.map((tool, index) =>
@@ -120,11 +130,7 @@ function requestDetails(r, opened) {
           h('summary', tool.name), h('p', { class: 'small' }, tool.description), h('pre', { class: 'small mono' }, (() => { try { return JSON.stringify(JSON.parse(tool.parameters), null, 2) } catch { return tool.parameters } })())))) : empty('本轮未提供函数工具。')]
         : empty('此记录未保存工具列表。')),
     disclosure('chat-context', '聊天上下文', 'memory', context ? `${context.messages.length}${context.omittedMessages ? '+' : ''}` : '—',
-      context ? [context.truncated ? h('p', { class: 'small warn' }, '部分内容超出保存上限，已截取。') : null,
-        h('details', { class: 'quiet-details', 'data-disclosure': 'system-prompt', open: opened.get('system-prompt') }, h('summary', '系统提示'), h('pre', { class: 'small' }, context.system)),
-        context.messages.map((message, index) => h('div', { class: `context-message ${message.role}` },
-          h('div', { class: 'row small muted' }, badge(roleLabel[message.role] ?? message.role), message.imageCount ? badge(`${message.imageCount} 张图片`) : null),
-          textBlock(message.text, { key: `context:${index}`, open: opened.get(`context:${index}`), limit: 300 })))]
+      context ? contextInspector(context, opened)
         : empty('此记录未保存聊天上下文。')))
 }
 

@@ -80,6 +80,7 @@ it('bounds and filters request snapshots without persisting image bytes or provi
   const id = startRollout({ conv: 'context', source: 'chat', input: 'inspect', inputImageCount: 1 })
   recordRolloutContext(id, {
     system: 'secret-password=do-not-display ' + '系统提示'.repeat(10000),
+    current: { heading: '当前发言', text: 'current image request', recent: ['password=do-not-display'], roster: ['alice@example.com'], memory: 'apiKey=do-not-display', quote: '引用内容' },
     tools: Array.from({ length: 100 }, (_, i) => ({ name: `tool_${i}`, description: '工具描述'.repeat(1000), parameters: { description: '参数'.repeat(3000), apiKey: 'do-not-display' } })),
     messages: [
       ...Array.from({ length: 50 }, () => ({ role: 'assistant' as const, content: '历史消息'.repeat(3000), native: { provider: 'openai' as const, model: 'fake', data: { reasoning: 'hidden-native-reasoning' } } })),
@@ -93,6 +94,8 @@ it('bounds and filters request snapshots without persisting image bytes or provi
   assert.ok(context.omittedMessages > 0)
   assert.equal(context.messages.at(-1)!.imageCount, 1)
   assert.equal(context.messages.at(-1)!.text, 'current image request')
+  assert.equal(context.current!.text, 'current image request')
+  assert.ok(!context.current!.roster[0].includes('alice@example.com'))
   for (const hidden of ['image-byte-payload', 'hidden-native-reasoning', 'do-not-display']) assert.ok(!raw.includes(hidden), hidden)
   updateRollout(id, { status: 'completed' })
 })

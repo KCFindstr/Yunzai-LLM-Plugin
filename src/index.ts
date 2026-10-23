@@ -10,6 +10,7 @@ import { ownClasses } from './core/yunzai.ts'
 import { loadCustomTools } from './tools/custom.ts'
 import { loadSkills, registerSkillTool } from './tools/skills.ts'
 import { registerWebTools } from './tools/web.ts'
+import { registerSendImageTool } from './tools/sendImage.ts'
 import { registerMemoryTool } from './memory/tool.ts'
 import { registerStickerTools } from './stickers/tool.ts'
 import { registerRenderTool } from './tools/render.ts'
@@ -33,6 +34,7 @@ function startup() {
 
   config.watch()
   registerWebTools()
+  registerSendImageTool()
   registerCommandTools()
   registerSkillTool()
   registerMemoryTool()

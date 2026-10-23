@@ -42,9 +42,7 @@ export function registerMemoryTool() {
     name: 'recall', source: 'builtin',
     // a getter: the registry reads it every turn, so it follows memory.recallLimit
     get description() {
-      return '检索当前会话更早的历史聊天记录（每段摘要及当日概要，语义+关键词综合匹配）。' +
-        '积极查证历史细节：凡是对方提起过去（如“上次说的”、“之前那个”、“你还记得吗”、“我们说到哪了”）、续接旧话题、探讨早先决定/约定/称呼，或被问到某天聊了什么时，先检索确认真实背景再答，不要凭印象编；可按日期筛选。' +
-        `仅当前会话，最多返回${config.get().memory.recallLimit}条。`
+      return `检索当前会话更早的历史聊天记录（包含各阶段摘要与每日概要，语义与关键词综合匹配，可按日期筛选）。仅当前会话，最多返回${config.get().memory.recallLimit}条。`
     },
     parameters: {
       type: 'object',
@@ -66,9 +64,8 @@ export function registerMemoryTool() {
     name: 'memory',
     source: 'builtin',
     description:
-      '管理长期记忆（跨会话保留）。scope=user 记关于当前对方的事；scope=group 记本群的约定、梗、常识。' +
-      '积极保存记忆：除非对话极其简单，否则在每次会话结束前务必主动调用 memory add 记录有效信息（称呼、身份、喜好/雷区、游戏角色、约定、经历、纠正等），不必等对方要求，宁可多记（满了会自动整理）。' +
-      '每条一句话写明主语；相近条目用 update 改写，过时或错误用 delete；read 查看全部条目。不记无意义的一次性闲聊、推测和密码/证件号/手机号等敏感信息。',
+      '管理长期记忆（跨会话保留）。scope=user 记录关于当前用户的事实与偏好；scope=group 记录关于本群的约定、梗或公共常识。' +
+      '操作包括 read 查看全部条目、add 添加一条（写明主语）、update 改写已有条目、delete 删除指定编号。敏感信息（密码、证件号等）不得记录。',
     parameters: {
       type: 'object',
       properties: {
@@ -81,6 +78,7 @@ export function registerMemoryTool() {
     },
     available: ctx => config.get().memory.enable,
     limit: () => `最多修改 ${config.get().memory.maxWritesPerTurn} 次`,
+    remaining: ctx => `剩余修改 ${Math.max(0, config.get().memory.maxWritesPerTurn - (ctx.turn.memoryWrites ?? 0))} 次；读取无单独次数上限`,
     async run(args, ctx) {
       const scope: MemScope = args.scope === 'group' ? 'group' : 'user'
       const key = memoryKey(scope, ctx.e)

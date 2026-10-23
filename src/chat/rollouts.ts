@@ -10,11 +10,13 @@ import type { ThinkingLevel } from '../core/configTypes.ts'
 import type { JudgeResponse, ThinkingDecision } from './thinking.ts'
 import type { ImagePart, Msg, ToolSpec } from '../llm/types.ts'
 import { parseRolloutJson } from '../../web/js/rollout-data.js'
+import type { TurnPromptContext } from './prompt.ts'
 
 export interface RolloutContext {
   system: string
   tools: { name: string; description: string; parameters: string }[]
-  messages: { role: Msg['role']; text: string; imageCount?: number }[]
+  messages: { role: Msg['role']; text: string; imageCount?: number; source?: 'memory' | 'summary' | 'history' | 'current' }[]
+  current?: TurnPromptContext & { text: string }
   nativeSearch: boolean
   omittedMessages: number
   omittedTools: number
@@ -168,13 +170,22 @@ function cleanContext(context: RolloutContext): RolloutContext {
   return {
     system: agyHistoryText(context.system, undefined, 16000),
     tools: context.tools.map(tool => ({ name: agyHistoryText(tool.name, undefined, 100), description: agyHistoryText(tool.description, undefined, 1200), parameters: agyHistoryText(tool.parameters, undefined, 3000) })),
-    messages: context.messages.map(message => ({ role: message.role, text: agyHistoryText(message.text, undefined, 6000), imageCount: message.imageCount })),
+    messages: context.messages.map(message => ({ role: message.role, text: agyHistoryText(message.text, undefined, 6000), imageCount: message.imageCount, source: message.source })),
+    current: context.current && cleanCurrent(context.current),
     nativeSearch: context.nativeSearch, omittedMessages: context.omittedMessages, omittedTools: context.omittedTools, truncated: context.truncated,
+  }
+}
+function cleanCurrent(current: TurnPromptContext & { text: string }) {
+  return {
+    heading: agyHistoryText(current.heading, undefined, 500), text: agyHistoryText(current.text, undefined, 6000),
+    roster: current.roster.slice(0, 40).map(line => agyHistoryText(line, undefined, 200)),
+    recent: current.recent.slice(0, 30).map(line => agyHistoryText(line, undefined, 500)),
+    memory: agyHistoryText(current.memory, undefined, 6000), quote: agyHistoryText(current.quote, undefined, 1000),
   }
 }
 
 /** The logical initial request, without image bytes, provider-native state, or transport credentials. */
-export function recordRolloutContext(id: string, request: { system: string; tools: ToolSpec[]; messages: Msg[]; nativeSearch: boolean }) {
+export function recordRolloutContext(id: string, request: { system: string; tools: ToolSpec[]; messages: Msg[]; nativeSearch: boolean; messageSources?: RolloutContext['messages'][number]['source'][]; current?: RolloutContext['current'] }) {
   const rollout = store.data.rollouts.find(entry => entry.id === id)
   if (!rollout) return
   let truncated = false
@@ -183,13 +194,15 @@ export function recordRolloutContext(id: string, request: { system: string; tool
     if (safe.length > max) truncated = true
     return safe.slice(0, max)
   }
-  const messages = request.messages.slice(-40).map(message => {
-    if (message.role === 'user') return { role: message.role, text: text(message.content.filter(part => part.type === 'text').map(part => part.text).join('\n'), 6000), imageCount: message.content.filter(part => part.type === 'image').length }
-    if (message.role === 'tool') return { role: message.role, text: text(message.results.map(result => `${result.name}: ${result.content}`).join('\n'), 6000) }
-    return { role: message.role, text: text([message.content, ...(message.toolCalls ?? []).map(call => `${call.name}: ${agyHistoryText(call.args)}`)].filter(Boolean).join('\n'), 6000) }
+  const messages = request.messages.slice(-40).map((message, index) => {
+    const source = request.messageSources?.[Math.max(0, request.messages.length - 40) + index]
+    if (message.role === 'user') return { role: message.role, source, text: text(message.content.filter(part => part.type === 'text').map(part => part.text).join('\n'), 6000), imageCount: message.content.filter(part => part.type === 'image').length }
+    if (message.role === 'tool') return { role: message.role, source, text: text(message.results.map(result => `${result.name}: ${result.content}`).join('\n'), 6000) }
+    return { role: message.role, source, text: text([message.content, ...(message.toolCalls ?? []).map(call => `${call.name}: ${agyHistoryText(call.args)}`)].filter(Boolean).join('\n'), 6000) }
   })
   const context: RolloutContext = {
     system: text(request.system, 16000),
+    current: request.current && cleanCurrent(request.current),
     tools: request.tools.slice(0, 100).map(tool => ({ name: text(tool.name, 100), description: text(tool.description, 1200), parameters: text(tool.parameters, 3000) })),
     messages, nativeSearch: request.nativeSearch, omittedMessages: Math.max(0, request.messages.length - 40), omittedTools: Math.max(0, request.tools.length - 100), truncated: false,
   }

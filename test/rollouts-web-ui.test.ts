@@ -42,9 +42,11 @@ it('serves authenticated rollout history and renders live timelines, links and s
     system: '你是一个回答简洁的助手。password=secret-password',
     tools: [{ name: 'search_web', description: '搜索公开网页', parameters: { type: 'object', properties: { query: { type: 'string' } } } }],
     messages: [
-      { role: 'user', content: [{ type: 'text', text: '上一轮消息' }] },
+      { role: 'user', content: [{ type: 'text', text: '【长期记忆·本群】\n周末一起看猫' }] },
+      { role: 'user', content: [{ type: 'text', text: '【之前对话的摘要】\n聊过图片出处' }] },
+      { role: 'user', content: [{ type: 'text', text: '【2026-10-22｜群「测试」｜发言人 A】\n上一轮消息' }] },
       { role: 'assistant', content: '上一轮回复' },
-      { role: 'user', content: [{ type: 'text', text: '查找这张图片的原始出处' }, { type: 'image', data: 'private-image-bytes', mime: 'image/png' }] },
+      { role: 'user', content: [{ type: 'text', text: '【2026-10-23｜群「测试」｜发言人 A】\n【最近群友·仅身份参考】\nA\nB\n【最近群聊】\n[12:00] A: 这张图好眼熟\n[12:01] B: 像是一张插画\n【相关旧聊天·参考】\n之前提到过作者\n【引用 B 消息】像是一张插画\n【消息】\n查找这张图片的原始出处' }, { type: 'image', data: 'private-image-bytes', mime: 'image/png' }] },
     ], nativeSearch: true,
   })
   log.info('rollout-theme-info')
@@ -126,6 +128,19 @@ it('serves authenticated rollout history and renders live timelines, links and s
     await page.click('.tool-catalog details > summary')
     assert.ok(await page.$eval('.tool-catalog', (el: Element) => el.textContent!.includes('搜索公开网页') && el.textContent!.includes('query')))
     await page.click('[data-disclosure="chat-context"] > summary')
+    assert.equal(await page.$eval('.context-current > pre', (el: Element) => el.textContent), '查找这张图片的原始出处')
+    for (const key of ['context-recent', 'context-history', 'context-memory', 'context-summary', 'context-roster', 'context-raw']) {
+      assert.equal(await page.$eval(`[data-disclosure="${key}"]`, (el: HTMLDetailsElement) => el.open), false)
+    }
+    await page.click('[data-disclosure="context-recent"] > summary')
+    assert.equal(await page.$$eval('[data-disclosure="context-recent"] li', (els: Element[]) => els.length), 2)
+    await page.click('[data-disclosure="context-history"] > summary')
+    assert.equal(await page.$$eval('[data-disclosure="context-history"] .context-message', (els: Element[]) => els.length), 2)
+    await screenshot(page, 'context-desktop.png')
+    await page.setViewport({ width: 390, height: 844 })
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false)
+    await screenshot(page, 'context-mobile.png')
+    await page.setViewport({ width: 1440, height: 1050 })
     await page.click('[data-disclosure="system-prompt"] > summary')
     assert.ok(await page.$eval('[data-disclosure="chat-context"]', (el: Element) => el.textContent!.includes('上一轮回复')))
     assert.equal(await page.$eval('.rollout-detail', (el: Element) => el.textContent!.includes('private-image-bytes') || el.textContent!.includes('secret-password')), false)
@@ -134,6 +149,8 @@ it('serves authenticated rollout history and renders live timelines, links and s
     await page.waitForFunction(() => document.querySelector('.rollout-detail')?.textContent?.includes('刷新记录'))
     assert.ok(await page.$('.computer-arguments[open]'))
     assert.ok(await page.$('[data-disclosure="chat-context"][open]'))
+    assert.ok(await page.$('[data-disclosure="context-history"][open]'))
+    assert.ok(await page.$('[data-disclosure="context-recent"][open]'))
     assert.ok(await page.$('.rollout-event[data-kind=response] .text-disclosure[open]'))
     await page.click('.rollout-event[data-kind=response] .text-disclosure > summary')
     await page.click('[data-disclosure="chat-context"] > summary')

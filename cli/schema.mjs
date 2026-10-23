@@ -149,6 +149,7 @@ const chat = obj(
     groupContext: int('附带最近群聊条数', { min: 0, max: 30 }),
     groupContextMaxChars: int('群聊每条最多字数', { min: 10 }),
     maxToolRounds: int('工具调用轮数上限', { min: 0, max: 100 }),
+    maxToolCalls: int('所有工具合计调用次数上限（并行调用分别计数）', { min: 0, max: 1000 }),
     maxOutputTokens: int('最大输出 token', { min: 64 }),
     temperature: num('温度', { min: 0, max: 2, nullable: true }),
     thinking: oneOf(THINKING_SETTING, '默认思考强度'),

@@ -5,6 +5,7 @@ import type { ToolCall, ToolResult, ToolSpec } from '../llm/types.ts'
 import type { ImagePart } from '../llm/types.ts'
 
 export interface TurnState {
+  toolCalls?: number
   /** Command dispatched to another plugin this turn (ends the loop). */
   dispatched?: string
   commands: number
@@ -12,7 +13,8 @@ export interface TurnState {
   fetches: number
   memoryWrites?: number
   execRuns?: number
-  /** images produced by tools (render_html, run_code), sent after the text reply */
+  imageRequests?: number
+  /** Tool-produced or URL images, sent after the text reply. */
   images: Buffer[]
   memoryChanged?: boolean
   /** run_code / render_html workspace shared within this reply (deleted when the reply ends) */
@@ -52,10 +54,12 @@ export interface ToolDef {
   available?(ctx: ToolCtx): boolean
   /** per-reply cap, appended to the description sent to the model (e.g. "最多调用 3 次") */
   limit?(ctx: ToolCtx): string | undefined
+  /** Current enforced allowance, read after every call in a parallel batch has settled. */
+  remaining?(ctx: ToolCtx): string
   run(args: Record<string, any>, ctx: ToolCtx): Promise<ToolOutput | string>
 }
 
-/** images per reply from render_html and run_code combined */
+/** Shared reply-image allowance for rendering, code output and public URL images. */
 export const MAX_IMAGES_PER_TURN = 2
 const MAX_RESULT_CHARS = 8000
 const TOOL_TIMEOUT_MS = 60_000
@@ -85,7 +89,7 @@ class Registry {
 
   /** Tools offered this turn, in deterministic order (stable tool list = stable prompt cache). */
   forTurn(ctx: ToolCtx, hide: Set<string> = new Set()): ToolDef[] {
-    if (!ctx.eff.tools.enable) return []
+    if (!ctx.eff.tools.enable || ctx.eff.chat?.maxToolCalls === 0) return []
     // Worker data may only be summarized; it must never authorize side effects or bypass privacy filtering.
     if (ctx.turn.asyncResult) return []
     const disabled = new Set(ctx.eff.tools.disabled ?? [])
@@ -99,9 +103,10 @@ class Registry {
     })
   }
 
-  async execute(calls: ToolCall[], ctx: ToolCtx, offered: ToolDef[], onResult?: (result: ToolResult, ms: number) => void): Promise<{ results: ToolResult[]; terminal: boolean }> {
+  async execute(calls: ToolCall[], ctx: ToolCtx, offered: ToolDef[], onResult?: (result: ToolResult, ms: number) => void): Promise<{ results: (ToolResult & { remaining: string; globalRemaining: number })[]; terminal: boolean }> {
     const allowed = new Map(offered.map(d => [d.name, d]))
     let terminal = false
+    const maxCalls = ctx.eff.chat?.maxToolCalls ?? 20
     const results = await Promise.all(
       calls.map(async (call): Promise<ToolResult> => {
         const started = Date.now()
@@ -110,6 +115,9 @@ class Registry {
           try { onResult?.(result, Date.now() - started) } catch { /* best effort */ }
           return result
         }
+        // Reserve synchronously before awaiting: parallel calls cannot overrun the global allowance.
+        if ((ctx.turn.toolCalls ?? 0) >= maxCalls) return done({ id: call.id, name: call.name, content: '所有工具的全局调用次数已用完，请直接给出最终回复', isError: true })
+        ctx.turn.toolCalls = (ctx.turn.toolCalls ?? 0) + 1
         const def = allowed.get(call.name)
         if (!def) {
           log.warn(`模型调用了未提供的工具 ${call.name}(${brief(call.args ?? {})})`)
@@ -134,7 +142,10 @@ class Registry {
         }
       }),
     )
-    return { results, terminal }
+    return { results: results.map(result => {
+      const def = allowed.get(result.name)
+      return { ...result, remaining: !def ? '不可用' : def.remaining?.(ctx) ?? (def.limit ? '剩余次数未提供' : '无单独次数上限'), globalRemaining: Math.max(0, maxCalls - (ctx.turn.toolCalls ?? 0)) }
+    }), terminal }
   }
 }
 

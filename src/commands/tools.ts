@@ -30,6 +30,7 @@ export function registerCommandTools() {
     },
     available: ctx => ctx.eff.tools.botCommand.enable,
     limit: () => `最多调用 ${MAX_COMMANDS_PER_TURN} 次`,
+    remaining: ctx => `剩余 ${Math.max(0, MAX_COMMANDS_PER_TURN - ctx.turn.commands)} 次`,
     async run(args, ctx) {
       await ensureCatalog()
       const cmd = String(args.command ?? '')

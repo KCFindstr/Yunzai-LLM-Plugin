@@ -100,6 +100,7 @@ export function registerComputerTool() {
   })
   registry.register({
     name: 'computer_task', source: 'builtin',
+    remaining: ctx => `剩余新建 ${ctx.turn.computerJob ? 0 : 1} 次；其他操作无单独次数上限`,
     description: '使用你的持久桌面截图、浏览或运行长期操作，先读取 computer-use 技能。本轮附带或引用的图片自动作为文件传给桌面，电脑模型会收到实际路径，无需用户提供路径。start 在当前回复后执行，结果会回到你这里再决定如何回复；先以第一人称简短回应，不提内部队列或ID。status/cancel/respond 查询、取消或回复暂停的操作；省略id使用当前用户最近一次操作，不循环轮询。',
     parameters: { type: 'object', properties: { action: { type: 'string', enum: ['start', 'status', 'cancel', 'respond'] }, task: { type: 'string' }, id: { type: 'string' }, response: { type: 'string' }, image_indices: { type: 'array', items: { type: 'integer' }, description: '本轮图片编号（从1开始，与看到的图片顺序一致）；省略则携带全部本轮图片，空数组不携带。start/respond 可用。' } }, required: ['action'] },
     available: ctx => process.platform === 'win32' && ctx.eff.tools.computer.enable && (ctx.eff.tools.computer.access === 'all' || ctx.isAdmin),

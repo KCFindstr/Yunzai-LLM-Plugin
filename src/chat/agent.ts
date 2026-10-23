@@ -180,7 +180,7 @@ async function runTurnInner(req: TurnRequest, ref: { turn?: TurnState; rolloutId
   })).map(text => text.slice(0, dated ? 500 : 350))
   const context = [memTurn, recalled.length ? `【相关旧聊天·参考】\n${recalled.join('\n')}` : ''].filter(Boolean).join('\n')
   const header = buildHeader(e, eff, input, isAdmin, { conv: convKey, memory: context })
-  // from now on this message lives in the session history; keep it out of future ambient-chat windows
+  // Mark for background archiving; the ordered group window still includes overlapping exchanges.
   if (!req.computerResult && !req.asyncResult) markHandled(e, convKey)
 
   const userMsg: UserMsg = { role: 'user', content: [{ type: 'text', text: header.sent + text }, ...input.images] }
@@ -190,9 +190,11 @@ async function runTurnInner(req: TurnRequest, ref: { turn?: TurnState; rolloutId
   }
 
   const prefix: Msg[] = []
-  if (memPrefix) prefix.push({ role: 'user', content: [{ type: 'text', text: memPrefix }] })
-  if (session.summary) prefix.push({ role: 'user', content: [{ type: 'text', text: `【之前对话的摘要】\n${session.summary}` }] })
+  const messageSources: ('memory' | 'summary' | 'history' | 'current')[] = []
+  if (memPrefix) { prefix.push({ role: 'user', content: [{ type: 'text', text: memPrefix }] }); messageSources.push('memory') }
+  if (session.summary) { prefix.push({ role: 'user', content: [{ type: 'text', text: `【之前对话的摘要】\n${session.summary}` }] }); messageSources.push('summary') }
   const msgs: Msg[] = [...prefix, ...session.messages, userMsg]
+  messageSources.push(...session.messages.map(() => 'history' as const), 'current')
   // memory is part of the prefix, so a server-side chain built on older memory must not be reused
   // Gemini system instructions/tools are interaction-scoped: resend them without discarding history.
   // Prefix memory is part of stored history and must still match. Bind ids to their provider/endpoint too.
@@ -217,7 +219,7 @@ async function runTurnInner(req: TurnRequest, ref: { turn?: TurnState; rolloutId
     for (;;) {
       try {
         if (msgs.length === prefix.length + session.messages.length + 1)
-          recordRolloutContext(ref.rolloutId, { system, tools: specs, messages: msgs, nativeSearch })
+          recordRolloutContext(ref.rolloutId, { system, tools: specs, messages: msgs, nativeSearch, messageSources, current: { ...header.context, text } })
         return await chat({ model, provider, system, messages: msgs, tools: specs, nativeSearch, thinking, maxTokens, temperature, cacheKey, state })
       } catch (err) {
         // server-side chain expired/unknown: resend the full transcript once
@@ -290,8 +292,8 @@ async function runTurnInner(req: TurnRequest, ref: { turn?: TurnState; rolloutId
           callId: result.id, phase: 'completed', ms, isError: result.isError, images,
           omittedImages: (result.images?.length ?? 0) - images.length })
       })
-      if (round === maxRounds - 2)
-        for (const r of results) r.content += '\n（工具调用次数已用完，请直接给出最终回复）'
+      const roundsLeft = Math.max(0, maxRounds - round - 2)
+      for (const result of results) result.content += `\n【工具余量】${result.name}：${result.remaining}；全局剩余 ${result.globalRemaining} 次；剩余工具轮次 ${roundsLeft}${roundsLeft && result.globalRemaining ? '。' : '，请直接给出最终回复。'}`
       msgs.push({ role: 'tool', results })
       if (terminal) break
       if (checkQuota(model, quotaCtx)) break
@@ -319,7 +321,7 @@ async function runTurnInner(req: TurnRequest, ref: { turn?: TurnState; rolloutId
 
   const notes = [
     turn.dispatched && `（已为对方执行指令 ${turn.dispatched}）`,
-    turn.images.length && `（已发送 ${turn.images.length} 张渲染图片）`,
+    turn.images.length && `（已发送 ${turn.images.length} 张图片）`,
   ].filter(Boolean)
   const persisted = [finalText, ...notes].filter(Boolean).join('\n') || '…'
   appendTurn(convKey, storedUser, { role: 'assistant', content: persisted })

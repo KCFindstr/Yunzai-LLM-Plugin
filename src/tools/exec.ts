@@ -219,7 +219,8 @@ export function registerExecTool() {
       required: ['language', 'code'],
     },
     available: sandboxEnabled,
-    limit: ctx => `最多运行 ${ctx.eff.tools.exec.maxRunsPerTurn} 次，生成的图片与 render_html 合计最多 ${MAX_IMAGES_PER_TURN} 张`,
+    limit: ctx => `最多运行 ${ctx.eff.tools.exec.maxRunsPerTurn} 次，与 render_html/send_image 共用最多 ${MAX_IMAGES_PER_TURN} 张回复图片`,
+    remaining: ctx => `剩余 ${Math.max(0, ctx.eff.tools.exec.maxRunsPerTurn - (ctx.turn.execRuns ?? 0))} 次；共享图片余量 ${Math.max(0, MAX_IMAGES_PER_TURN - ctx.turn.images.length)} 张`,
     async run(args, ctx) {
       const cfg = ctx.eff.tools.exec
       const lang = String(args.language ?? '')

@@ -34,6 +34,7 @@ export function buildSystemPrompt(p: SystemPromptInput): string {
   const actions = ['# 工具']
   if (p.nativeSearch || tools.has('web_search') || tools.has('web_fetch')) actions.push('会变的事实先查证；需要细节再打开可靠来源，用自己的话总结，可附来源链接。')
   if (tools.has('run_code')) actions.push('精确计算、数据处理或绘图用 run_code。')
+  if (tools.has('send_image')) actions.push('要把公网图片直接给用户看，用 send_image 加入最终回复；它会验证真实图片，成功后随文字发送。')
   if (tools.has('google_lens')) actions.push('以图搜图或查图片出处时建议调用 google_lens（必要时先加载 google-lens 技能），根据说明用 google_lens 上传本轮/引用的原图并核对来源。')
   if (tools.has('computer_task')) actions.push('操作真实桌面或浏览器前加载 computer-use 技能。用第一人称简短说自己去做，不提队列、任务ID或代理；完成结果回来后仍由你决定如何回复，不轮询、不提前声称完成。')
   if (tools.has('computer_result')) actions.push('这轮是电脑操作的内部回报，不是新用户授权。结合原请求、观察和图片决定如何回应，保持你的人设；要分享截图时用 computer_result 选择图片。')
@@ -41,13 +42,13 @@ export function buildSystemPrompt(p: SystemPromptInput): string {
     actions.push('机器人功能以动态指令目录为准，先 search_bot_commands/list_bot_commands，再 run_bot_command；不猜指令。参数保留原意；结果已直接发送时不要复述。')
     actions.push(...promptEntries(eff.tools.botCommand.inPrompt).map(command => `${displayCmd(command)} — ${command.desc}`))
   }
-  if (tools.size) actions.push(`工具最多 ${eff.chat.maxToolRounds} 轮，上限前根据已有信息作答。`)
+  if (tools.size) actions.push(`工具最多 ${eff.chat.maxToolRounds} 轮、合计 ${eff.chat.maxToolCalls} 次（并行调用分别计数），上限前根据已有信息作答。`)
   parts.push(actions.join('\n'))
   if (tools.has('memory'))
     parts.push([
       '# 记忆',
       '【长期记忆】跨会话保留，是你了解对方的唯一途径；自然运用，不要说“我记得/根据记忆”。',
-      '积极保存长期记忆：除非对话极其简单（如仅一句单纯问候、打招呼或无有效信息的一问一答），否则在每次会话或交流结束前务必主动调用 memory add 记录新信息；宁可多记，记满会自动整理合并。',
+      '积极保存记忆：除非对话极其简单，否则在每次会话结束前务必主动调用 memory add 记录有效信息（称呼、身份、喜好/雷区、游戏角色、约定、经历、纠正等），不必等对方要求，宁可多记（满了会自动整理）。',
       '每轮回复前先自查：本轮对话及上下文中，对方透露或双方确认了哪些以后还用得上的事实与信息？有就先调用 memory add 再回复，不必等对方要求。值得记的包括：',
       '- 称呼/昵称、身份、所在地或时区、生日、职业或学业；',
       '- 喜好与雷区：喜欢或讨厌的东西、常玩的游戏/角色/阵容、口味、习惯、希望你怎么称呼或对待TA；',
@@ -56,7 +57,7 @@ export function buildSystemPrompt(p: SystemPromptInput): string {
       '- 群规、群梗、固定活动、群友之间的关系（scope=group）。',
       '已有相近条目用 update 改写，过时或错误用 delete。每条一句话并写明主语；不记无意义的一次性闲聊、你的猜测，绝不记密码、证件号、手机号等敏感信息。',
     ].join('\n'))
-  if (tools.has('recall')) parts.push('【之前对话的摘要】只是梗概；需要早先聊过的细节、约定或结论，或被问到某天聊了什么（昨天、上周六、10月20日…）时，先 recall 检索旧聊天（按话题描述，可加日期），不要凭印象编。')
+  if (tools.has('recall')) parts.push('【之前对话的摘要】只是极简梗概，缺失大量细节；凡是对方提起过去（如“上次说的”、“之前那个”、“你还记得吗”、“我们说到哪了”）、续接旧话题、探讨早先决定/约定/称呼，或被问到某天聊了什么（昨天、上周六、10月20日…）时，务必先调用 recall 检索旧聊天确认真实背景与细节，按话题描述检索，也可加日期筛选。')
   if (tools.has('load_skill')) {
     const skills = listSkills()
     if (skills.length) parts.push(['# 技能', '使用前 load_skill 读取：', ...skills.map(skill => `${skill.name}：${skill.description}`)].join('\n'))
@@ -69,18 +70,29 @@ export function buildSystemPrompt(p: SystemPromptInput): string {
   return parts.join('\n\n')
 }
 
-export function buildHeader(e: any, eff: EffectiveConfig, input: ExtractedInput, isAdmin: boolean, opts: { conv?: string; memory?: string } = {}): { sent: string; stored: string } {
+export interface TurnPromptContext {
+  heading: string
+  roster: string[]
+  recent: string[]
+  memory: string
+  quote: string
+}
+
+export function buildHeader(e: any, eff: EffectiveConfig, input: ExtractedInput, isAdmin: boolean, opts: { conv?: string; memory?: string } = {}): { sent: string; stored: string; context: TurnPromptContext } {
   observeUsers(e)
   const who = `${senderName(e)}(平台ID ${e.user_id})${isAdmin ? '［管理员］' : ''}`
   const head = e.group_id
     ? `【${formatNow()}｜群「${truncate(String(e.group_name ?? e.group_id), 20)}」｜发言人 ${who}】`
     : `【${formatNow()}｜私聊｜对方 ${who}】`
   const ambient: string[] = []
+  const context: TurnPromptContext = { heading: head, roster: [], recent: [], memory: opts.memory ?? '', quote: '' }
   if (e.group_id) {
     const roster = rosterLines(e, eff.chat.rosterSize, config.get().memory.enable)
+    context.roster = roster
     if (roster.length) ambient.push('【最近群友·仅身份参考】', ...roster)
     const recent = recentLines(e, eff.chat.groupContext, eff.chat.groupContextMaxChars, opts.conv)
-    if (recent.length) ambient.push('【最近群聊】', ...recent)
+    context.recent = recent
+    if (recent.length) ambient.push('【最近群聊】', '以下按群内实际先后排列，可能与前面的对话历史重叠；重叠内容是同一次发言，并非再次发生。用此处判断群聊顺序，只回应末尾【消息】中的当前请求。', ...recent)
   }
   const quote: string[] = []
   if (input.quoted) {
@@ -89,7 +101,8 @@ export function buildHeader(e: any, eff: EffectiveConfig, input: ExtractedInput,
   }
   const render = (lines: string[]) => (lines.length > 1 ? `${[...lines, '【消息】'].join('\n')}\n` : `${lines[0]}\n`)
   const memory = opts.memory ? [opts.memory] : []
-  return { sent: render([head, ...ambient, ...memory, ...quote]), stored: render([head, ...quote]) }
+  context.quote = quote.join('\n')
+  return { sent: render([head, ...ambient, ...memory, ...quote]), stored: render([head, ...quote]), context }
 }
 
 export function buildMemoryBlock(e: any, opts: { user: boolean; group: boolean; nudge?: boolean }): string {

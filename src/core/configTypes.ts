@@ -108,6 +108,8 @@ export interface ChatSection {
   groupContext: number
   groupContextMaxChars: number
   maxToolRounds: number
+  /** Total individual tool-call attempts per reply, including calls in parallel batches. */
+  maxToolCalls: number
   maxOutputTokens: number
   temperature: number | null
   thinking: ThinkingSetting

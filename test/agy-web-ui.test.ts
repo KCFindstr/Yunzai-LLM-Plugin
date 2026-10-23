@@ -64,6 +64,7 @@ it('renders AGY navigation, results, safe tool history, live refresh and cancell
     const body = await page.evaluate(() => document.body.innerText)
     assert.match(body, /执行结果/); assert.match(body, /我找到了这张图的来源/); assert.match(body, /已发送/)
     assert.ok(!body.includes('private-owner'))
+    await page.click('.tool-disclosure > summary')
     await page.click('.computer-arguments summary')
     const expanded = await page.evaluate(() => document.body.innerText)
     assert.ok(expanded.includes('<script>window.__agy_xss=true</script>'))

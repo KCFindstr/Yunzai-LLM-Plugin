@@ -46,6 +46,11 @@ export function isPrivateIp(ip: string): boolean {
 
 /** Throws unless the URL is http(s) and every resolved address is public. */
 export async function assertPublicUrl(raw: string): Promise<URL> {
+  return (await resolvePublicUrl(raw)).url
+}
+
+/** Return validated addresses too, so callers can pin the connection and avoid a second DNS lookup. */
+export async function resolvePublicUrl(raw: string): Promise<{ url: URL; addresses: { address: string; family: number }[] }> {
   let url: URL
   try {
     url = new URL(raw)
@@ -56,7 +61,7 @@ export async function assertPublicUrl(raw: string): Promise<URL> {
   const host = url.hostname.replace(/^\[|\]$/g, '')
   if (!host || /^localhost$/i.test(host) || host.endsWith('.localhost') || host.endsWith('.local') || host.endsWith('.internal'))
     throw new Error('禁止访问内网地址')
-  const addrs = net.isIP(host) ? [{ address: host }] : await dns.lookup(host, { all: true, verbatim: true })
+  const addrs = net.isIP(host) ? [{ address: host, family: net.isIP(host) }] : await dns.lookup(host, { all: true, verbatim: true })
   if (!addrs.length || addrs.some(a => isPrivateIp(a.address))) throw new Error('禁止访问内网地址')
-  return url
+  return { url, addresses: addrs }
 }

@@ -1,4 +1,4 @@
-import { truncate } from '../core/util.ts'
+import { formatNow, truncate } from '../core/util.ts'
 import { observeUsers, knownName, rememberMessage } from './roster.ts'
 import { markChatterHandled, recordChatter } from './chatter.ts'
 
@@ -98,10 +98,7 @@ export function markHandled(e: any, conv: string) {
   if (l) l.conv = conv
 }
 
-/**
- * Lines already in `conv`'s own history (its handled messages and the bot's replies there) are skipped, so
- * they aren't sent twice; other members' exchanges with the bot still count as ambient context.
- */
+/** Keep overlapping exchanges: removing them loses how bot conversations interleave with group chatter. */
 export function recentLines(e: any, n: number, maxChars: number, conv?: string, withinMs = 30 * 60_000): string[] {
   if (!e?.group_id || n <= 0) return []
   const list = logs.get(keyOf(e)) ?? []
@@ -113,10 +110,9 @@ export function recentLines(e: any, n: number, maxChars: number, conv?: string, 
     const l = list[i]
     if (l.t < cutoff) break
     if (mid && l.mid === mid) continue
-    if (conv && l.conv === conv) continue
-    out.push(`${l.name}: ${truncate(l.text, maxChars)}`)
+    out.push(`[${formatNow(new Date(l.t))}] ${l.name}: ${truncate(l.text, maxChars)}`)
   }
-  return out.reverse()
+  return out.reverse().map((line, index) => `${index + 1}. ${line}`)
 }
 
 /** Number of other people's messages after the trigger message — used to decide whether to quote. */

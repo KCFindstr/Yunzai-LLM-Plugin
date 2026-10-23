@@ -22,7 +22,8 @@ export function registerRenderTool() {
       required: ['html'],
     },
     available: ctx => ctx.eff.tools.renderHtml.enable,
-    limit: () => `最多 ${MAX_IMAGES_PER_TURN} 张图片，与 run_code 生成的图片合计`,
+    limit: () => `最多 ${MAX_IMAGES_PER_TURN} 张图片，与 run_code/send_image 共用`,
+    remaining: ctx => `最多剩余 ${Math.max(0, MAX_IMAGES_PER_TURN - ctx.turn.images.length)} 次（共享图片余量，每次至少一张）`,
     async run(args, ctx) {
       const html = String(args.html ?? '')
       if (!html.trim()) return { content: '缺少 html', isError: true }

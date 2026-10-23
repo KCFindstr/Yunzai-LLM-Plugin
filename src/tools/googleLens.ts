@@ -9,10 +9,11 @@ import { registry } from './registry.ts'
 export function registerGoogleLensTool(bridge: typeof lensBridge = lensBridge) {
   registry.register({
     name: 'google_lens', source: 'builtin',
-    description: '以图搜图与查图片出处。当被询问图片的来源、出处、画师、作品或角色时必须调用。将本轮或引用的原图直接上传到 Google Lens，返回 Google AI Overview 识别总结（如有）、公开精确匹配链接（最多3条）与视觉匹配链接（最多20条）。图片编号从1开始，无需文件路径。使用前加载 google-lens 技能；由你直接核对证据并回答。',
+    description: '将本轮或引用的原图直接上传到 Google Lens 进行以图搜图与查图片出处，返回 Google AI Overview 识别总结（如有）、公开精确匹配链接（最多3条）与视觉匹配链接（最多20条）。图片编号从1开始，无需文件路径。使用前加载 google-lens 技能。',
     parameters: { type: 'object', properties: { image_index: { type: 'integer', minimum: 1, maximum: 8 } }, additionalProperties: false },
     available: ctx => process.platform === 'win32' && ctx.eff.tools.googleLens.enable && (ctx.eff.tools.googleLens.access === 'all' || ctx.isAdmin),
     limit: () => '最多调用 2 次',
+    remaining: ctx => `剩余 ${Math.max(0, 2 - (ctx.turn.lensSearches ?? 0))} 次`,
     async run(args, ctx) {
       const cfg = ctx.eff.tools.googleLens
       if (!cfg.enable || (cfg.access !== 'all' && !ctx.isAdmin) || ctx.turn.asyncResult || ctx.turn.computerResult) return { content: '此工具未启用或无使用权限', isError: true }
