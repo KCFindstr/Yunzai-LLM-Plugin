@@ -41,6 +41,7 @@ export interface ToolOutput {
   isError?: boolean
   /** Stop the agent loop after this round (result already delivered by other means). */
   terminal?: boolean
+  images?: ImagePart[]
 }
 
 export interface ToolDef {
@@ -125,7 +126,8 @@ class Registry {
           if (o.terminal) terminal = true
           log.info(`工具 ${call.name}(${brief(call.args ?? {})}) ${o.isError ? '失败' : '完成'} ${Date.now() - started}ms → ${(o.content ?? '').length}字`)
           log.debug(`工具 ${call.name} 结果：${brief(o.content, 600)}`)
-          return done({ id: call.id, name: call.name, content: truncate(o.content || '(无结果)', MAX_RESULT_CHARS), isError: o.isError })
+          return done({ id: call.id, name: call.name, content: truncate(o.content || '(无结果)', MAX_RESULT_CHARS), isError: o.isError,
+            ...(o.images?.length ? { images: o.images } : {}) })
         } catch (err: any) {
           log.warn(`工具 ${call.name}(${brief(call.args ?? {})}) 出错: ${err?.message ?? err}`)
           return done({ id: call.id, name: call.name, content: `执行出错: ${err?.message ?? err}`, isError: true })

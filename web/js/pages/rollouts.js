@@ -1,6 +1,7 @@
 import { enc, get } from '../api.js'
 import { menuButton } from '../main.js'
 import { badge, card, empty, fmt, h, icon, mount, spinner, textBlock } from '../ui.js'
+import { parseRolloutJson } from '../rollout-data.js'
 
 const STATUS = {
   queued: ['排队中', 'accent'], running: ['执行中', 'accent'], completed: ['已完成', 'ok'],
@@ -17,8 +18,7 @@ const THINKING_SOURCE = { fixed: '固定配置', uniform: '各类消息使用相
 function thinkingDetails(r, opened) {
   const decision = r.thinkingDecision
   if (!decision) return null
-  let answer
-  try { answer = JSON.parse(decision.judge?.response ?? '').answers?.kind } catch { /* plain model verdict */ }
+  const answer = parseRolloutJson(decision.judge?.response)?.answers?.kind
   const probabilities = answer?.probabilities
   const values = ['casual', 'question', 'complex'].map(kind => {
     const item = Array.isArray(probabilities) ? probabilities.find(p => (p?.choice ?? p?.name) === kind) : probabilities?.[kind]
@@ -48,7 +48,7 @@ function thinkingDetails(r, opened) {
         h('summary', '判断响应'),
         h('pre', { class: 'small mono' }, decision.judge.response),
         h('p', { class: 'small muted' }, [decision.judge.inputTokens != null ? `输入 ${fmt.num(decision.judge.inputTokens)} / 输出 ${fmt.num(decision.judge.outputTokens)}` : null,
-          decision.judge.cost != null ? `判断费用 $${decision.judge.cost.toFixed(6)}` : null].filter(Boolean).join(' · '))) : null,
+          typeof decision.judge.cost === 'number' && Number.isFinite(decision.judge.cost) ? `判断费用 $${decision.judge.cost.toFixed(6)}` : null].filter(Boolean).join(' · '))) : null,
     )
 }
 

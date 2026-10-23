@@ -1,5 +1,5 @@
 import type { ThinkingLevel } from '../core/configTypes.ts'
-import type { ImagePart } from './types.ts'
+import type { ImagePart, Part, ToolResult } from './types.ts'
 
 let seq = 0
 export const genCallId = (prefix = 'call') => `${prefix}_${Date.now().toString(36)}${(seq++).toString(36)}`
@@ -22,6 +22,15 @@ export function parseArgs(raw: any): Record<string, any> {
 export function dataUrl(img: ImagePart): string | undefined {
   if (img.data) return `data:${img.mime || 'image/png'};base64,${img.data}`
   return img.url
+}
+
+/**
+ * Tool-result images as user-message parts, each batch labelled with its tool, for APIs whose tool results are
+ * text-only. Empty for models without vision: the result text already says what was fetched.
+ */
+export function toolImages(results: ToolResult[], vision: boolean): Part[] {
+  if (!vision) return []
+  return results.flatMap(r => r.images?.length ? [{ type: 'text' as const, text: `【工具 ${r.name} 返回的图片】` }, ...r.images] : [])
 }
 
 /** OpenAI reasoning_effort / Responses reasoning.effort mapping. */

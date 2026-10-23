@@ -351,3 +351,51 @@ describe('gemini interactions', () => {
     await assert.rejects(chat(params({ type: 'gemini', baseUrl: srv.url, apiKey: 'gk' }, {}, [userMsg])), /blocked/)
   })
 })
+
+describe('tool result images', () => {
+  const img = { type: 'image' as const, data: 'QUJD', mime: 'image/png', detail: 'auto' as const }
+  const toolMsgs: Msg[] = [
+    { role: 'user', content: [{ type: 'text', text: '看看这张图' }] },
+    { role: 'assistant', content: '', toolCalls: [{ id: 't1', name: 'web_fetch', args: {} }, { id: 't2', name: 'get_weather', args: {} }] },
+    { role: 'tool', results: [{ id: 't1', name: 'web_fetch', content: '已打开图片', images: [img] }, { id: 't2', name: 'get_weather', content: '晴' }] },
+  ]
+  const ok = { openai: { choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }], usage: {} },
+    anthropic: { content: [{ type: 'text', text: 'ok' }], stop_reason: 'end_turn', usage: {} },
+    'openai-responses': { id: 'r', status: 'completed', output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'ok' }] }], usage: {} },
+    gemini: { id: 'i', status: 'completed', steps: [{ type: 'model_output', content: [{ type: 'text', text: 'ok' }] }], usage: {} } }
+  async function send(type: keyof typeof ok, vision = true) {
+    const srv = await mockServer(() => [200, ok[type]])
+    after(srv.close)
+    await chat(params({ type, baseUrl: srv.url, apiKey: 'k' }, { vision, serverState: false }, toolMsgs, { thinking: 'off' }))
+    return srv.requests[0].body
+  }
+
+  it('anthropic puts the images inside the matching tool_result', async () => {
+    const results = (await send('anthropic')).messages[2].content
+    assert.deepEqual(results[0].content, [{ type: 'text', text: '已打开图片' }, { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'QUJD' } }])
+    assert.equal(results[1].content, '晴')
+  })
+
+  it('openai chat follows the tool messages with a labelled user image message', async () => {
+    const m = (await send('openai')).messages
+    assert.deepEqual(m.slice(3, 5).map((x: any) => [x.role, x.content]), [['tool', '已打开图片'], ['tool', '晴']])
+    assert.deepEqual(m[5], { role: 'user', content: [{ type: 'text', text: '【工具 web_fetch 返回的图片】' },
+      { type: 'image_url', image_url: { url: 'data:image/png;base64,QUJD', detail: 'auto' } }] })
+  })
+
+  it('openai responses and gemini add the images as a user input after the results', async () => {
+    const r = (await send('openai-responses')).input
+    assert.equal(r.at(-2).type, 'function_call_output')
+    assert.deepEqual(r.at(-1).content[1], { type: 'input_image', image_url: 'data:image/png;base64,QUJD', detail: 'auto' })
+    const g = (await send('gemini')).input
+    assert.equal(g.at(-2).type, 'function_result')
+    assert.deepEqual(g.at(-1), { type: 'user_input', content: [{ type: 'text', text: '【工具 web_fetch 返回的图片】' }, { type: 'image', data: 'QUJD', mime_type: 'image/png' }] })
+  })
+
+  it('drops tool images for models without vision', async () => {
+    assert.equal((await send('anthropic', false)).messages[2].content[0].content, '已打开图片')
+    assert.equal((await send('openai', false)).messages.length, 5)
+    assert.equal((await send('openai-responses', false)).input.at(-1).type, 'function_call_output')
+    assert.equal((await send('gemini', false)).input.at(-1).type, 'function_result')
+  })
+})

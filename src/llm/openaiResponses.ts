@@ -1,7 +1,7 @@
 import { deepMerge } from '../core/util.ts'
-import { dataUrl, genCallId, openaiEffort, parseArgs } from './common.ts'
+import { dataUrl, genCallId, openaiEffort, parseArgs, toolImages } from './common.ts'
 import { joinUrl, requestJson } from './http.ts'
-import type { Adapter, ChatParams, ChatResult, ToolCall } from './types.ts'
+import type { Adapter, ChatParams, ChatResult, Part, ToolCall } from './types.ts'
 import { stripThink } from './types.ts'
 
 /** OpenAI Responses API (POST /responses). */
@@ -14,18 +14,19 @@ export const openaiResponses: Adapter = {
     const msgs = p.state ? p.messages.slice(p.state.skip) : p.messages
     const input: any[] = []
 
+    const userInput = (content: Part[]) => ({
+      role: 'user',
+      content: content.map(c =>
+        c.type === 'text'
+          ? { type: 'input_text', text: c.text }
+          : vision
+            ? { type: 'input_image', image_url: dataUrl(c), detail: c.detail ?? 'low' }
+            : { type: 'input_text', text: '[图片]' },
+      ),
+    })
     for (const m of msgs) {
       if (m.role === 'user') {
-        input.push({
-          role: 'user',
-          content: m.content.map(c =>
-            c.type === 'text'
-              ? { type: 'input_text', text: c.text }
-              : vision
-                ? { type: 'input_image', image_url: dataUrl(c), detail: c.detail ?? 'low' }
-                : { type: 'input_text', text: '[图片]' },
-          ),
-        })
+        input.push(userInput(m.content))
       } else if (m.role === 'assistant') {
         if (m.native?.provider === 'openai-responses' && m.native.model === p.model.model) {
           input.push(...m.native.data)
@@ -36,6 +37,9 @@ export const openaiResponses: Adapter = {
           input.push({ type: 'function_call', call_id: tc.id, name: tc.name, arguments: JSON.stringify(tc.args) })
       } else {
         for (const r of m.results) input.push({ type: 'function_call_output', call_id: r.id, output: r.content })
+        // Compatible endpoints often take text-only outputs: images follow as a user message instead.
+        const images = toolImages(m.results, vision)
+        if (images.length) input.push(userInput(images))
       }
     }
 

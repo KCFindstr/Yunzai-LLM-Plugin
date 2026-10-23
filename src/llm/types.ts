@@ -27,6 +27,8 @@ export interface ToolResult {
   name: string
   content: string
   isError?: boolean
+  /** images for vision models to look at (e.g. web_fetch of an image URL); dropped for models without vision */
+  images?: ImagePart[]
 }
 
 /** Provider-raw assistant output, replayed verbatim to the same provider+model inside one tool loop. */

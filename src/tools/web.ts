@@ -1,5 +1,5 @@
-import { truncate } from '../core/util.ts'
-import { registry, type ToolCtx } from './registry.ts'
+import { detectImageMime, truncate } from '../core/util.ts'
+import { registry, type ToolCtx, type ToolOutput } from './registry.ts'
 import { assertPublicUrl } from './ssrf.ts'
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36'
@@ -148,10 +148,29 @@ async function readCapped(res: Response, maxBytes: number): Promise<Buffer> {
   return Buffer.concat(chunks)
 }
 
-export async function fetchPage(url: string, ctx: ToolCtx): Promise<string> {
+/** Image types every provider accepts; larger files are refused rather than sent (Anthropic caps images near 5MB). */
+const VIEWABLE_IMAGES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp'])
+const MAX_IMAGE_BYTES = 3_700_000
+const IMAGE_PATH = /\.(png|jpe?g|gif|webp)$/i
+
+/** An image response as an image part for vision models, checked by its bytes rather than the server's content-type. */
+async function fetchImage(res: Response, contentType: string): Promise<ToolOutput | string> {
+  const buf = await readCapped(res, MAX_IMAGE_BYTES)
+  if (buf.length > MAX_IMAGE_BYTES) return `该图片超过 ${MAX_IMAGE_BYTES / 1_000_000}MB，无法查看`
+  const mime = detectImageMime(buf)
+  if (!mime || !VIEWABLE_IMAGES.has(mime)) return `该链接是 ${contentType} 类型的文件，不是可查看的 png/jpg/gif/webp 图片`
+  return {
+    content: `已打开图片（${mime}，${Math.ceil(buf.length / 1024)}KB），图片本身随本结果附上，请直接查看。`,
+    images: [{ type: 'image', data: buf.toString('base64'), mime, detail: 'auto' }],
+  }
+}
+
+export async function fetchPage(url: string, ctx: ToolCtx): Promise<ToolOutput | string> {
   const wf = ctx.eff.tools.webFetch
   const max = wf.maxChars || 6000
-  if (wf.reader === 'jina') {
+  const vision = ctx.model.vision !== false
+  // Jina Reader turns images into text: fetch image links directly so a vision model sees the picture.
+  if (wf.reader === 'jina' && !(vision && IMAGE_PATH.test(new URL(url).pathname))) {
     if (!wf.allowPrivateNetwork) await assertPublicUrl(url)
     const res = await fetch(`https://r.jina.ai/${url}`, {
       headers: { accept: 'text/plain', ...(wf.jinaKey ? { authorization: `Bearer ${wf.jinaKey}` } : {}) },
@@ -163,6 +182,8 @@ export async function fetchPage(url: string, ctx: ToolCtx): Promise<string> {
   const res = await fetchPublic(url, ctx)
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
   const ct = res.headers.get('content-type') ?? ''
+  // octet-stream too: some hosts serve images without a proper type.
+  if (vision && /image|octet-stream/i.test(ct)) return fetchImage(res, ct)
   if (/image|video|audio|octet-stream|pdf|zip/i.test(ct)) return `该链接是 ${ct} 类型的文件，无法读取文本内容`
   const buf = await readCapped(res, 3 * 1024 * 1024)
   let text: string
@@ -211,7 +232,7 @@ export function registerWebTools() {
   registry.register({
     name: 'web_fetch',
     source: 'builtin',
-    description: '打开一个网页链接并读取正文文本（自动截断）。用于查看用户发来的链接或搜索结果里的页面详情。',
+    description: '打开一个网页链接并读取正文文本（自动截断）。用于查看用户发来的链接或搜索结果里的页面详情。若链接是图片（png/jpg/gif/webp）且你能看图，会把图片本身交给你查看。',
     parameters: {
       type: 'object',
       properties: { url: { type: 'string', description: '完整的 http(s) 链接' } },

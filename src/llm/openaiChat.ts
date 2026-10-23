@@ -1,5 +1,5 @@
 import { deepMerge } from '../core/util.ts'
-import { dataUrl, genCallId, openaiEffort, parseArgs } from './common.ts'
+import { dataUrl, genCallId, openaiEffort, parseArgs, toolImages } from './common.ts'
 import { joinUrl, requestJson } from './http.ts'
 import type { Adapter, ChatParams, ChatResult, Part, ToolCall } from './types.ts'
 import { stripThink } from './types.ts'
@@ -61,7 +61,12 @@ export const openaiChat: Adapter = {
           }))
         if (msg.content == null && !msg.tool_calls) msg.content = ''
         messages.push(msg)
-      } else for (const r of m.results) messages.push({ role: 'tool', tool_call_id: r.id, content: r.content })
+      } else {
+        for (const r of m.results) messages.push({ role: 'tool', tool_call_id: r.id, content: r.content })
+        // Tool messages are text-only here: images follow as a user message right after the results.
+        const images = toolImages(m.results, vision)
+        if (images.length) messages.push({ role: 'user', content: userContent(images, vision) })
+      }
     }
 
     let body: any = { model: p.model.model, messages }

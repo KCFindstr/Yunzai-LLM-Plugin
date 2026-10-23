@@ -1,9 +1,15 @@
 import { deepMerge } from '../core/util.ts'
 import { anthropicEffort } from './common.ts'
 import { joinUrl, requestJson } from './http.ts'
-import type { Adapter, ChatParams, ChatResult, ToolCall } from './types.ts'
+import type { Adapter, ChatParams, ChatResult, ImagePart, ToolCall } from './types.ts'
 
 const CACHEABLE_TAIL = new Set(['text', 'image', 'tool_result'])
+
+function imageBlock(c: ImagePart): any {
+  return c.data
+    ? { type: 'image', source: { type: 'base64', media_type: c.mime || 'image/png', data: c.data } }
+    : { type: 'image', source: { type: 'url', url: c.url } }
+}
 
 /** Models that accept the dynamic-filtering web search tool version. */
 function searchToolType(model: string): string {
@@ -33,10 +39,7 @@ export const anthropic: Adapter = {
           m.content
             .map(c => {
               if (c.type === 'text') return c.text ? { type: 'text', text: c.text } : null
-              if (!vision) return { type: 'text', text: '[图片]' }
-              return c.data
-                ? { type: 'image', source: { type: 'base64', media_type: c.mime || 'image/png', data: c.data } }
-                : { type: 'image', source: { type: 'url', url: c.url } }
+              return vision ? imageBlock(c) : { type: 'text', text: '[图片]' }
             })
             .filter(Boolean),
         )
@@ -55,7 +58,9 @@ export const anthropic: Adapter = {
           m.results.map(r => ({
             type: 'tool_result',
             tool_use_id: r.id,
-            content: r.content || '(empty)',
+            content: vision && r.images?.length
+              ? [{ type: 'text', text: r.content || '(empty)' }, ...r.images.map(imageBlock)]
+              : r.content || '(empty)',
             ...(r.isError ? { is_error: true } : {}),
           })),
         )

@@ -1,8 +1,8 @@
 import { deepMerge } from '../core/util.ts'
-import { genCallId, geminiThinking, parseArgs } from './common.ts'
+import { genCallId, geminiThinking, parseArgs, toolImages } from './common.ts'
 import { joinUrl, requestJson } from './http.ts'
 import { usesServerState } from './state.ts'
-import type { Adapter, ChatParams, ChatResult, ToolCall } from './types.ts'
+import type { Adapter, ChatParams, ChatResult, Part, ToolCall } from './types.ts'
 import { LLMError } from './types.ts'
 
 /**
@@ -20,20 +20,21 @@ export const gemini: Adapter = {
     const msgs = state ? p.messages.slice(state.skip) : p.messages
     const input: any[] = []
 
+    const userInput = (content: Part[]) => ({
+      type: 'user_input',
+      content: content.map(c =>
+        c.type === 'text'
+          ? { type: 'text', text: c.text }
+          : vision && c.data
+            ? { type: 'image', data: c.data, mime_type: c.mime || 'image/png' }
+            : vision && c.url
+              ? { type: 'image', uri: c.url }
+              : { type: 'text', text: '[图片]' },
+      ),
+    })
     for (const m of msgs) {
       if (m.role === 'user') {
-        input.push({
-          type: 'user_input',
-          content: m.content.map(c =>
-            c.type === 'text'
-              ? { type: 'text', text: c.text }
-              : vision && c.data
-                ? { type: 'image', data: c.data, mime_type: c.mime || 'image/png' }
-                : vision && c.url
-                  ? { type: 'image', uri: c.url }
-                  : { type: 'text', text: '[图片]' },
-          ),
-        })
+        input.push(userInput(m.content))
       } else if (m.role === 'assistant') {
         if (m.native?.provider === 'gemini' && m.native.model === p.model.model) {
           input.push(...m.native.data)
@@ -50,6 +51,9 @@ export const gemini: Adapter = {
             result: r.content,
             ...(r.isError ? { is_error: true } : {}),
           })
+        // function_result carries text; images follow as a user step.
+        const images = toolImages(m.results, vision)
+        if (images.length) input.push(userInput(images))
       }
     }
 

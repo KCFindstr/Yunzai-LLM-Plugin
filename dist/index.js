@@ -2441,6 +2441,10 @@ function dataUrl(img) {
   if (img.data) return `data:${img.mime || "image/png"};base64,${img.data}`;
   return img.url;
 }
+function toolImages(results, vision) {
+  if (!vision) return [];
+  return results.flatMap((r) => r.images?.length ? [{ type: "text", text: `\u3010\u5DE5\u5177 ${r.name} \u8FD4\u56DE\u7684\u56FE\u7247\u3011` }, ...r.images] : []);
+}
 function openaiEffort(t) {
   switch (t) {
     case "off":
@@ -2484,6 +2488,9 @@ var init_common = __esm({
 });
 
 // src/llm/anthropic.ts
+function imageBlock(c) {
+  return c.data ? { type: "image", source: { type: "base64", media_type: c.mime || "image/png", data: c.data } } : { type: "image", source: { type: "url", url: c.url } };
+}
 function searchToolType(model2) {
   return /(opus|sonnet)-(4-[6-9]|5)/i.test(model2) ? "web_search_20260209" : "web_search_20250305";
 }
@@ -2514,8 +2521,7 @@ var init_anthropic = __esm({
               "user",
               m.content.map((c) => {
                 if (c.type === "text") return c.text ? { type: "text", text: c.text } : null;
-                if (!vision) return { type: "text", text: "[\u56FE\u7247]" };
-                return c.data ? { type: "image", source: { type: "base64", media_type: c.mime || "image/png", data: c.data } } : { type: "image", source: { type: "url", url: c.url } };
+                return vision ? imageBlock(c) : { type: "text", text: "[\u56FE\u7247]" };
               }).filter(Boolean)
             );
           } else if (m.role === "assistant") {
@@ -2533,7 +2539,7 @@ var init_anthropic = __esm({
               m.results.map((r) => ({
                 type: "tool_result",
                 tool_use_id: r.id,
-                content: r.content || "(empty)",
+                content: vision && r.images?.length ? [{ type: "text", text: r.content || "(empty)" }, ...r.images.map(imageBlock)] : r.content || "(empty)",
                 ...r.isError ? { is_error: true } : {}
               }))
             );
@@ -2631,14 +2637,15 @@ var init_gemini = __esm({
         const vision = p.model.vision !== false;
         const msgs = state ? p.messages.slice(state.skip) : p.messages;
         const input = [];
+        const userInput = (content) => ({
+          type: "user_input",
+          content: content.map(
+            (c) => c.type === "text" ? { type: "text", text: c.text } : vision && c.data ? { type: "image", data: c.data, mime_type: c.mime || "image/png" } : vision && c.url ? { type: "image", uri: c.url } : { type: "text", text: "[\u56FE\u7247]" }
+          )
+        });
         for (const m of msgs) {
           if (m.role === "user") {
-            input.push({
-              type: "user_input",
-              content: m.content.map(
-                (c) => c.type === "text" ? { type: "text", text: c.text } : vision && c.data ? { type: "image", data: c.data, mime_type: c.mime || "image/png" } : vision && c.url ? { type: "image", uri: c.url } : { type: "text", text: "[\u56FE\u7247]" }
-              )
-            });
+            input.push(userInput(m.content));
           } else if (m.role === "assistant") {
             if (m.native?.provider === "gemini" && m.native.model === p.model.model) {
               input.push(...m.native.data);
@@ -2655,6 +2662,8 @@ var init_gemini = __esm({
                 result: r.content,
                 ...r.isError ? { is_error: true } : {}
               });
+            const images = toolImages(m.results, vision);
+            if (images.length) input.push(userInput(images));
           }
         }
         const generation_config = { max_output_tokens: p.maxTokens };
@@ -2773,7 +2782,11 @@ var init_openaiChat = __esm({
               }));
             if (msg2.content == null && !msg2.tool_calls) msg2.content = "";
             messages.push(msg2);
-          } else for (const r of m.results) messages.push({ role: "tool", tool_call_id: r.id, content: r.content });
+          } else {
+            for (const r of m.results) messages.push({ role: "tool", tool_call_id: r.id, content: r.content });
+            const images = toolImages(m.results, vision);
+            if (images.length) messages.push({ role: "user", content: userContent(images, vision) });
+          }
         }
         let body = { model: p.model.model, messages };
         if (p.tools.length)
@@ -2841,14 +2854,15 @@ var init_openaiResponses = __esm({
         const store11 = p.provider.store ?? p.provider.serverState ?? false;
         const msgs = p.state ? p.messages.slice(p.state.skip) : p.messages;
         const input = [];
+        const userInput = (content) => ({
+          role: "user",
+          content: content.map(
+            (c) => c.type === "text" ? { type: "input_text", text: c.text } : vision ? { type: "input_image", image_url: dataUrl(c), detail: c.detail ?? "low" } : { type: "input_text", text: "[\u56FE\u7247]" }
+          )
+        });
         for (const m of msgs) {
           if (m.role === "user") {
-            input.push({
-              role: "user",
-              content: m.content.map(
-                (c) => c.type === "text" ? { type: "input_text", text: c.text } : vision ? { type: "input_image", image_url: dataUrl(c), detail: c.detail ?? "low" } : { type: "input_text", text: "[\u56FE\u7247]" }
-              )
-            });
+            input.push(userInput(m.content));
           } else if (m.role === "assistant") {
             if (m.native?.provider === "openai-responses" && m.native.model === p.model.model) {
               input.push(...m.native.data);
@@ -2859,6 +2873,8 @@ var init_openaiResponses = __esm({
               input.push({ type: "function_call", call_id: tc.id, name: tc.name, arguments: JSON.stringify(tc.args) });
           } else {
             for (const r of m.results) input.push({ type: "function_call_output", call_id: r.id, output: r.content });
+            const images = toolImages(m.results, vision);
+            if (images.length) input.push(userInput(images));
           }
         }
         let body = { model: p.model.model, input, instructions: p.system, max_output_tokens: p.maxTokens, store: store11 };
@@ -3582,7 +3598,13 @@ var init_registry = __esm({
               if (o.terminal) terminal = true;
               log.info(`\u5DE5\u5177 ${call.name}(${brief(call.args ?? {})}) ${o.isError ? "\u5931\u8D25" : "\u5B8C\u6210"} ${Date.now() - started}ms \u2192 ${(o.content ?? "").length}\u5B57`);
               log.debug(`\u5DE5\u5177 ${call.name} \u7ED3\u679C\uFF1A${brief(o.content, 600)}`);
-              return done({ id: call.id, name: call.name, content: truncate(o.content || "(\u65E0\u7ED3\u679C)", MAX_RESULT_CHARS), isError: o.isError });
+              return done({
+                id: call.id,
+                name: call.name,
+                content: truncate(o.content || "(\u65E0\u7ED3\u679C)", MAX_RESULT_CHARS),
+                isError: o.isError,
+                ...o.images?.length ? { images: o.images } : {}
+              });
             } catch (err) {
               log.warn(`\u5DE5\u5177 ${call.name}(${brief(call.args ?? {})}) \u51FA\u9519: ${err?.message ?? err}`);
               return done({ id: call.id, name: call.name, content: `\u6267\u884C\u51FA\u9519: ${err?.message ?? err}`, isError: true });
@@ -4648,6 +4670,29 @@ var init_history = __esm({
   }
 });
 
+// web/js/rollout-data.js
+function parseRolloutJson(text2) {
+  if (typeof text2 !== "string") return void 0;
+  try {
+    return JSON.parse(text2);
+  } catch {
+  }
+  const repaired = text2.replace(
+    /"(?:\\.|[^"\\])*"|[+\d.eE-]*\[private number\][+\d.eE-]*/g,
+    (token) => token.startsWith('"') ? token : "null"
+  );
+  try {
+    return JSON.parse(repaired);
+  } catch {
+    return void 0;
+  }
+}
+var init_rollout_data = __esm({
+  "web/js/rollout-data.js"() {
+    "use strict";
+  }
+});
+
 // src/chat/rollouts.ts
 import { randomBytes as randomBytes4 } from "crypto";
 function cleanEvent2(event) {
@@ -4668,6 +4713,31 @@ function cleanEvent2(event) {
     thinking: event.thinking
   };
 }
+function cleanJudgeResponse(judge) {
+  const response = parseRolloutJson(judge.response);
+  const answer = response?.answers?.kind;
+  if (!answer || typeof answer !== "object") return agyHistoryText(judge.response);
+  const number = (value) => typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : void 0;
+  const probability = (value) => {
+    const n = number(value);
+    return n != null && n <= 1 ? n : void 0;
+  };
+  const probabilities = answer.probabilities;
+  const score = (name) => {
+    const entry = Array.isArray(probabilities) ? probabilities.find((p) => (p?.choice ?? p?.name) === name) : probabilities?.[name];
+    return probability(entry && typeof entry === "object" ? entry.probability ?? entry.score ?? entry.prob : entry);
+  };
+  return JSON.stringify({
+    model: agyHistoryText(typeof response.model === "string" ? response.model : judge.model, void 0, 100),
+    answers: { kind: {
+      choice: typeof answer.choice === "string" ? agyHistoryText(answer.choice, void 0, 100) : void 0,
+      confidence: probability(answer.confidence),
+      probabilities: Object.fromEntries(["casual", "question", "complex"].map((name) => [name, score(name)]).filter(([, value]) => value != null))
+    } },
+    usage: { input_tokens: number(judge.inputTokens) ?? number(response.usage?.input_tokens), output_tokens: number(judge.outputTokens) ?? number(response.usage?.output_tokens) },
+    cost: number(judge.cost) ?? number(response.cost)
+  }, null, 2);
+}
 function cleanThinking(decision) {
   return {
     setting: decision.setting,
@@ -4679,7 +4749,7 @@ function cleanThinking(decision) {
     judge: decision.judge ? {
       kind: decision.judge.kind,
       model: agyHistoryText(decision.judge.model, void 0, 100),
-      response: agyHistoryText(decision.judge.response),
+      response: cleanJudgeResponse(decision.judge),
       inputTokens: decision.judge.inputTokens,
       outputTokens: decision.judge.outputTokens,
       cost: decision.judge.cost
@@ -4809,6 +4879,7 @@ var init_rollouts = __esm({
     "use strict";
     init_store();
     init_history();
+    init_rollout_data();
     store8 = new JsonStore("rollouts.json", { v: 1, rollouts: [] });
     active = (rollout) => ["queued", "running"].includes(rollout.status);
     for (const rollout of store8.data.rollouts) {
@@ -8454,10 +8525,24 @@ async function readCapped(res, maxBytes) {
   }
   return Buffer.concat(chunks);
 }
+var VIEWABLE_IMAGES = /* @__PURE__ */ new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
+var MAX_IMAGE_BYTES3 = 37e5;
+var IMAGE_PATH = /\.(png|jpe?g|gif|webp)$/i;
+async function fetchImage(res, contentType) {
+  const buf = await readCapped(res, MAX_IMAGE_BYTES3);
+  if (buf.length > MAX_IMAGE_BYTES3) return `\u8BE5\u56FE\u7247\u8D85\u8FC7 ${MAX_IMAGE_BYTES3 / 1e6}MB\uFF0C\u65E0\u6CD5\u67E5\u770B`;
+  const mime = detectImageMime(buf);
+  if (!mime || !VIEWABLE_IMAGES.has(mime)) return `\u8BE5\u94FE\u63A5\u662F ${contentType} \u7C7B\u578B\u7684\u6587\u4EF6\uFF0C\u4E0D\u662F\u53EF\u67E5\u770B\u7684 png/jpg/gif/webp \u56FE\u7247`;
+  return {
+    content: `\u5DF2\u6253\u5F00\u56FE\u7247\uFF08${mime}\uFF0C${Math.ceil(buf.length / 1024)}KB\uFF09\uFF0C\u56FE\u7247\u672C\u8EAB\u968F\u672C\u7ED3\u679C\u9644\u4E0A\uFF0C\u8BF7\u76F4\u63A5\u67E5\u770B\u3002`,
+    images: [{ type: "image", data: buf.toString("base64"), mime, detail: "auto" }]
+  };
+}
 async function fetchPage(url, ctx) {
   const wf = ctx.eff.tools.webFetch;
   const max = wf.maxChars || 6e3;
-  if (wf.reader === "jina") {
+  const vision = ctx.model.vision !== false;
+  if (wf.reader === "jina" && !(vision && IMAGE_PATH.test(new URL(url).pathname))) {
     if (!wf.allowPrivateNetwork) await assertPublicUrl(url);
     const res2 = await fetch(`https://r.jina.ai/${url}`, {
       headers: { accept: "text/plain", ...wf.jinaKey ? { authorization: `Bearer ${wf.jinaKey}` } : {} },
@@ -8469,6 +8554,7 @@ async function fetchPage(url, ctx) {
   const res = await fetchPublic(url, ctx);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const ct = res.headers.get("content-type") ?? "";
+  if (vision && /image|octet-stream/i.test(ct)) return fetchImage(res, ct);
   if (/image|video|audio|octet-stream|pdf|zip/i.test(ct)) return `\u8BE5\u94FE\u63A5\u662F ${ct} \u7C7B\u578B\u7684\u6587\u4EF6\uFF0C\u65E0\u6CD5\u8BFB\u53D6\u6587\u672C\u5185\u5BB9`;
   const buf = await readCapped(res, 3 * 1024 * 1024);
   let text2;
@@ -8518,7 +8604,7 @@ ${truncate((h.snippet ?? "").replace(/\s+/g, " "), 300)}`).join("\n\n");
   registry.register({
     name: "web_fetch",
     source: "builtin",
-    description: "\u6253\u5F00\u4E00\u4E2A\u7F51\u9875\u94FE\u63A5\u5E76\u8BFB\u53D6\u6B63\u6587\u6587\u672C\uFF08\u81EA\u52A8\u622A\u65AD\uFF09\u3002\u7528\u4E8E\u67E5\u770B\u7528\u6237\u53D1\u6765\u7684\u94FE\u63A5\u6216\u641C\u7D22\u7ED3\u679C\u91CC\u7684\u9875\u9762\u8BE6\u60C5\u3002",
+    description: "\u6253\u5F00\u4E00\u4E2A\u7F51\u9875\u94FE\u63A5\u5E76\u8BFB\u53D6\u6B63\u6587\u6587\u672C\uFF08\u81EA\u52A8\u622A\u65AD\uFF09\u3002\u7528\u4E8E\u67E5\u770B\u7528\u6237\u53D1\u6765\u7684\u94FE\u63A5\u6216\u641C\u7D22\u7ED3\u679C\u91CC\u7684\u9875\u9762\u8BE6\u60C5\u3002\u82E5\u94FE\u63A5\u662F\u56FE\u7247\uFF08png/jpg/gif/webp\uFF09\u4E14\u4F60\u80FD\u770B\u56FE\uFF0C\u4F1A\u628A\u56FE\u7247\u672C\u8EAB\u4EA4\u7ED9\u4F60\u67E5\u770B\u3002",
     parameters: {
       type: "object",
       properties: { url: { type: "string", description: "\u5B8C\u6574\u7684 http(s) \u94FE\u63A5" } },

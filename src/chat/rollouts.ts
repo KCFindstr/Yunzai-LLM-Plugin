@@ -2,8 +2,9 @@ import { randomBytes } from 'node:crypto'
 import { JsonStore } from '../core/store.ts'
 import { agyHistoryText } from '../agy/history.ts'
 import type { ThinkingLevel } from '../core/configTypes.ts'
-import type { ThinkingDecision } from './thinking.ts'
+import type { JudgeResponse, ThinkingDecision } from './thinking.ts'
 import type { Msg, ToolSpec } from '../llm/types.ts'
+import { parseRolloutJson } from '../../web/js/rollout-data.js'
 
 export interface RolloutContext {
   system: string
@@ -71,13 +72,36 @@ function cleanEvent(event: RolloutEvent): RolloutEvent {
     inputTokens: event.inputTokens, outputTokens: event.outputTokens, isError: event.isError, thinking: event.thinking,
   }
 }
+function cleanJudgeResponse(judge: JudgeResponse): string {
+  const response = parseRolloutJson(judge.response)
+  const answer = response?.answers?.kind
+  if (!answer || typeof answer !== 'object') return agyHistoryText(judge.response)
+  const number = (value: unknown) => typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined
+  const probability = (value: unknown) => { const n = number(value); return n != null && n <= 1 ? n : undefined }
+  const probabilities = answer.probabilities
+  const score = (name: string) => {
+    const entry = Array.isArray(probabilities) ? probabilities.find((p: any) => (p?.choice ?? p?.name) === name) : probabilities?.[name]
+    return probability(entry && typeof entry === 'object' ? entry.probability ?? entry.score ?? entry.prob : entry)
+  }
+  // Redact text before serialization. Known numeric metrics must stay numeric JSON tokens.
+  return JSON.stringify({
+    model: agyHistoryText(typeof response.model === 'string' ? response.model : judge.model, undefined, 100),
+    answers: { kind: {
+      choice: typeof answer.choice === 'string' ? agyHistoryText(answer.choice, undefined, 100) : undefined,
+      confidence: probability(answer.confidence),
+      probabilities: Object.fromEntries(['casual', 'question', 'complex'].map(name => [name, score(name)]).filter(([, value]) => value != null)),
+    } },
+    usage: { input_tokens: number(judge.inputTokens) ?? number(response.usage?.input_tokens), output_tokens: number(judge.outputTokens) ?? number(response.usage?.output_tokens) },
+    cost: number(judge.cost) ?? number(response.cost),
+  }, null, 2)
+}
 function cleanThinking(decision: ThinkingDecision): ThinkingDecision {
   return {
     setting: decision.setting, level: decision.level, source: decision.source, kind: decision.kind, ms: decision.ms,
     fallbackReason: decision.fallbackReason && agyHistoryText(decision.fallbackReason),
     judge: decision.judge ? {
       kind: decision.judge.kind, model: agyHistoryText(decision.judge.model, undefined, 100),
-      response: agyHistoryText(decision.judge.response), inputTokens: decision.judge.inputTokens,
+      response: cleanJudgeResponse(decision.judge), inputTokens: decision.judge.inputTokens,
       outputTokens: decision.judge.outputTokens, cost: decision.judge.cost,
     } : undefined,
   }
