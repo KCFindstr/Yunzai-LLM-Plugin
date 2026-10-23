@@ -16,6 +16,7 @@ import { registerRenderTool } from './tools/render.ts'
 import { registerExecTool, stopKeepalive } from './tools/exec.ts'
 import { closeOwnBrowser } from './render/browser.ts'
 import { registerComputerTool, computerQueue } from './tools/computer.ts'
+import { registerAgyTool, agyQueue } from './tools/agy.ts'
 import { refreshComputerKeepalive, stopComputerKeepalive } from './computer/keepalive.ts'
 import { startWeb, stopWeb } from './web/server.ts'
 import { startArchiveJobs, stopArchiveJobs } from './chat/archiveJobs.ts'
@@ -38,6 +39,7 @@ function startup() {
   registerRenderTool()
   registerExecTool()
   registerComputerTool()
+  registerAgyTool()
   refreshComputerKeepalive()
   config.onChange(refreshComputerKeepalive)
   loadSkills()
@@ -59,6 +61,7 @@ function startup() {
   else B?.once?.('online', scan)
   B?.once?.('exit', () => {
     computerQueue.stop()
+    agyQueue.stop()
     stopArchiveJobs()
     stopWeb()
     stopComputerKeepalive()
@@ -68,6 +71,7 @@ function startup() {
   })
   process.once('exit', () => {
     computerQueue.stop()
+    agyQueue.stop()
     stopArchiveJobs()
     stopComputerKeepalive()
     flushAllStores()

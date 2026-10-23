@@ -53,6 +53,7 @@ export interface TurnRequest {
   convKey: string
   modelId?: string
   computerResult?: { id: string; images: Buffer[] }
+  asyncResult?: { kind: 'agy'; id: string }
 }
 
 export type TurnOutcome = (
@@ -109,6 +110,8 @@ async function runTurnInner(req: TurnRequest, ref: { turn?: TurnState }): Promis
   const maxTokens = model.maxTokens ?? eff.chat.maxOutputTokens
 
   const turn: TurnState = { commands: 0, searches: 0, fetches: 0, images: [] }
+  if (!req.computerResult && !req.asyncResult) turn.inputImages = input.images
+  turn.asyncResult = req.asyncResult
   turn.computerResult = req.computerResult
   turn.computerJob = req.computerResult?.id
   ref.turn = turn
@@ -151,7 +154,7 @@ async function runTurnInner(req: TurnRequest, ref: { turn?: TurnState }): Promis
   const context = [memTurn, recalled.length ? `【相关旧聊天·参考】\n${recalled.join('\n')}` : ''].filter(Boolean).join('\n')
   const header = buildHeader(e, eff, input, isAdmin, { conv: convKey, memory: context })
   // from now on this message lives in the session history; keep it out of future ambient-chat windows
-  if (!req.computerResult) markHandled(e, convKey)
+  if (!req.computerResult && !req.asyncResult) markHandled(e, convKey)
 
   const userMsg: UserMsg = { role: 'user', content: [{ type: 'text', text: header.sent + text }, ...input.images] }
   const storedUser: UserMsg = {

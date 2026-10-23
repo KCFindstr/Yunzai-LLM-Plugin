@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto'
+import type { ComputerInputImage } from './attachments.ts'
 
 export type JobStatus = 'queued' | 'running' | 'waiting' | 'completed' | 'failed' | 'cancelled' | 'interrupted'
 export interface ComputerJob {
@@ -12,6 +13,8 @@ export interface ComputerJob {
   response?: string
   progress?: string
   requesterText?: string
+  /** Metadata only; original bytes live in the plugin's computer-inputs directory. */
+  inputImages?: ComputerInputImage[]
   steps?: number
   inputTokens?: number
   outputTokens?: number

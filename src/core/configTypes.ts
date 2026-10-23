@@ -185,7 +185,17 @@ export interface ToolsSection {
   renderHtml: { enable: boolean; width: number; maxHeight: number; allowNetwork: boolean }
   exec: ExecToolConfig
   computer: ComputerConfig
+  agy: AgyConfig
   disabled: string[]
+}
+
+export interface AgyConfig {
+  enable: boolean
+  access: 'admin' | 'all'
+  distro: string
+  executable: string
+  maxMinutes: number
+  maxQueue: number
 }
 
 export type ExecLanguage = 'python' | 'node' | 'bash'

@@ -142,6 +142,36 @@ describe('web panel', () => {
       assert.doesNotMatch(await (await fetch(base + p)).text(), /do-not-serve/)
   })
 
+  it('protects AGY history and cancellation, filters private data, and rejects unknown jobs', async () => {
+    const { agyQueue } = await import('../src/tools/agy.ts')
+    const { recordAgyEvent } = await import('../src/agy/history.ts')
+    const job = agyQueue.submit('private-owner', 'Search image for alice@example.com', 5)
+    job.report = 'Found a source. password=private-password'
+    job.progress = '正在搜索'
+    recordAgyEvent(job.id, { kind: 'tool', tool: 'read_file', text: 'Read alice@example.com at C:\\Users\\Alice\\private.txt' })
+    recordAgyEvent(job.id, { kind: 'reply', text: 'Found the source', delivery: 'sent' })
+    const url = `/api/agy/${job.id}`
+    assert.equal((await fetch(base + '/api/agy')).status, 401)
+    assert.equal((await fetch(base + url + '/history')).status, 401)
+    const list = await (await call('GET', '/api/agy')).json()
+    assert.equal(list[0].id, job.id)
+    assert.equal(list[0].progress, '正在搜索')
+    assert.ok(!('owner' in list[0]))
+    const history = await (await call('GET', url + '/history')).json()
+    assert.equal(history.events[1].delivery, 'sent')
+    for (const text of [JSON.stringify(list), JSON.stringify(history)]) for (const value of ['alice@example.com', 'private-password', 'private-owner', 'Alice']) assert.ok(!text.includes(value))
+    const noHeader = await fetch(base + url + '/cancel', { method: 'POST', headers: { cookie } })
+    assert.equal(noHeader.status, 403)
+    assert.equal(job.status, 'queued')
+    assert.equal((await call('POST', url + '/cancel')).status, 200)
+    assert.equal(job.status, 'cancelled'); assert.equal(job.progress, undefined)
+    assert.equal((await (await call('GET', url + '/history')).json()).events.at(-1).kind, 'cancel')
+    assert.equal((await call('POST', url + '/cancel')).status, 200)
+    assert.equal((await call('GET', '/api/agy/0000000000/history')).status, 404)
+    assert.equal((await call('GET', '/api/agy/..%2fconfig/history')).status, 404)
+    assert.equal((await call('POST', '/api/agy/0000000000/cancel')).status, 404)
+  })
+
   it('logs out', async () => {
     assert.equal((await call('POST', '/api/logout')).status, 200)
     assert.equal((await call('GET', '/api/overview')).status, 401)

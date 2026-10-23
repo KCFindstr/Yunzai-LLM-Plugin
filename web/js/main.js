@@ -13,6 +13,7 @@ const PAGES = [
   ['config', '配置', '≡', () => import('./pages/config.js')],
   ['stickers', '表情包', '❖', () => import('./pages/stickers.js')],
   ['tools', '工具与技能', '⚒', () => import('./pages/tools.js')],
+  ['agy', 'AGY 任务', '✦', () => import('./pages/agy.js')],
   ['computer', '电脑任务', '▣', () => import('./pages/computer.js')],
   ['logs', '日志', '›_', () => import('./pages/logs.js')],
 ]

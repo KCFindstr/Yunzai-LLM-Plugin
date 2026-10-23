@@ -360,6 +360,13 @@ tools:
     thinking: 'off'
     checkpointSteps: 8         # Claude 使用追加式上下文，定期检查点以保留缓存命中
   # 禁用的工具名（#llm工具列表 查看）
+  agy:
+    enable: false
+    access: admin
+    distro: yunzai-sandbox
+    executable: ''              # 留空使用 data/agy-setup/agy.exe
+    maxMinutes: 10
+    maxQueue: 8
   disabled: []
 
 # --------------------------------------------------------------------------

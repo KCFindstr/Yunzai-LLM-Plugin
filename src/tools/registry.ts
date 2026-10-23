@@ -2,6 +2,7 @@ import type { EffectiveConfig, ModelConfig } from '../core/configTypes.ts'
 import { brief, log } from '../core/log.ts'
 import { truncate } from '../core/util.ts'
 import type { ToolCall, ToolResult, ToolSpec } from '../llm/types.ts'
+import type { ImagePart } from '../llm/types.ts'
 
 export interface TurnState {
   /** Command dispatched to another plugin this turn (ends the loop). */
@@ -18,6 +19,10 @@ export interface TurnState {
   sandboxSession?: string
   afterReply?: (() => void)[]
   computerJob?: string
+  agyJob?: string
+  asyncResult?: { kind: 'agy'; id: string }
+  /** Current/quoted image bytes already loaded for this turn; never persisted in the chat transcript. */
+  inputImages?: ImagePart[]
   computerResult?: { id: string; images: Buffer[] }
 }
 
@@ -79,6 +84,8 @@ class Registry {
   /** Tools offered this turn, in deterministic order (stable tool list = stable prompt cache). */
   forTurn(ctx: ToolCtx, hide: Set<string> = new Set()): ToolDef[] {
     if (!ctx.eff.tools.enable) return []
+    // Worker data may only be summarized; it must never authorize side effects or bypass privacy filtering.
+    if (ctx.turn.asyncResult) return []
     const disabled = new Set(ctx.eff.tools.disabled ?? [])
     return this.all().filter(d => !disabled.has(d.name) && !hide.has(d.name) && (d.available?.(ctx) ?? true))
   }

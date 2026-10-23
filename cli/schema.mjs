@@ -52,7 +52,7 @@ const providerNames = c => Object.keys(c.providers ?? {})
 const modelIds = c => (c.models ?? []).map(m => m.id).filter(Boolean)
 const presetNames = c => Object.keys(c.persona?.presets ?? {})
 const toolNames = c => [
-  ...new Set(['web_search', 'web_fetch', 'run_bot_command', 'search_bot_commands', 'list_bot_commands', 'load_skill', 'memory', 'add_sticker', 'list_stickers', 'render_html', 'run_code', 'computer_task', ...(c.tools?.http ?? []).map(h => h.name).filter(Boolean), ...(c.tools?.disabled ?? [])]),
+  ...new Set(['web_search', 'web_fetch', 'run_bot_command', 'search_bot_commands', 'list_bot_commands', 'load_skill', 'memory', 'add_sticker', 'list_stickers', 'render_html', 'run_code', 'computer_task', 'agy', ...(c.tools?.http ?? []).map(h => h.name).filter(Boolean), ...(c.tools?.disabled ?? [])]),
 ]
 
 const limits = label => obj({ window5h: num('5小时额度（美元）', { min: 0, nullable: true }), weekly: num('每周额度（美元）', { min: 0, nullable: true }) }, label)
@@ -276,6 +276,14 @@ const tools = obj(
       },
       '持久电脑代理',
     ),
+    agy: obj({
+      enable: bool('异步 AGY 检索（需先 agy-setup）'),
+      access: oneOf(['admin', 'all'], '谁可以使用 AGY'),
+      distro: str('现有机器人 WSL 发行版', { pattern: /^[\w.-]+$/ }),
+      executable: str('宿主机 AGY CLI 路径（留空使用私有副本）', { allowEmpty: true }),
+      maxMinutes: int('任务最多分钟数', { min: 1, max: 30 }),
+      maxQueue: int('排队上限', { min: 1, max: 50 }),
+    }, '异步检索'),
     disabled: multi(toolNames, '禁用的工具'),
   },
   '工具',

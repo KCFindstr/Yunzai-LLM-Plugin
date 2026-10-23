@@ -33,6 +33,12 @@ export class JsonStore<T> {
     this.timer.unref?.()
   }
 
+  dispose() {
+    if (this.timer) clearTimeout(this.timer)
+    this.timer = undefined
+    stores.delete(this)
+  }
+
   flush() {
     if (this.timer) clearTimeout(this.timer)
     this.timer = undefined

@@ -370,6 +370,15 @@ export function normalize(raw: any): PluginConfig {
     checkpointSteps: bounded(pc.checkpointSteps, 8, 2, 30),
   }
   c.tools.disabled = asArray(c.tools.disabled)
+  const agy = isPlainObject(c.tools.agy) ? c.tools.agy : {}
+  c.tools.agy = {
+    enable: agy.enable === true,
+    access: agy.access === 'all' ? 'all' : 'admin',
+    distro: typeof agy.distro === 'string' && /^[\w.-]+$/.test(agy.distro) ? agy.distro : 'yunzai-sandbox',
+    executable: typeof agy.executable === 'string' ? agy.executable : '',
+    maxMinutes: bounded(agy.maxMinutes, 10, 1, 30),
+    maxQueue: bounded(agy.maxQueue, 8, 1, 50),
+  }
   c.skills = isPlainObject(c.skills) ? c.skills : { enable: true }
   const m = isPlainObject(c.memory) ? c.memory : {}
   const n = (v: any, d: number) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : d)

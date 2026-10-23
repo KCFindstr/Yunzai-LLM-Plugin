@@ -226,3 +226,28 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .login .card { width: min(360px, 100%); display: flex; flex-direction: column; gap: 12px; }
 .spin { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: spin .7s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* AGY execution history */
+.icon { display: inline-flex; align-items: center; justify-content: center; flex: none; vertical-align: middle; }
+/* Computer task history */
+.computer-job-list { padding: 2px; }
+.computer-job { display: flex; flex-direction: column; gap: 8px; color: var(--text); margin-bottom: 10px; }
+.computer-job:hover { text-decoration: none; border-color: var(--accent); }
+.computer-job strong { font-size: 13px; font-weight: 550; overflow-wrap: anywhere; }
+.computer-job-detail { min-width: 0; }
+.computer-task-text { font: inherit; font-weight: 550; }
+.computer-progress { display: flex; gap: 8px; align-items: flex-start; background: var(--accent-soft, #35bda51a); padding: 10px 12px; border-radius: 8px; margin-top: 12px; overflow-wrap: anywhere; }
+.computer-arguments { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 10px; color: var(--muted); font-size: 11px; }
+.computer-arguments summary { cursor: pointer; }
+.computer-arguments pre { margin-top: 10px; color: var(--text); }
+.computer-timeline { display: flex; flex-direction: column; }
+.computer-event { display: flex; gap: 12px; position: relative; padding-bottom: 24px; }
+.computer-event:not(:last-child)::before { content: ''; position: absolute; left: 15px; top: 34px; bottom: 2px; border-left: 1px solid var(--line); }
+.computer-event:last-child { padding-bottom: 0; }
+.computer-event-icon { width: 32px; height: 32px; background: var(--accent-soft, #35bda51a); color: var(--accent); display: grid; place-items: center; border-radius: 9px; flex: none; }
+.computer-event-content { min-width: 0; flex: 1; padding-top: 3px; }
+.computer-event-content > pre, .computer-event-content > .chips { margin-top: 9px; }
+.computer-event-content > .small { display: block; margin-top: 7px; }
+.computer-event-head { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; font-size: 12px; }
+.computer-event-head time { margin-left: auto; font-size: 10px; }
+.event-error .computer-event-icon { color: var(--bad); background: #e0445a13; }

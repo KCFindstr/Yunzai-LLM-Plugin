@@ -21,6 +21,8 @@ import { addMemory, clearMemory, deleteMemory, listMemory, memoryOwners, memoryS
 import { indexSticker, stickerIncomplete } from '../stickers/indexer.ts'
 import { addImageSticker, listStickers, removeSticker, stickerFile, updateSticker, type Sticker } from '../stickers/store.ts'
 import { computerQueue } from '../tools/computer.ts'
+import { agyQueue, cancelAgyJob } from '../tools/agy.ts'
+import { agyHistory, agyJobView } from '../agy/history.ts'
 import { registry } from '../tools/registry.ts'
 import { deleteSkill, listSkills, parseSkillMarkdown, saveSkill } from '../tools/skills.ts'
 
@@ -551,6 +553,17 @@ export const routes: Route[] = [
   }),
 
   R('GET', '/api/logs', ({ query }) => recentLogs(Number(query.get('after')) || 0, query.get('level') || undefined)),
+
+  R('GET', '/api/agy', () => [...agyQueue.jobs].reverse().map(agyJobView)),
+  R('GET', '/api/agy/:id/history', ({ params }) => {
+    if (!agyQueue.jobs.some(job => job.id === params[0])) throw fail('任务不存在', 404)
+    return agyHistory(params[0])
+  }),
+  R('POST', '/api/agy/:id/cancel', ({ params }) => {
+    const job = agyQueue.jobs.find(entry => entry.id === params[0])
+    if (!job) throw fail('没有这个任务', 404)
+    cancelAgyJob(job)
+  }),
 
   R('POST', '/api/actions/:name', async ({ params }) => {
     switch (params[0]) {
