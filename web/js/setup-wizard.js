@@ -261,15 +261,108 @@ export function setupWizard(initialData, onChange) {
     const runtime = ['sandbox', 'agy', 'computer', 'lens'].includes(id)
     const label = !state ? '检查中' : state.ready ? (runtime ? state.enabled ? '已就绪 · 已启用' : '已就绪 · 未启用' : '已配置') : skipped.has(id) ? '已跳过' : '待配置'
     const step = { models: modelsStep, search: searchStep, embedding: embeddingStep, jev: jevStep, budgets: budgetsStep }[id]
-    mount(root, h('div', { class: 'setup-heading' }, h('h2', '设置向导'), h('p', { class: 'muted small' }, '先完成聊天模型，其余功能按需配置。已有设置会自动识别。')),
-      h('nav', { class: 'setup-steps', 'aria-label': '设置步骤' }, STEPS.map(([key, label], index) => button(
-        `${index + 1}. ${label}${status?.[key]?.ready ? ' ✓' : skipped.has(key) ? ' · 已跳过' : ''}`, () => { current = index; draw() }, index === current ? 'primary' : 'ghost', { 'data-setup-target': key, 'aria-current': index === current ? 'step' : null }))),
-      h('section', { class: 'setup-step', 'data-setup-step': id }, h('div', { class: 'row' }, h('h3', title), badge(label, state?.ready ? 'ok' : 'warn'), current ? badge('可选') : null),
-        state?.detail ? h('p', { class: 'small muted' }, state.detail) : null,
-        step ? step() : runtimeStep(id)),
-      feedback, h('div', { class: 'setup-navigation' }, current ? button('上一步', () => { current--; draw() }) : h('span'),
-        h('div', { class: 'row' }, current > 0 ? button('跳过此步骤', () => { skipped.add(id); if (current < STEPS.length - 1) { current++; draw() } else location.hash = '#/config/basic' }, 'ghost') : null,
-          current < STEPS.length - 1 ? button('下一步', () => { current++; draw() }, 'primary') : h('a', { class: 'btn primary', href: '#/config/basic' }, '完成'))))
+
+    const totalSteps = STEPS.length
+    const readyCount = STEPS.filter(([k]) => status?.[k]?.ready).length
+    const readyPct = Math.round((readyCount / totalSteps) * 100)
+    const trackFillPercent = totalSteps > 1 ? (current / (totalSteps - 1)) * 100 : 0
+
+    const headerCard = h('div', { class: 'setup-header-card' },
+      h('div', { class: 'setup-header-top' },
+        h('div', { class: 'setup-heading' },
+          h('div', { class: 'setup-title-badge-row' },
+            h('h2', '设置向导'),
+            h('span', { class: 'setup-pill-badge' }, `第 ${current + 1} / ${totalSteps} 步 · ${title}`)
+          ),
+          h('p', { class: 'muted small' }, '引导您配置核心模型与各项扩展能力。已配置项自动识别同步，按需逐步启用。')
+        ),
+        h('div', { class: 'setup-progress-stat' },
+          h('span', { class: 'setup-progress-percent' }, `${readyPct}%`),
+          h('span', { class: 'setup-progress-sub' }, `${readyCount} / ${totalSteps} 项就绪`)
+        )
+      ),
+      h('div', { class: 'setup-progress-bar-container', role: 'progressbar', 'aria-valuenow': readyPct, 'aria-valuemin': 0, 'aria-valuemax': 100, title: `整体配置进度 ${readyPct}%` },
+        h('div', { class: 'setup-progress-bar-fill', style: `width: ${readyPct}%` })
+      )
+    )
+
+    const stepperNav = h('nav', { class: 'setup-steps', 'aria-label': '设置步骤' },
+      h('div', { class: 'setup-steps-track', 'aria-hidden': 'true' },
+        h('div', { class: 'setup-steps-track-fill', style: `width: ${trackFillPercent}%` })
+      ),
+      ...STEPS.map(([key, stepTitle], index) => {
+        const isReady = Boolean(status?.[key]?.ready)
+        const isCurrent = index === current
+        const isSkipped = skipped.has(key)
+        const nodeStatus = isCurrent
+          ? (isReady ? '当前 · 就绪' : '当前步骤')
+          : isReady
+            ? '已就绪'
+            : isSkipped
+              ? '已跳过'
+              : index === 0
+                ? '必需'
+                : '待配置'
+        const nodeClasses = [
+          'setup-step-node',
+          isCurrent ? 'is-active' : '',
+          isReady ? 'is-ready' : '',
+          isSkipped ? 'is-skipped' : ''
+        ].filter(Boolean).join(' ')
+
+        const circleContent = isReady
+          ? '✓'
+          : isSkipped
+            ? '↷'
+            : String(index + 1)
+
+        return h('button', {
+          type: 'button',
+          class: nodeClasses,
+          onclick: () => { current = index; draw() },
+          'data-setup-target': key,
+          'aria-current': isCurrent ? 'step' : null,
+          title: `${index + 1}. ${stepTitle} (${nodeStatus})`
+        },
+          h('span', { class: 'setup-step-circle' }, circleContent),
+          h('span', { class: 'setup-step-info' },
+            h('span', { class: 'setup-step-title' }, stepTitle),
+            h('span', { class: 'setup-step-badge' }, nodeStatus)
+          )
+        )
+      })
+    )
+
+    const stepCard = h('section', { class: 'setup-step', 'data-setup-step': id },
+      h('div', { class: 'setup-step-header' },
+        h('div', { class: 'setup-step-title-group' },
+          h('span', { class: 'setup-step-index-tag' }, `步骤 ${current + 1}`),
+          h('h3', title)
+        ),
+        h('div', { class: 'row setup-step-badges' },
+          badge(label, state?.ready ? 'ok' : 'warn'),
+          current ? badge('可选') : badge('必需', 'accent')
+        )
+      ),
+      state?.detail ? h('p', { class: 'small muted setup-step-detail' }, state.detail) : null,
+      step ? step() : runtimeStep(id)
+    )
+
+    const navRow = h('div', { class: 'setup-navigation' },
+      current ? button('上一步', () => { current--; draw() }, 'ghost') : h('span'),
+      h('div', { class: 'row setup-nav-actions' },
+        current > 0 ? button('跳过此步骤', () => {
+          skipped.add(id)
+          if (current < STEPS.length - 1) { current++; draw() }
+          else location.hash = '#/config/basic'
+        }, 'ghost') : null,
+        current < STEPS.length - 1
+          ? button('下一步', () => { current++; draw() }, 'primary')
+          : h('a', { class: 'btn primary', href: '#/config/basic' }, '完成')
+      )
+    )
+
+    mount(root, headerCard, stepperNav, stepCard, feedback, navRow)
   }
   draw()
   void run(async () => { status = await get('/api/setup'); draw() })
