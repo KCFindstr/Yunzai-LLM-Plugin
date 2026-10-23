@@ -1118,7 +1118,115 @@ function queryUsageCalls(from, to, model2) {
     FROM usage_calls WHERE ${where} GROUP BY model ORDER BY cost DESC`).all(...model2 ? [from, to, model2] : [from, to]);
   const models = db.prepare("SELECT DISTINCT model FROM usage_calls ORDER BY model").all().map((row) => row.model);
   const startedAt2 = db.prepare("SELECT value FROM usage_meta WHERE key = 'startedAt'").get().value;
-  return { from, to, startedAt: startedAt2, models, rows };
+  const diff = to - from;
+  let bucketMs = 864e5;
+  if (diff <= 3 * 36e5) bucketMs = 5 * 6e4;
+  else if (diff <= 12 * 36e5) bucketMs = 15 * 6e4;
+  else if (diff <= 36 * 36e5) bucketMs = 36e5;
+  else if (diff <= 7 * 864e5) bucketMs = 4 * 36e5;
+  else if (diff <= 16 * 864e5) bucketMs = 864e5;
+  else if (diff <= 60 * 864e5) bucketMs = 864e5;
+  else bucketMs = 7 * 864e5;
+  const numBuckets = Math.max(1, Math.min(360, Math.ceil(diff / bucketMs)));
+  const timelineRows = db.prepare(`SELECT
+    CAST((at - ?) / ? AS INTEGER) AS bucket,
+    model,
+    COUNT(*) AS calls,
+    SUM(cost) AS cost,
+    SUM(input) AS input,
+    SUM(output) AS output,
+    SUM(cache_read) AS cacheRead,
+    SUM(cache_write) AS cacheWrite,
+    SUM(cache_write_1h) AS cacheWrite1h,
+    SUM(input_cost) AS inputCost,
+    SUM(output_cost) AS outputCost,
+    SUM(cached_cost) AS cachedCost,
+    SUM(other_cost) AS otherCost,
+    SUM(unattributed_cost) AS unattributedCost
+    FROM usage_calls WHERE ${where}
+    GROUP BY bucket, model ORDER BY bucket ASC, model ASC`).all(from, bucketMs, ...model2 ? [from, to, model2] : [from, to]);
+  const bucketMap = /* @__PURE__ */ new Map();
+  for (const r of timelineRows) {
+    const b = Number(r.bucket);
+    let entry = bucketMap.get(b);
+    if (!entry) {
+      entry = {
+        calls: 0,
+        cost: 0,
+        input: 0,
+        output: 0,
+        cached: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        cacheWrite1h: 0,
+        inputCost: 0,
+        outputCost: 0,
+        cachedCost: 0,
+        otherCost: 0,
+        byModel: {}
+      };
+      bucketMap.set(b, entry);
+    }
+    const calls = Number(r.calls ?? 0);
+    const cost = Number(r.cost ?? 0);
+    const input = Number(r.input ?? 0);
+    const output = Number(r.output ?? 0);
+    const cacheRead = Number(r.cacheRead ?? 0);
+    const cacheWrite = Number(r.cacheWrite ?? 0);
+    const cacheWrite1h = Number(r.cacheWrite1h ?? 0);
+    const cached = cacheRead + cacheWrite + cacheWrite1h;
+    const inputCost = Number(r.inputCost ?? 0);
+    const outputCost = Number(r.outputCost ?? 0);
+    const cachedCost = Number(r.cachedCost ?? 0);
+    const otherCost = Number((r.otherCost ?? 0) + (r.unattributedCost ?? 0));
+    entry.calls += calls;
+    entry.cost += cost;
+    entry.input += input;
+    entry.output += output;
+    entry.cached += cached;
+    entry.cacheRead += cacheRead;
+    entry.cacheWrite += cacheWrite;
+    entry.cacheWrite1h += cacheWrite1h;
+    entry.inputCost += inputCost;
+    entry.outputCost += outputCost;
+    entry.cachedCost += cachedCost;
+    entry.otherCost += otherCost;
+    entry.byModel[String(r.model)] = {
+      calls,
+      cost,
+      input,
+      output,
+      cached,
+      cacheRead,
+      cacheWrite,
+      cacheWrite1h,
+      inputCost,
+      outputCost,
+      cachedCost,
+      otherCost
+    };
+  }
+  const timeline = [];
+  for (let i = 0; i < numBuckets; i++) {
+    const entry = bucketMap.get(i);
+    timeline.push({
+      time: from + i * bucketMs,
+      calls: entry?.calls ?? 0,
+      cost: entry?.cost ?? 0,
+      input: entry?.input ?? 0,
+      output: entry?.output ?? 0,
+      cached: entry?.cached ?? 0,
+      cacheRead: entry?.cacheRead ?? 0,
+      cacheWrite: entry?.cacheWrite ?? 0,
+      cacheWrite1h: entry?.cacheWrite1h ?? 0,
+      inputCost: entry?.inputCost ?? 0,
+      outputCost: entry?.outputCost ?? 0,
+      cachedCost: entry?.cachedCost ?? 0,
+      otherCost: entry?.otherCost ?? 0,
+      byModel: entry?.byModel ?? {}
+    });
+  }
+  return { from, to, startedAt: startedAt2, models, rows, timeline, bucketMs };
 }
 function resetUsageCalls(models) {
   const db = database();
