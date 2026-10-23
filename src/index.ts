@@ -16,6 +16,7 @@ import { registerRenderTool } from './tools/render.ts'
 import { registerExecTool, stopKeepalive } from './tools/exec.ts'
 import { closeOwnBrowser } from './render/browser.ts'
 import { registerComputerTool, computerQueue } from './tools/computer.ts'
+import { registerGoogleLensTool } from './tools/googleLens.ts'
 import { registerAgyTool, agyQueue } from './tools/agy.ts'
 import { refreshComputerKeepalive, stopComputerKeepalive } from './computer/keepalive.ts'
 import { startWeb, stopWeb } from './web/server.ts'
@@ -40,6 +41,7 @@ function startup() {
   registerExecTool()
   registerComputerTool()
   registerAgyTool()
+  registerGoogleLensTool()
   refreshComputerKeepalive()
   config.onChange(refreshComputerKeepalive)
   loadSkills()

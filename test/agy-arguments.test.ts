@@ -11,6 +11,8 @@ it('accepts command and the cmd alias without silently changing or coercing comm
   assert.match(agyOperation('exec', { command: 'a'.repeat(24001) }).error, /limit/)
   assert.deepEqual(agyOperation('read_image', { path: '/work/image.png' }), { op: 'image', path: '/work/image.png' })
   assert.ok(agyOperation('read_image', {}).error)
+  assert.match(agyOperation('google_image_search', { path: '/work/image.jpg' }).error, /Unknown tool/)
+  assert.ok(agyOperation('google_image_search', { path: 1 }).error)
 })
 
 it('returns an actionable MCP error for missing arguments without needing the VM', async () => {

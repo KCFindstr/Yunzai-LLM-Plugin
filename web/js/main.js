@@ -13,7 +13,7 @@ const PAGES = [
   ['stickers', '表情包', 'sticker', () => import('./pages/stickers.js'), '模型与资源'],
   ['tools', '工具与技能', 'tools', () => import('./pages/tools.js'), '模型与资源'],
   ['computer', '电脑任务', 'computer', () => import('./pages/computer.js'), '系统管理'],
-  ['agy', 'AGY 任务', 'models', () => import('./pages/agy.js'), '系统管理'],
+  ['agy', '异步代理（AGY）', 'models', () => import('./pages/agy.js'), '系统管理'],
   ['config', '配置', 'settings', () => import('./pages/config.js'), '系统管理'],
   ['logs', '日志', 'logs', () => import('./pages/logs.js'), '系统管理'],
 ]

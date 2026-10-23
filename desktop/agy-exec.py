@@ -41,6 +41,15 @@ def main():
                 f.write(data)
             os.replace(temporary, item['name'], src_dir_fd=work_fd, dst_dir_fd=work_fd)
         return {'ok': True, 'work': '/work'}
+    if request['op'] == 'google_image_search':
+        # Narrow trusted operation against the existing sandboxed desktop browser, not arbitrary agent code.
+        environment = {'PATH': '/usr/bin:/bin', 'PYTHONPATH': '/usr/local/lib/agy-browser'}
+        try:
+            result = subprocess.run(['python3', '/opt/llm-agy/google-image-search.py', str(work_fd), request.get('path', '')],
+                                    stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=60, pass_fds=(work_fd,), env=environment)
+        except subprocess.TimeoutExpired:
+            return {'provider': 'google_lens', 'status': 'timeout', 'error': 'Google Lens timed out waiting for the VM browser; no visual match is confirmed.'}
+        return json.loads(result.stdout)
     if request['op'] not in ('exec', 'image'):
         raise ValueError('Unknown operation')
     command = str(request.get('command', ''))

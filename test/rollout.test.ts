@@ -6,9 +6,11 @@ import { spawnSync } from 'node:child_process'
 import { describe, it } from 'node:test'
 
 const secret = 'never-export-this-provider-secret'
-writeUserConfig(`providers:\n  mock: { type: openai, baseUrl: 'http://127.0.0.1:9', apiKey: '${secret}' }\nmodels:\n  - { id: example, provider: mock, model: example-model }\ndefaultModel: example\npersona:\n  active: example\n  presets:\n    example: '完整人设：你是{botName}，保持简短自然。'\nchat: { maxToolRounds: 20, sessionScope: group }\ntools:\n  computer: { enable: true, access: admin }\n  http:\n    - name: example_http\n      description: 文档示例HTTP工具\n      url: 'https://example.invalid/private-endpoint'\n      headers: { Authorization: 'Bearer ${secret}' }\n`)
+writeUserConfig(`providers:\n  mock: { type: openai, baseUrl: 'http://127.0.0.1:9', apiKey: '${secret}' }\nmodels:\n  - { id: example, provider: mock, model: example-model }\ndefaultModel: example\npersona:\n  active: example\n  presets:\n    example: '完整人设：你是{botName}，保持简短自然。'\nchat: { maxToolRounds: 20, sessionScope: group }\ntools:\n  computer: { enable: true, access: admin }\n  agy: { enable: true, access: admin }\n  googleLens: { enable: true, access: admin }\n  http:\n    - name: example_http\n      description: 文档示例HTTP工具\n      url: 'https://example.invalid/private-endpoint'\n      headers: { Authorization: 'Bearer ${secret}' }\n`)
 fs.mkdirSync(path.join(TMP, 'skills', 'computer-use'), { recursive: true })
 fs.copyFileSync(path.join(PLUGIN_ROOT, 'skills/computer-use/SKILL.md'), path.join(TMP, 'skills/computer-use/SKILL.md'))
+fs.mkdirSync(path.join(TMP, 'skills', 'google-lens'), { recursive: true })
+fs.copyFileSync(path.join(PLUGIN_ROOT, 'skills/google-lens/SKILL.md'), path.join(TMP, 'skills/google-lens/SKILL.md'))
 const marker = path.join(TMP, 'custom-module-executed')
 fs.mkdirSync(path.join(TMP, 'tools'), { recursive: true })
 fs.writeFileSync(path.join(TMP, 'tools', 'side-effect.mjs'), `import fs from 'node:fs'; fs.writeFileSync(${JSON.stringify(marker)}, 'executed');`)
@@ -44,6 +46,8 @@ describe('complete initial prompt examples', () => {
     assert.ok(snapshot.initial.tools.some((tool: any) => tool.name === 'example_http'))
     assert.ok(!snapshot.initial.tools.some((tool: any) => tool.name === 'computer_result'))
     if (process.platform === 'win32') {
+      assert.ok(snapshot.initial.tools.some((tool: any) => tool.name === 'google_lens'))
+      assert.ok(snapshot.initial.tools.some((tool: any) => tool.name === 'agy'))
       const computer = snapshot.initial.tools.find((tool: any) => tool.name === 'computer_task')
       assert.deepEqual(computer.parameters.properties.action.enum, ['start', 'status', 'cancel', 'respond'])
     }
@@ -52,7 +56,7 @@ describe('complete initial prompt examples', () => {
   it('applies non-admin availability filters rather than advertising every registered tool', () => {
     const snapshot = generate(false)
     assert.equal(snapshot.context.isAdmin, false)
-    assert.ok(!snapshot.initial.tools.some((tool: any) => tool.name === 'computer_task'))
+    for (const name of ['computer_task', 'google_lens', 'agy']) assert.ok(!snapshot.initial.tools.some((tool: any) => tool.name === name))
     assert.ok(!snapshot.initial.messages.at(-1).content[0].text.includes('［管理员］'))
   })
 

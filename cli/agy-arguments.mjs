@@ -8,7 +8,7 @@ export function agyOperation(name, args) {
     return { op: 'exec', command }
   }
   if (name === 'read_image') {
-    if (typeof args.path !== 'string' || !args.path.trim() || args.path.length > 300 || args.path.includes('\0')) return { error: 'read_image requires a valid "path" string under /work.' }
+    if (typeof args.path !== 'string' || !args.path.trim() || args.path.length > 300 || args.path.includes('\0')) return { error: `${name} requires a valid "path" string under /work.` }
     return { op: 'image', path: args.path }
   }
   return { error: 'Unknown tool.' }

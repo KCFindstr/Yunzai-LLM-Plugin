@@ -370,6 +370,12 @@ export function normalize(raw: any): PluginConfig {
     checkpointSteps: bounded(pc.checkpointSteps, 8, 2, 30),
   }
   c.tools.disabled = asArray(c.tools.disabled)
+  const lens = isPlainObject(c.tools.googleLens) ? c.tools.googleLens : {}
+  c.tools.googleLens = {
+    enable: lens.enable === true,
+    access: lens.access === 'all' ? 'all' : 'admin',
+    distro: typeof lens.distro === 'string' && /^[\w.-]+$/.test(lens.distro) ? lens.distro : 'yunzai-sandbox',
+  }
   const agy = isPlainObject(c.tools.agy) ? c.tools.agy : {}
   c.tools.agy = {
     enable: agy.enable === true,

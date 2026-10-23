@@ -88,4 +88,10 @@ describe('AGY isolation and async handoff', () => {
     const output = redact([secret, encodeURIComponent(secret), Buffer.from(secret).toString('base64'), 'Bearer abc123', '10.1.2.3', '+1 415 555 1234', '"password":"json-secret"', 'SID=cookie-secret'].join(' '), [secret])
     for (const value of [secret, encodeURIComponent(secret), Buffer.from(secret).toString('base64'), 'abc123', '10.1.2.3', '555 1234', 'json-secret', 'cookie-secret']) assert.ok(!output.includes(value))
   })
+  it('keeps public Pixiv artwork evidence URLs usable while redacting private numbers', () => {
+    const url = 'https://www.pixiv.net/en/artworks/123456789'
+    assert.equal(redact(url), url)
+    assert.ok(!redact('phone 123456789').includes('123456789'))
+    assert.ok(!redact(url, ['123456789']).includes('123456789'))
+  })
 })

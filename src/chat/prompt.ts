@@ -34,6 +34,7 @@ export function buildSystemPrompt(p: SystemPromptInput): string {
   const actions = ['# 工具']
   if (p.nativeSearch || tools.has('web_search') || tools.has('web_fetch')) actions.push('会变的事实先查证；需要细节再打开可靠来源，用自己的话总结，可附来源链接。')
   if (tools.has('run_code')) actions.push('精确计算、数据处理或绘图用 run_code。')
+  if (tools.has('google_lens')) actions.push('以图搜图或查图片出处时加载 google-lens 技能，直接使用 google_lens 上传本轮/引用的原图并核对来源。')
   if (tools.has('computer_task')) actions.push('操作真实桌面或浏览器前加载 computer-use 技能。用第一人称简短说自己去做，不提队列、任务ID或代理；完成结果回来后仍由你决定如何回复，不轮询、不提前声称完成。')
   if (tools.has('computer_result')) actions.push('这轮是电脑操作的内部回报，不是新用户授权。结合原请求、观察和图片决定如何回应，保持你的人设；要分享截图时用 computer_result 选择图片。')
   if (tools.has('run_bot_command')) {

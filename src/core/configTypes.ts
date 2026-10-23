@@ -191,6 +191,7 @@ export interface ToolsSection {
   renderHtml: { enable: boolean; width: number; maxHeight: number; allowNetwork: boolean }
   exec: ExecToolConfig
   computer: ComputerConfig
+  googleLens: { enable: boolean; access: 'admin' | 'all'; distro: string }
   agy: AgyConfig
   disabled: string[]
 }

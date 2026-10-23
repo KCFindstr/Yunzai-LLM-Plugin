@@ -20,6 +20,7 @@ export interface TurnState {
   afterReply?: (() => void)[]
   computerJob?: string
   agyJob?: string
+  lensSearches?: number
   asyncResult?: { kind: 'agy'; id: string }
   /** Current/quoted image bytes already loaded for this turn; never persisted in the chat transcript. */
   inputImages?: ImagePart[]

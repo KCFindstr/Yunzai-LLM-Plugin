@@ -15,6 +15,8 @@ export interface ComputerJob {
   requesterText?: string
   /** Metadata only; original bytes live in the plugin's computer-inputs directory. */
   inputImages?: ComputerInputImage[]
+  /** AGY workspace is stable per chat session; job IDs remain unique per operation. */
+  agyWorkspaceId?: string
   steps?: number
   inputTokens?: number
   outputTokens?: number

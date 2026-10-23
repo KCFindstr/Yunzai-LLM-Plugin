@@ -49,7 +49,7 @@ function prepare() {
 describe('image handoff to desktop worker', () => {
   it('stages images before the model starts and preserves exact paths across checkpoints and resume', async () => {
     const cfg = prepare()
-    const job = new ComputerQueue([]).submit('owner', 'Use Google Lens to identify the attached image', 2)
+    const job = new ComputerQueue([]).submit('owner', 'Inspect the attached image on the desktop', 2)
     job.inputImages = captureComputerImages(job.id, [image])
     const file = computerImagePath(job.id, job.inputImages[0])
     let staged = 0
@@ -61,7 +61,7 @@ describe('image handoff to desktop worker', () => {
         assert.ok(staged > 0)
         const context = JSON.stringify(params.messages)
         assert.ok(context.includes(file))
-        assert.match(params.system, /Upload the actual image/)
+        assert.doesNotMatch(params.system, /Google Lens|images\.google\.com|Upload the actual image/)
         assert.doesNotMatch(context, /computer-inputs|expired.test/)
         calls++
         return { text: '', usage: emptyUsage(), stopReason: 'stop', toolCalls: [{ id: String(calls), name: calls === 1 ? 'checkpoint' : 'finish', args: calls === 1 ? { note: 'Upload is next' } : { report: 'observed result' } }] }

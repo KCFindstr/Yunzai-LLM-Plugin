@@ -1,5 +1,6 @@
 import type { ChatSection } from '../core/configTypes.ts'
 import { JsonStore } from '../core/store.ts'
+import { randomBytes } from 'node:crypto'
 import { estimateTokens, similarity, truncate } from '../core/util.ts'
 import { config } from '../core/config.ts'
 import { log } from '../core/log.ts'
@@ -25,6 +26,8 @@ export interface ArchiveEntry {
 export interface DayEntry { id: string; day: string; text: string; at: number; sources: string[] }
 
 export interface StoredSession {
+  /** Separate AGY thread/workspace for this chat session; discarded with a session reset/timeout. */
+  agy?: { workspaceId: string; conversationId?: string }
   messages: Msg[]
   summary?: string
   /** Older context: one entry per trimmed chunk; `raw` until compactSession replaces it with a summary. */
@@ -104,6 +107,24 @@ export function getSession(key: string, timeoutMin: number): StoredSession {
 
 export function peekSession(key: string): StoredSession | undefined {
   return store.data[key]
+}
+
+export function getAgySession(key: string, timeoutMin: number) {
+  const session = getSession(key, timeoutMin)
+  if (!session.agy) {
+    session.agy = { workspaceId: randomBytes(5).toString('hex') }
+    store.save()
+  }
+  return session.agy
+}
+
+export function rememberAgyConversation(key: string, workspaceId: string, conversationId: string) {
+  const session = store.data[key]
+  if (session?.agy?.workspaceId !== workspaceId || !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(conversationId)) return false
+  if (session.agy.conversationId === conversationId) return true
+  session.agy.conversationId = conversationId
+  store.save()
+  return true
 }
 
 export function toStoredUser(m: UserMsg): UserMsg {

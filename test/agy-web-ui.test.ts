@@ -78,7 +78,7 @@ it('renders AGY navigation, results, safe tool history, live refresh and cancell
     await page.waitForFunction(() => document.querySelector('.computer-job-detail')?.textContent?.includes('任务不存在或已清理'))
     agyQueue.jobs.length = 0
     await page.goto(`http://127.0.0.1:${port}/#/agy`)
-    await page.waitForFunction(() => document.body.textContent?.includes('还没有 AGY 任务'))
+    await page.waitForFunction(() => document.body.textContent?.includes('还没有异步代理任务'))
     assert.deepEqual(errors, [])
   } finally { await browser?.close(); stopWeb() }
 })

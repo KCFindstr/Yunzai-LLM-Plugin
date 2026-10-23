@@ -359,7 +359,11 @@ tools:
     maxTokensPerStep: 1200
     thinking: 'off'
     checkpointSteps: 8         # Claude 使用追加式上下文，定期检查点以保留缓存命中
-  # 禁用的工具名（#llm工具列表 查看）
+  # 主聊天模型直接调用 Google Lens，上传本轮/引用的原图
+  googleLens:
+    enable: false
+    access: admin
+    distro: yunzai-sandbox
   agy:
     enable: false
     access: admin
@@ -367,6 +371,7 @@ tools:
     executable: ''              # 留空使用 data/agy-setup/agy.exe
     maxMinutes: 10
     maxQueue: 8
+  # 禁用的工具名（#llm工具列表 查看）
   disabled: []
 
 # --------------------------------------------------------------------------

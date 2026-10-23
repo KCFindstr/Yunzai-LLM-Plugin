@@ -32,7 +32,9 @@ for await (const line of lines) {
     const image = request.params.name === 'read_image'
     const operation = agyOperation(request.params.name, request.params.arguments)
     const response = operation.error ? operation : await execute(operation)
-    result = { content: image && response.data ? [{ type: 'image', data: response.data, mimeType: response.mimeType }] : [{ type: 'text', text: JSON.stringify(response) }], isError: Boolean(response.error) || (typeof response.exitCode === 'number' && response.exitCode !== 0) }
+    const { image: screenshot, ...textResponse } = response
+    result = { content: image && response.data ? [{ type: 'image', data: response.data, mimeType: response.mimeType }] : [{ type: 'text', text: JSON.stringify(textResponse) }], isError: Boolean(response.error) || (typeof response.exitCode === 'number' && response.exitCode !== 0) }
+    if (screenshot?.data) result.content.push({ type: 'image', data: screenshot.data, mimeType: screenshot.mimeType })
   } else { process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: request.id, error: { code: -32601, message: 'Unknown method' } }) + '\n'); continue }
   process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: request.id, result }) + '\n')
 }
