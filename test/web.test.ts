@@ -198,7 +198,11 @@ describe('web panel', () => {
   it('clears cumulative statistics per model or for all, leaving quota windows alone', async () => {
     const { record, totals, daily, usedIn } = await import('../src/billing/ledger.ts')
     const usage = { input: 100, output: 10, cacheRead: 50, cacheWrite: 0, cacheWrite1h: 0, reasoning: 0, webSearches: 0 }
-    for (const id of ['gem-a', 'gem-b']) record({ id, provider: 'p', model: id } as any, { userId: 5 }, 0.01, usage as any)
+    for (const id of ['gem-a', 'gem-b']) record({ id, provider: 'p', model: id } as any, { userId: 5 }, 0.01, { ...usage, ...(id === 'gem-a' ? { inputIncomplete: true } : {}) })
+    const reported = await (await call('GET', '/api/usage')).json()
+    assert.ok(reported.incompleteModels.includes('gem-a'))
+    assert.ok(!reported.incompleteModels.includes('gem-b'))
+    assert.equal(reported.totals['gem-a'].incompleteCalls, 1)
     assert.equal((await call('POST', '/api/usage/reset-stats', {})).status, 400)
     assert.deepEqual((await (await call('POST', '/api/usage/reset-stats', { models: ['gem-a'] })).json()).reset, ['gem-a'])
     assert.equal(totals()['gem-a'], undefined)

@@ -14,7 +14,7 @@ export interface TurnRecord {
   tools: string[]
   cost: number
   ms: number
-  tokens?: { input: number; output: number; cacheRead: number }
+  tokens?: { input: number; output: number; cacheRead: number; inputIncomplete?: boolean }
   error?: string
 }
 

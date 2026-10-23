@@ -8,6 +8,8 @@ export async function render(root) {
   const u = await get('/api/usage')
   const days = u.daily.map(([d, per]) => [d.slice(5), Object.values(per).reduce((a, b) => a + b, 0)])
   const models = Object.entries(u.totals).sort((a, b) => b[1].cost - a[1].cost)
+  const incomplete = new Set(u.incompleteModels ?? [])
+  const usageNote = 'Gemini 服务端会话可能漏报历史输入和缓存 token；花费与额度按已报告用量计算，可能偏低，不能保证实际消费上限。实际费用以服务商账单为准。'
 
   const lookup = async () => {
     const r = await promptFields('查询用户额度', [{ name: 'id', label: 'QQ 号' }])
@@ -27,6 +29,7 @@ export async function render(root) {
         if (await confirmDanger('清空所有用户、群和全局的额度计数？（不影响累计统计）')) act(() => post('/api/usage/reset', { all: true }), '已重置全部额度').then(() => render(root))
       } }, '重置全部额度（不含统计）'),
     ),
+    incomplete.size ? card('用量报告不完整', h('p', { class: 'small muted' }, `${[...incomplete].join('、')}：${usageNote}`)) : null,
     card('最近 14 天花费', bars(days, fmt.usd)),
     h('div', { class: 'grid cols-2', style: { marginTop: '16px' } },
       card('全局额度（按模型）',
@@ -56,11 +59,12 @@ export async function render(root) {
           h('th', { class: 'num', title: '缓存读 ÷（未缓存输入 + 缓存读）' }, '缓存命中率'), h('th', { class: 'num' }, '缓存写'), h('th', { class: 'num' }, '输出'), h('th', { class: 'num' }, '花费'), h('th', ''))),
         h('tbody', models.map(([id, t]) => {
           const total = t.input + t.cacheRead
-          return h('tr', h('td', id),
+          const partial = incomplete.has(id)
+          return h('tr', h('td', id, partial ? h('div', { class: 'small muted', title: usageNote }, '用量可能不完整') : null),
             [t.calls, t.input, t.cacheRead].map(v => h('td', { class: 'num' }, fmt.num(v))),
-            h('td', { class: 'num' }, total ? `${((t.cacheRead / total) * 100).toFixed(1)}%` : '-'),
+            h('td', { class: 'num', title: partial ? usageNote : '' }, partial ? '待确认' : total ? `${((t.cacheRead / total) * 100).toFixed(1)}%` : '-'),
             [t.cacheWrite, t.output].map(v => h('td', { class: 'num' }, fmt.num(v))),
-            h('td', { class: 'num' }, fmt.usd(t.cost)),
+            h('td', { class: 'num', title: partial ? usageNote : '' }, fmt.usd(t.cost), partial ? h('div', { class: 'small muted' }, '已报告') : null),
             h('td', { class: 'num' }, h('button', { class: 'btn sm ghost danger', title: '清零这个模型的累计统计', onclick: async () => {
               if (await confirmDanger(`清零「${id}」的累计统计？不影响额度计数。`, '清零')) act(() => post('/api/usage/reset-stats', { models: [id] }), `「${id}」的统计已清零`).then(() => render(root))
             } }, '清零')))

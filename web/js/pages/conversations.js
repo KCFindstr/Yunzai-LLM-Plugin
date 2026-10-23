@@ -17,7 +17,7 @@ export function turnList(turns, { showConv = true } = {}) {
       ),
       h('td', { class: 'small' }, t.model ?? '-'),
       h('td', { class: 'num small' }, fmt.dur(t.ms)),
-      h('td', { class: 'num small' }, fmt.usd(t.cost)),
+      h('td', { class: 'num small', title: t.tokens?.inputIncomplete ? '历史输入与缓存用量可能缺失，花费可能偏低' : '' }, fmt.usd(t.cost), t.tokens?.inputIncomplete ? h('div', { class: 'small muted' }, '已报告') : null),
     ))),
   ))
 }
@@ -25,6 +25,7 @@ export function turnList(turns, { showConv = true } = {}) {
 function showTurn(t) {
   modal(`${fmt.time(t.at)} · ${t.userName ?? t.userId ?? ''}`, h('div', { class: 'col' },
     h('div', { class: 'small muted' }, `${t.model ?? '-'} · ${fmt.dur(t.ms)} · ${fmt.usd(t.cost)}${t.tokens ? ` · 输入 ${fmt.num(t.tokens.input)} / 缓存 ${fmt.num(t.tokens.cacheRead)} / 输出 ${fmt.num(t.tokens.output)}` : ''}`),
+    t.tokens?.inputIncomplete ? h('div', { class: 'small muted' }, '上游可能漏报历史输入和缓存 token，以上花费可能偏低；实际费用以服务商账单为准。') : null,
     h('div', { class: 'chat' }, h('div', { class: 'bubble user' }, t.input), t.reply ? h('div', { class: 'bubble assistant' }, t.reply) : null),
     t.tools.length ? h('div', h('span', { class: 'small muted' }, '工具调用：'), t.tools.join(' → ')) : null,
     t.error ? h('pre', { class: 'bad' }, t.error) : null,

@@ -20,7 +20,7 @@ models:
 
 const { config } = await import('../src/core/config.ts')
 const { computeCost, normalizeModelId, resolvePrice } = await import('../src/billing/pricing.ts')
-const { checkQuota, limitsFor, record, summarize } = await import('../src/billing/ledger.ts')
+const { checkQuota, incompleteUsageModels, limitsFor, record, resetStats, summarize, totals } = await import('../src/billing/ledger.ts')
 const { prepareReply, stripMarkdown } = await import('../src/chat/reply.ts')
 const { extractStickerMarkers } = await import('../src/stickers/picker.ts')
 const { isPrivateIp } = await import('../src/tools/ssrf.ts')
@@ -102,6 +102,19 @@ describe('pricing', () => {
 })
 
 describe('quota ledger', () => {
+  it('tracks incomplete reports without inventing tokens and retains the flag on later complete calls', () => {
+    const model = { id: 'partial-test', model: 'gemini-test', provider: 'p' }
+    const usage = { input: 97, output: 7, cacheRead: 0, cacheWrite: 0, cacheWrite1h: 0, reasoning: 0, webSearches: 0 }
+    record(model, {}, 0.001, { ...usage, inputIncomplete: true })
+    record(model, {}, 0.001, usage)
+    assert.equal(totals()[model.id].input, 194)
+    assert.equal(totals()[model.id].cacheRead, 0)
+    assert.equal(totals()[model.id].incompleteCalls, 1)
+    assert.ok(incompleteUsageModels().includes(model.id))
+    resetStats([model.id])
+    assert.ok(!incompleteUsageModels().includes(model.id))
+  })
+
   it('shorthand applies to default scope, explicit scopes are separate', () => {
     const cheap = config.getModel('cheap')!
     assert.deepEqual(limitsFor(cheap, 'user'), { window5h: 0.01, weekly: 0.02 })

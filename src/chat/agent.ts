@@ -167,8 +167,11 @@ async function runTurnInner(req: TurnRequest, ref: { turn?: TurnState }): Promis
   if (session.summary) prefix.push({ role: 'user', content: [{ type: 'text', text: `【之前对话的摘要】\n${session.summary}` }] })
   const msgs: Msg[] = [...prefix, ...session.messages, userMsg]
   // memory is part of the prefix, so a server-side chain built on older memory must not be reused
-  const stateKey = `${provider.type}:${model.model}:${memoryHash([memPrefix, system, JSON.stringify(specs)])}`
-  const serverState = usesServerState(provider)
+  // Gemini system instructions/tools are interaction-scoped: resend them without discarding history.
+  // Prefix memory is part of stored history and must still match. Bind ids to their provider/endpoint too.
+  const statePrefix = provider.type === 'gemini' ? [memPrefix] : [memPrefix, system, JSON.stringify(specs)]
+  const stateKey = `${model.provider}:${provider.type}:${provider.baseUrl ?? ''}:${model.model}:${memoryHash(statePrefix)}`
+  const serverState = usesServerState(provider, model)
   let state: ServerState | undefined
   if (serverState && session.state?.key === stateKey && session.state.len === session.messages.length)
     state = { previousId: session.state.previousId, skip: prefix.length + session.messages.length }
@@ -216,7 +219,7 @@ async function runTurnInner(req: TurnRequest, ref: { turn?: TurnState }): Promis
     at: started, conv: convKey, userId: e.user_id != null ? String(e.user_id) : undefined, userName: senderName(e),
     groupId: e.group_id != null ? String(e.group_id) : undefined, model: model.id, input: text, cost, ms: Date.now() - started,
     tools: msgs.flatMap(m => (m.role === 'assistant' ? (m.toolCalls ?? []).map(call => call.name) : [])),
-    tokens: { input: usage.input, output: usage.output, cacheRead: usage.cacheRead },
+    tokens: { input: usage.input, output: usage.output, cacheRead: usage.cacheRead, ...(usage.inputIncomplete ? { inputIncomplete: true } : {}) },
   })
   try {
     for (let round = 0; round < maxRounds; round++) {
@@ -255,7 +258,7 @@ async function runTurnInner(req: TurnRequest, ref: { turn?: TurnState }): Promis
   }
 
   log.info(
-    `[${model.id}] ${Date.now() - started}ms think=${thinking} in=${usage.input} cache=${usage.cacheRead}/${usage.cacheWrite + usage.cacheWrite1h} out=${usage.output}${usage.reasoning ? `(思考${usage.reasoning})` : ''}${usage.webSearches ? ` 自带搜索${usage.webSearches}次` : ''} $${cost.toFixed(5)}${turn.dispatched ? ` cmd=${turn.dispatched}` : ''}`,
+    `[${model.id}] ${Date.now() - started}ms think=${thinking} in=${usage.input} cache=${usage.cacheRead}/${usage.cacheWrite + usage.cacheWrite1h} out=${usage.output}${usage.reasoning ? `(思考${usage.reasoning})` : ''}${usage.webSearches ? ` 自带搜索${usage.webSearches}次` : ''} $${cost.toFixed(5)}${usage.inputIncomplete ? ' (上游历史用量可能缺失)' : ''}${turn.dispatched ? ` cmd=${turn.dispatched}` : ''}`,
   )
   if (finalText) log.debug(`[${model.id}] 回复：${brief(finalText, 500)}`)
   recordTurn({ ...turnInfo(), reply: finalText || (turn.dispatched ? `（执行指令 ${turn.dispatched}）` : '') })

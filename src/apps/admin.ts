@@ -1,6 +1,6 @@
 import YAML from 'yaml'
 import { queryBalance } from '../billing/balance.ts'
-import { daily, limitsFor, resetUsage, summarize, topUsers, totals, WINDOW_WEEK } from '../billing/ledger.ts'
+import { daily, incompleteUsageModels, limitsFor, resetUsage, summarize, topUsers, totals, WINDOW_WEEK } from '../billing/ledger.ts'
 import { priceCacheInfo, refreshPrices, resolvePrice } from '../billing/pricing.ts'
 import { catalogEntries, catalogInfo, displayCmd, ensureCatalog, formatCommandCatalog, matchRule, scanCatalog, searchCommands } from '../commands/catalog.ts'
 import { config, resolveKeys } from '../core/config.ts'
@@ -125,6 +125,7 @@ function limitLine(m: ModelConfig): string {
 
 function usageLines(userId: string, groupId?: string): string[] {
   const lines: string[] = []
+  const incomplete = new Set(incompleteUsageModels())
   for (const m of config.get().models) {
     const segs: string[] = []
     for (const s of ['user', 'group', 'global'] as QuotaScope[]) {
@@ -143,7 +144,7 @@ function usageLines(userId: string, groupId?: string): string[] {
             : ''
       segs.push(`${name} ${a} · ${b}${reset}`)
     }
-    if (segs.length) lines.push(`${m.id}：${segs.join('；')}`)
+    if (segs.length) lines.push(`${m.id}：${segs.join('；')}${incomplete.has(m.id) ? '（上游历史用量可能缺失，费用和额度可能偏低）' : ''}`)
   }
   return lines
 }
@@ -675,9 +676,11 @@ const COMMANDS: Cmd[] = [
     level: 'admin',
     async run({ e }) {
       const t = totals()
+      const incomplete = new Set(incompleteUsageModels())
       const lines = ['【累计】']
       for (const [id, v] of Object.entries(t))
-        lines.push(`${id}：${formatUsd(v.cost)}，${v.calls} 次，入 ${v.input} 缓存 ${v.cacheRead} 出 ${v.output}${v.input + v.cacheRead ? `（缓存命中 ${Math.round((v.cacheRead / (v.input + v.cacheRead)) * 100)}%）` : ''}`)
+        lines.push(`${id}：${formatUsd(v.cost)}，${v.calls} 次，入 ${v.input} 缓存 ${v.cacheRead} 出 ${v.output}${incomplete.has(id) ? '（已报告用量，缓存命中率待确认）' : v.input + v.cacheRead ? `（缓存命中 ${Math.round((v.cacheRead / (v.input + v.cacheRead)) * 100)}%）` : ''}`)
+      if (incomplete.size) lines.push(`\n${[...incomplete].join('、')}：上游可能漏报历史输入和缓存，花费与额度可能偏低；实际费用以服务商账单为准。`)
       lines.push('', '【近7天】')
       for (const [day, by] of daily(7)) {
         const sum = Object.values(by).reduce((a, b) => a + b, 0)

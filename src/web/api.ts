@@ -4,7 +4,7 @@ import YAML from 'yaml'
 // shared with the terminal config editor, so both validate writes the same way
 import { PRICING_FIELDS, SCHEMA, schemaAt, validate, validatePath, valuesOf } from '../../cli/schema.mjs'
 import { queryBalance } from '../billing/balance.ts'
-import { daily, limitsFor, resetStats, resetUsage, summarize, topUsers, totals, WINDOW_5H, WINDOW_WEEK } from '../billing/ledger.ts'
+import { daily, incompleteUsageModels, limitsFor, resetStats, resetUsage, summarize, topUsers, totals, WINDOW_5H, WINDOW_WEEK } from '../billing/ledger.ts'
 import { priceCacheInfo, refreshPrices, resolvePrice } from '../billing/pricing.ts'
 import { catalogEntries, catalogInfo, scanCatalog } from '../commands/catalog.ts'
 import { config, normalize, personaText, resolveKeys } from '../core/config.ts'
@@ -302,6 +302,7 @@ export const routes: Route[] = [
     const c = config.get()
     return {
       totals: totals(),
+      incompleteModels: incompleteUsageModels(),
       daily: daily(14),
       topUsers: topUsers(WINDOW_WEEK, 15).map(([id, usd]) => ({ id, name: nameOf('user', id), usd })),
       topUsers5h: topUsers(WINDOW_5H, 10).map(([id, usd]) => ({ id, name: nameOf('user', id), usd })),

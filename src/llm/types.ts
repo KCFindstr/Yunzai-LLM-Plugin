@@ -75,6 +75,8 @@ export interface Usage {
   webSearches: number
   /** USD cost reported by the provider (e.g. OpenRouter); overrides computed cost. */
   cost?: number
+  /** Historical input/cache tokens may be missing from provider usage; calculated cost can undercount. */
+  inputIncomplete?: boolean
 }
 
 export function emptyUsage(): Usage {
@@ -91,6 +93,7 @@ export function addUsage(a: Usage, b: Usage): Usage {
     reasoning: a.reasoning + b.reasoning,
     webSearches: a.webSearches + b.webSearches,
     cost: a.cost != null || b.cost != null ? (a.cost ?? 0) + (b.cost ?? 0) : undefined,
+    ...(a.inputIncomplete || b.inputIncomplete ? { inputIncomplete: true } : {}),
   }
 }
 

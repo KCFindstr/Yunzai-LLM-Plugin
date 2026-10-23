@@ -2,6 +2,7 @@ import { config } from '../core/config.ts'
 import type { Limits, ModelConfig, QuotaScope } from '../core/configTypes.ts'
 import { JsonStore } from '../core/store.ts'
 import type { Usage } from '../llm/types.ts'
+import { usesServerState } from '../llm/state.ts'
 
 export const WINDOW_5H = 5 * 3600_000
 export const WINDOW_WEEK = 7 * 24 * 3600_000
@@ -14,6 +15,8 @@ interface Totals {
   cacheRead: number
   cacheWrite: number
   output: number
+  /** Calls whose provider may have omitted historical input/cache usage. Absent in older ledgers. */
+  incompleteCalls?: number
 }
 
 interface LedgerData {
@@ -139,6 +142,7 @@ export function record(model: ModelConfig, ctx: QuotaCtx, cost: number, usage?: 
     t.cacheRead += usage.cacheRead
     t.cacheWrite += usage.cacheWrite + usage.cacheWrite1h
     t.output += usage.output
+    if (usage.inputIncomplete) t.incompleteCalls = (t.incompleteCalls ?? 0) + 1
   }
   const day = (d.daily[dayKey(now)] ??= {})
   day[model.id] = (day[model.id] ?? 0) + cost
@@ -172,6 +176,16 @@ export function summarize(model: ModelConfig, scope: QuotaScope, ctx: QuotaCtx):
 
 export function totals() {
   return store.data.totals
+}
+
+/** Includes active Gemini chaining before its first call, plus affected totals after config changes. */
+export function incompleteUsageModels(): string[] {
+  const ids = new Set(Object.entries(store.data.totals).filter(([, t]) => t.incompleteCalls).map(([id]) => id))
+  for (const model of config.get().models) {
+    const provider = config.getProvider(model.provider)
+    if (provider?.type === 'gemini' && usesServerState(provider, model)) ids.add(model.id)
+  }
+  return [...ids]
 }
 
 export function daily(days = 7) {

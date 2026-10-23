@@ -15,12 +15,7 @@ const adapters: Record<ProviderType, Adapter> = {
 
 export const PROVIDER_TYPES = Object.keys(adapters) as ProviderType[]
 
-/** Whether this provider type can chain turns server-side (and whether it's enabled). */
-export function usesServerState(p: ChatParams['provider']): boolean {
-  if (p.type === 'gemini') return (p.serverState ?? true) && (p.store ?? true)
-  if (p.type === 'openai-responses') return (p.serverState ?? false) && (p.store ?? p.serverState ?? false)
-  return false
-}
+export { usesServerState } from './state.ts'
 
 export async function chat(p: ChatParams): Promise<ChatResult> {
   const adapter = adapters[p.provider.type]

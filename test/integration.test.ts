@@ -351,7 +351,7 @@ describe('chat flow', () => {
     config.set('defaultModel', 'main')
   })
 
-  it('invalidates provider chains when completion-only tool definitions change', async () => {
+  it('preserves Gemini chains while resending changed system and completion-only tools', async () => {
     const { registry } = await import('../src/tools/registry.ts')
     const { runTurn } = await import('../src/chat/agent.ts')
     const { sessionKey } = await import('../src/chat/session.ts')
@@ -359,16 +359,78 @@ describe('chat flow', () => {
     config.set('defaultModel', 'gem')
     try {
       const gem = (id: string) => ({ id, status: 'completed', steps: [{ type: 'model_output', content: [{ type: 'text', text: '完成' }] }], usage: {} })
-      srvReplies.push(gem('before_completion'), gem('after_completion'))
+      srvReplies.push(gem('before_completion'), gem('after_completion'), gem('normal_again'))
       const { e } = await trigger({ user_id: 20706, message_id: 'completion-start' })
+      config.set(`groups.${e.group_id}.persona`, '新的系统人设，后续轮次继续使用已有历史，不需要重建会话。')
       const eff = config.effective(e.group_id)
       const outcome = await runTurn({ e, eff, input: { text: 'Internal result', images: [], imageSegments: [] }, isAdmin: false, convKey: sessionKey(e, eff.chat.sessionScope), modelId: 'gem', computerResult: { id: 'job', images: [] } })
       assert.equal(outcome.kind, 'reply')
       assert.equal(srv.requests.length, 2)
-      assert.equal(srv.requests[1].body.previous_interaction_id, undefined, 'new tool definitions require the full current system and tool context')
-      assert.equal(srv.requests[1].body.input.length, 3)
+      assert.equal(srv.requests[1].body.previous_interaction_id, 'before_completion')
+      assert.equal(srv.requests[1].body.input.length, 1)
+      assert.match(srv.requests[1].body.system_instruction, /新的系统人设/)
+      assert.ok(srv.requests[1].body.tools.some(t => t.name === 'completion_only'))
+      await trigger({ user_id: 20706, message_id: 'completion-return' })
+      assert.equal(srv.requests[2].body.previous_interaction_id, 'after_completion')
+      assert.equal(srv.requests[2].body.input.length, 1)
+      assert.ok(!srv.requests[2].body.tools.some(t => t.name === 'completion_only'))
     } finally {
       registry.unregisterWhere(tool => tool.name === 'completion_only')
+      config.delete('groups.30001.persona')
+      config.set('defaultModel', 'main')
+    }
+  })
+
+  it('honors Gemini model state overrides in both directions across chat turns', async () => {
+    config.set('defaultModel', 'gem')
+    const modelPath = `models.${config.get().models.findIndex(m => m.id === 'gem')}.serverState`
+    const gem = (id: string) => ({ id, status: 'completed', steps: [{ type: 'model_output', content: [{ type: 'text', text: 'ok' }] }], usage: {} })
+    try {
+      config.set('providers.mockgem.serverState', false)
+      config.set(modelPath, true)
+      srvReplies.push(gem('model-true-1'), gem('model-true-2'))
+      await trigger({ user_id: 20710, message_id: 'override-true-1' })
+      await trigger({ user_id: 20710, message_id: 'override-true-2' })
+      assert.equal(srv.requests[1].body.previous_interaction_id, 'model-true-1')
+      config.set('providers.mockgem.serverState', true)
+      config.set(modelPath, false)
+      srvReplies.push(gem('model-false-1'), gem('model-false-2'))
+      await trigger({ user_id: 20711, message_id: 'override-false-1' })
+      await trigger({ user_id: 20711, message_id: 'override-false-2' })
+      assert.equal(srv.requests[3].body.store, false)
+      assert.equal(srv.requests[3].body.previous_interaction_id, undefined)
+      assert.equal(srv.requests[3].body.input.length, 3)
+    } finally {
+      config.delete(modelPath)
+      config.delete('providers.mockgem.serverState')
+      config.set('defaultModel', 'main')
+    }
+  })
+
+  it('resets Gemini chains when prefix memory, summaries, or the endpoint change', async () => {
+    const { addMemory, clearMemory } = await import('../src/memory/store.ts')
+    const { sessionKey, setSummary } = await import('../src/chat/session.ts')
+    config.set('defaultModel', 'gem')
+    const gem = (id: string) => ({ id, status: 'completed', steps: [{ type: 'model_output', content: [{ type: 'text', text: 'ok' }] }], usage: {} })
+    srvReplies.push(...['initial', 'memory', 'summary', 'endpoint'].map(gem))
+    try {
+      const { e } = await trigger({ user_id: 20712, message_id: 'reset-initial' })
+      const eff = config.effective(e.group_id)
+      addMemory('user', '20712', '喜欢紫色的猫')
+      await trigger({ user_id: 20712, message_id: 'reset-memory' })
+      assert.equal(srv.requests[1].body.previous_interaction_id, undefined)
+      assert.match(JSON.stringify(srv.requests[1].body.input), /喜欢紫色的猫/)
+      setSummary(sessionKey(e, eff.chat.sessionScope), '替换后的摘要')
+      await trigger({ user_id: 20712, message_id: 'reset-summary' })
+      assert.equal(srv.requests[2].body.previous_interaction_id, undefined)
+      assert.match(JSON.stringify(srv.requests[2].body.input), /替换后的摘要/)
+      config.set('providers.mockgem.baseUrl', `${srv.url}/alternate`)
+      await trigger({ user_id: 20712, message_id: 'reset-endpoint' })
+      assert.equal(srv.requests[3].body.previous_interaction_id, undefined)
+      assert.equal(srv.requests[3].url, '/alternate/v1beta/interactions')
+    } finally {
+      clearMemory('user', '20712')
+      config.set('providers.mockgem.baseUrl', srv.url)
       config.set('defaultModel', 'main')
     }
   })

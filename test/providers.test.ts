@@ -1,7 +1,7 @@
 import { mockServer } from './helpers.ts'
 import assert from 'node:assert/strict'
 import { after, describe, it } from 'node:test'
-import { chat } from '../src/llm/index.ts'
+import { addUsage, chat, emptyUsage, usesServerState } from '../src/llm/index.ts'
 import type { ChatParams, Msg } from '../src/llm/types.ts'
 import type { ModelConfig, ProviderConfig } from '../src/core/configTypes.ts'
 
@@ -244,6 +244,45 @@ describe('openai responses', () => {
 })
 
 describe('gemini interactions', () => {
+  it('uses the same model/provider/storage decision in the adapter and chat loop', async () => {
+    const srv = await mockServer(() => [200, { id: 'next', status: 'completed', steps: [], usage: {} }])
+    after(srv.close)
+    const messages: Msg[] = [userMsg, { role: 'assistant', content: 'old' }, { role: 'user', content: [{ type: 'text', text: 'new' }] }]
+    const cases: { provider?: Partial<ProviderConfig>; model?: Partial<ModelConfig>; store?: boolean; enabled: boolean }[] = [
+      { enabled: true },
+      { provider: { serverState: false }, enabled: false },
+      { provider: { serverState: false }, model: { serverState: true }, enabled: true },
+      { provider: { serverState: true }, model: { serverState: false }, enabled: false },
+      { provider: { store: false }, model: { serverState: true }, enabled: false },
+      { provider: { store: false }, store: true, enabled: true },
+      { store: false, enabled: false },
+      { model: { extraBody: { store: false } }, enabled: false },
+      { model: { extraBody: { store: true, previous_interaction_id: 'unsafe-partial' } }, store: false, enabled: false },
+      { model: { serverState: false, extraBody: { store: true } }, enabled: false },
+    ]
+    for (const c of cases) {
+      const p = params({ type: 'gemini', baseUrl: srv.url, apiKey: 'test', ...c.provider }, c.model ?? {}, messages, { store: c.store, state: { previousId: 'old', skip: 2 } })
+      assert.equal(usesServerState(p.provider, p.model, p.store), c.enabled)
+      const result = await chat(p)
+      const body = srv.requests.at(-1)!.body
+      assert.equal(body.store, c.enabled)
+      assert.equal(body.previous_interaction_id, c.enabled ? 'old' : undefined)
+      assert.equal(body.input.length, c.enabled ? 1 : 3)
+      assert.equal(result.responseId, c.enabled ? 'next' : undefined)
+      assert.equal(result.usage.inputIncomplete, c.enabled ? true : undefined)
+      assert.equal(body.system_instruction, 'SYS')
+      assert.equal(body.tools[0].name, 'get_weather')
+      assert.equal(body.generation_config.thinking_level, 'low')
+    }
+  })
+
+  it('retains incomplete input metadata when aggregating subsequent tool calls', () => {
+    const partial = { ...emptyUsage(), input: 97, inputIncomplete: true }
+    assert.equal(addUsage(emptyUsage(), partial).inputIncomplete, true)
+    assert.equal(addUsage(partial, emptyUsage()).inputIncomplete, true)
+    assert.equal(addUsage(emptyUsage(), emptyUsage()).inputIncomplete, undefined)
+  })
+
   it('sends steps, parses function_call and usage', async () => {
     const srv = await mockServer(() => [
       200,
@@ -287,6 +326,10 @@ describe('gemini interactions', () => {
     const b = srv.requests[0].body
     assert.equal(b.previous_interaction_id, 'int_1')
     assert.deepEqual(b.input, [{ type: 'function_result', call_id: 'g1', name: 'get_weather', result: '多云' }])
+    assert.equal(b.system_instruction, 'SYS', 'system instructions must be resent on tool-result continuations')
+    assert.equal(b.tools[0].name, 'get_weather', 'tool schemas are interaction-scoped')
+    assert.equal(b.generation_config.thinking_level, 'low')
+    assert.equal(res.usage.inputIncomplete, true)
     assert.equal(res.text, '广州多云')
   })
 

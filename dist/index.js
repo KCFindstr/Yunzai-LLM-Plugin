@@ -426,6 +426,7 @@ function normalize(raw) {
     dailyDays: Math.min(3650, Math.floor(n(m.dailyDays, 365))),
     crossChatRecall: m.crossChatRecall === true,
     groupChatArchive: m.groupChatArchive !== false,
+    recallLimit: Math.min(100, Math.max(1, Math.floor(Number(m.recallLimit) || 5))),
     embedding: (() => {
       const em = isPlainObject(m.embedding) ? m.embedding : {};
       const type = em.type === "openai" ? "openai" : "voyage";
@@ -671,7 +672,8 @@ function addUsage(a, b) {
     output: a.output + b.output,
     reasoning: a.reasoning + b.reasoning,
     webSearches: a.webSearches + b.webSearches,
-    cost: a.cost != null || b.cost != null ? (a.cost ?? 0) + (b.cost ?? 0) : void 0
+    cost: a.cost != null || b.cost != null ? (a.cost ?? 0) + (b.cost ?? 0) : void 0,
+    ...a.inputIncomplete || b.inputIncomplete ? { inputIncomplete: true } : {}
   };
 }
 function stripThink(text2) {
@@ -838,6 +840,20 @@ var init_store = __esm({
   }
 });
 
+// src/llm/state.ts
+function usesServerState(provider2, model2, store10) {
+  if (provider2.type === "gemini")
+    return (model2?.serverState ?? provider2.serverState ?? true) && (store10 ?? model2?.extraBody?.store ?? provider2.store ?? true);
+  if (provider2.type === "openai-responses")
+    return (provider2.serverState ?? false) && (store10 ?? provider2.store ?? provider2.serverState ?? false);
+  return false;
+}
+var init_state = __esm({
+  "src/llm/state.ts"() {
+    "use strict";
+  }
+});
+
 // src/billing/ledger.ts
 function scopeKey(scope, ctx, modelId) {
   if (scope === "global") return `global|${modelId}`;
@@ -921,6 +937,7 @@ function record(model2, ctx, cost, usage2) {
     t.cacheRead += usage2.cacheRead;
     t.cacheWrite += usage2.cacheWrite + usage2.cacheWrite1h;
     t.output += usage2.output;
+    if (usage2.inputIncomplete) t.incompleteCalls = (t.incompleteCalls ?? 0) + 1;
   }
   const day = d.daily[dayKey(now)] ??= {};
   day[model2.id] = (day[model2.id] ?? 0) + cost;
@@ -943,6 +960,14 @@ function summarize(model2, scope, ctx) {
 }
 function totals() {
   return store.data.totals;
+}
+function incompleteUsageModels() {
+  const ids = new Set(Object.entries(store.data.totals).filter(([, t]) => t.incompleteCalls).map(([id]) => id));
+  for (const model2 of config.get().models) {
+    const provider2 = config.getProvider(model2.provider);
+    if (provider2?.type === "gemini" && usesServerState(provider2, model2)) ids.add(model2.id);
+  }
+  return [...ids];
 }
 function daily(days = 7) {
   const out = [];
@@ -982,6 +1007,7 @@ var init_ledger = __esm({
     "use strict";
     init_config();
     init_store();
+    init_state();
     WINDOW_5H = 5 * 36e5;
     WINDOW_WEEK = 7 * 24 * 36e5;
     KEEP = WINDOW_WEEK + 36e5;
@@ -2300,7 +2326,7 @@ async function recallSession(key, query, count = 3, opts = {}) {
   return entries2.map((entry) => {
     const lexical = similarity(query, entry.text) + terms.reduce((score, term) => score + (entry.text.toLowerCase().includes(term) ? 0.2 : 0), 0);
     return { entry, lexical, cos: cosine.get(entry), score: lexical + (cosine.get(entry) ?? 0) + (range && entry.kind === "day" ? 1 : 0) };
-  }).filter((hit) => range || !query.trim() || hit.lexical >= 0.06 || (hit.cos ?? -1) >= minScore).sort((a, b) => b.score - a.score || b.entry.at - a.entry.at).slice(0, Math.min(5, Math.max(1, count))).map(({ entry }) => {
+  }).filter((hit) => range || !query.trim() || hit.lexical >= 0.06 || (hit.cos ?? -1) >= minScore).sort((a, b) => b.score - a.score || b.entry.at - a.entry.at).slice(0, Math.min(config.get().memory.recallLimit, Math.max(1, count))).map(({ entry }) => {
     const where = entry.label ? `\xB7${entry.label}` : "";
     return entry.kind === "day" ? `\u3010${entry.day} \u5F53\u65E5\u6982\u8981${where}\u3011${truncate(entry.text, 600)}` : `${entry.day} ${hhmm(entry.at)}${entry.label ? ` [${entry.label}]` : ""} ${truncate(entry.text, 600)}`;
   });
@@ -2594,14 +2620,14 @@ var init_gemini = __esm({
     init_util();
     init_common();
     init_http();
+    init_state();
     init_types();
     gemini = {
       async chat(p) {
         const base = p.provider.baseUrl || "https://generativelanguage.googleapis.com";
         const url = /\/v1beta\/?$/.test(base) ? joinUrl(base, "interactions") : joinUrl(base, "v1beta/interactions");
-        const chain = p.model.serverState ?? true;
-        const state = chain ? p.state : void 0;
-        const store10 = chain ? p.store ?? p.provider.store ?? true : false;
+        const store10 = usesServerState(p.provider, p.model, p.store);
+        const state = store10 ? p.state : void 0;
         const vision = p.model.vision !== false;
         const msgs = state ? p.messages.slice(state.skip) : p.messages;
         const input = [];
@@ -2642,6 +2668,8 @@ var init_gemini = __esm({
         if (p.nativeSearch) tools2.push({ type: "google_search" }, { type: "url_context" });
         if (tools2.length) body.tools = tools2;
         if (p.model.extraBody) body = deepMerge(body, p.model.extraBody);
+        body.store = store10;
+        if (!store10) delete body.previous_interaction_id;
         const res = await requestJson(p.provider, (key) => ({ url, headers: { "x-goog-api-key": key }, body }), p.signal);
         if (res?.status === "failed") {
           const e = res?.errors?.[0];
@@ -2672,7 +2700,10 @@ var init_gemini = __esm({
             cacheWrite1h: 0,
             output: (u.total_output_tokens ?? 0) + thought,
             reasoning: thought,
-            webSearches: grounding ?? searchSteps
+            webSearches: grounding ?? searchSteps,
+            // Google currently omits historical input/cache usage on some chained Interactions.
+            // https://discuss.ai.google.dev/t/187450 — keep the reported numbers, flag their limits.
+            ...state ? { inputIncomplete: true } : {}
           },
           native: { provider: "gemini", model: p.model.model, data: steps },
           stopReason: res?.status ?? "unknown",
@@ -2886,11 +2917,6 @@ var init_openaiResponses = __esm({
 });
 
 // src/llm/index.ts
-function usesServerState(p) {
-  if (p.type === "gemini") return (p.serverState ?? true) && (p.store ?? true);
-  if (p.type === "openai-responses") return (p.serverState ?? false) && (p.store ?? p.serverState ?? false);
-  return false;
-}
 async function chat(p) {
   const adapter = adapters[p.provider.type];
   if (!adapter) throw new LLMError(`\u4E0D\u652F\u6301\u7684 provider \u7C7B\u578B: ${p.provider.type}`);
@@ -2905,6 +2931,7 @@ var init_llm = __esm({
     init_openaiChat();
     init_openaiResponses();
     init_types();
+    init_state();
     init_types();
     adapters = {
       openai: openaiChat,
@@ -4511,7 +4538,10 @@ function registerMemoryTool() {
   registry.register({
     name: "recall",
     source: "builtin",
-    description: "\u68C0\u7D22\u5F53\u524D\u4F1A\u8BDD\u66F4\u65E9\u7684\u804A\u5929\uFF1A\u6BCF\u6BB5\u804A\u5929\u6458\u8981\uFF08\u4FDD\u755930\u5929\uFF09\u548C\u6BCF\u5929\u4E00\u6761\u7684\u300C\u5F53\u65E5\u6982\u8981\u300D\uFF08\u4FDD\u7559\u66F4\u4E45\uFF09\uFF0C\u6309\u8BED\u4E49\u548C\u5173\u952E\u8BCD\u7EFC\u5408\u5339\u914D\u3002\u9700\u8981\u4E4B\u524D\u7684\u7EA6\u5B9A\u3001\u79F0\u547C\u3001\u8BDD\u9898\u7EC6\u8282\uFF0C\u6216\u88AB\u95EE\u5230\u67D0\u5929/\u67D0\u6BB5\u65F6\u95F4\u804A\u8FC7\u4EC0\u4E48\u65F6\uFF0C\u5148\u67E5\u518D\u7B54\uFF1B\u53EF\u6309\u65E5\u671F\u7B5B\u9009\u3002\u4EC5\u5F53\u524D\u4F1A\u8BDD\uFF0C\u6700\u591A\u8FD4\u56DE5\u6761\u3002",
+    // a getter: the registry reads it every turn, so it follows memory.recallLimit
+    get description() {
+      return `\u68C0\u7D22\u5F53\u524D\u4F1A\u8BDD\u66F4\u65E9\u7684\u804A\u5929\uFF1A\u6BCF\u6BB5\u804A\u5929\u6458\u8981\uFF08\u4FDD\u755930\u5929\uFF09\u548C\u6BCF\u5929\u4E00\u6761\u7684\u300C\u5F53\u65E5\u6982\u8981\u300D\uFF08\u4FDD\u7559\u66F4\u4E45\uFF09\uFF0C\u6309\u8BED\u4E49\u548C\u5173\u952E\u8BCD\u7EFC\u5408\u5339\u914D\u3002\u9700\u8981\u4E4B\u524D\u7684\u7EA6\u5B9A\u3001\u79F0\u547C\u3001\u8BDD\u9898\u7EC6\u8282\uFF0C\u6216\u88AB\u95EE\u5230\u67D0\u5929/\u67D0\u6BB5\u65F6\u95F4\u804A\u8FC7\u4EC0\u4E48\u65F6\uFF0C\u5148\u67E5\u518D\u7B54\uFF1B\u53EF\u6309\u65E5\u671F\u7B5B\u9009\u3002\u4EC5\u5F53\u524D\u4F1A\u8BDD\uFF0C\u6700\u591A\u8FD4\u56DE${config.get().memory.recallLimit}\u6761\u3002`;
+    },
     parameters: {
       type: "object",
       properties: {
@@ -4519,7 +4549,7 @@ function registerMemoryTool() {
         date: { type: "string", description: "\u53EA\u770B\u67D0\u4E00\u5929\uFF1AYYYY-MM-DD\uFF0C\u6216\u300C\u6628\u5929\u300D\u300C\u4E0A\u5468\u516D\u300D\u300C10\u670820\u65E5\u300D\u8FD9\u7C7B\u8BF4\u6CD5" },
         from: { type: "string", description: "\u65E5\u671F\u8303\u56F4\u8D77\u70B9 YYYY-MM-DD\uFF08\u542B\uFF09" },
         to: { type: "string", description: "\u65E5\u671F\u8303\u56F4\u7EC8\u70B9 YYYY-MM-DD\uFF08\u542B\uFF09" },
-        count: { type: "integer", description: "\u8FD4\u56DE\u6761\u6570\uFF0C1-5\uFF0C\u9ED8\u8BA43" }
+        count: { type: "integer", description: "\u8FD4\u56DE\u6761\u6570\uFF0C\u9ED8\u8BA43\uFF08\u4E0D\u8D85\u8FC7\u4E0A\u9762\u8BF4\u7684\u4E0A\u9650\uFF09" }
       }
     },
     async run(args, ctx) {
@@ -4689,8 +4719,9 @@ ${recalled.join("\n")}` : ""].filter(Boolean).join("\n");
   if (session.summary) prefix.push({ role: "user", content: [{ type: "text", text: `\u3010\u4E4B\u524D\u5BF9\u8BDD\u7684\u6458\u8981\u3011
 ${session.summary}` }] });
   const msgs = [...prefix, ...session.messages, userMsg];
-  const stateKey = `${provider2.type}:${model2.model}:${memoryHash([memPrefix, system, JSON.stringify(specs)])}`;
-  const serverState = usesServerState(provider2);
+  const statePrefix = provider2.type === "gemini" ? [memPrefix] : [memPrefix, system, JSON.stringify(specs)];
+  const stateKey = `${model2.provider}:${provider2.type}:${provider2.baseUrl ?? ""}:${model2.model}:${memoryHash(statePrefix)}`;
+  const serverState = usesServerState(provider2, model2);
   let state;
   if (serverState && session.state?.key === stateKey && session.state.len === session.messages.length)
     state = { previousId: session.state.previousId, skip: prefix.length + session.messages.length };
@@ -4740,7 +4771,7 @@ ${session.summary}` }] });
     cost,
     ms: Date.now() - started,
     tools: msgs.flatMap((m) => m.role === "assistant" ? (m.toolCalls ?? []).map((call2) => call2.name) : []),
-    tokens: { input: usage2.input, output: usage2.output, cacheRead: usage2.cacheRead }
+    tokens: { input: usage2.input, output: usage2.output, cacheRead: usage2.cacheRead, ...usage2.inputIncomplete ? { inputIncomplete: true } : {} }
   });
   try {
     for (let round = 0; round < maxRounds; round++) {
@@ -4777,7 +4808,7 @@ ${session.summary}` }] });
     }
   }
   log.info(
-    `[${model2.id}] ${Date.now() - started}ms think=${thinking} in=${usage2.input} cache=${usage2.cacheRead}/${usage2.cacheWrite + usage2.cacheWrite1h} out=${usage2.output}${usage2.reasoning ? `(\u601D\u8003${usage2.reasoning})` : ""}${usage2.webSearches ? ` \u81EA\u5E26\u641C\u7D22${usage2.webSearches}\u6B21` : ""} $${cost.toFixed(5)}${turn.dispatched ? ` cmd=${turn.dispatched}` : ""}`
+    `[${model2.id}] ${Date.now() - started}ms think=${thinking} in=${usage2.input} cache=${usage2.cacheRead}/${usage2.cacheWrite + usage2.cacheWrite1h} out=${usage2.output}${usage2.reasoning ? `(\u601D\u8003${usage2.reasoning})` : ""}${usage2.webSearches ? ` \u81EA\u5E26\u641C\u7D22${usage2.webSearches}\u6B21` : ""} $${cost.toFixed(5)}${usage2.inputIncomplete ? " (\u4E0A\u6E38\u5386\u53F2\u7528\u91CF\u53EF\u80FD\u7F3A\u5931)" : ""}${turn.dispatched ? ` cmd=${turn.dispatched}` : ""}`
   );
   if (finalText) log.debug(`[${model2.id}] \u56DE\u590D\uFF1A${brief(finalText, 500)}`);
   recordTurn({ ...turnInfo(), reply: finalText || (turn.dispatched ? `\uFF08\u6267\u884C\u6307\u4EE4 ${turn.dispatched}\uFF09` : "") });
@@ -6567,6 +6598,7 @@ function limitLine(m) {
 }
 function usageLines(userId, groupId) {
   const lines = [];
+  const incomplete = new Set(incompleteUsageModels());
   for (const m of config.get().models) {
     const segs = [];
     for (const s of ["user", "group", "global"]) {
@@ -6580,7 +6612,7 @@ function usageLines(userId, groupId) {
       const reset = limits2.window5h && sum.used5h >= limits2.window5h ? `\uFF08${formatDuration(sum.reset5h)}\u540E\u6062\u590D\uFF09` : limits2.weekly && sum.usedWeek >= limits2.weekly ? `\uFF08${formatDuration(sum.resetWeek)}\u540E\u6062\u590D\uFF09` : "";
       segs.push(`${name} ${a} \xB7 ${b}${reset}`);
     }
-    if (segs.length) lines.push(`${m.id}\uFF1A${segs.join("\uFF1B")}`);
+    if (segs.length) lines.push(`${m.id}\uFF1A${segs.join("\uFF1B")}${incomplete.has(m.id) ? "\uFF08\u4E0A\u6E38\u5386\u53F2\u7528\u91CF\u53EF\u80FD\u7F3A\u5931\uFF0C\u8D39\u7528\u548C\u989D\u5EA6\u53EF\u80FD\u504F\u4F4E\uFF09" : ""}`);
   }
   return lines;
 }
@@ -7121,9 +7153,12 @@ ${lines.join("\n")}`);
     level: "admin",
     async run({ e }) {
       const t = totals();
+      const incomplete = new Set(incompleteUsageModels());
       const lines = ["\u3010\u7D2F\u8BA1\u3011"];
       for (const [id, v] of Object.entries(t))
-        lines.push(`${id}\uFF1A${formatUsd(v.cost)}\uFF0C${v.calls} \u6B21\uFF0C\u5165 ${v.input} \u7F13\u5B58 ${v.cacheRead} \u51FA ${v.output}${v.input + v.cacheRead ? `\uFF08\u7F13\u5B58\u547D\u4E2D ${Math.round(v.cacheRead / (v.input + v.cacheRead) * 100)}%\uFF09` : ""}`);
+        lines.push(`${id}\uFF1A${formatUsd(v.cost)}\uFF0C${v.calls} \u6B21\uFF0C\u5165 ${v.input} \u7F13\u5B58 ${v.cacheRead} \u51FA ${v.output}${incomplete.has(id) ? "\uFF08\u5DF2\u62A5\u544A\u7528\u91CF\uFF0C\u7F13\u5B58\u547D\u4E2D\u7387\u5F85\u786E\u8BA4\uFF09" : v.input + v.cacheRead ? `\uFF08\u7F13\u5B58\u547D\u4E2D ${Math.round(v.cacheRead / (v.input + v.cacheRead) * 100)}%\uFF09` : ""}`);
+      if (incomplete.size) lines.push(`
+${[...incomplete].join("\u3001")}\uFF1A\u4E0A\u6E38\u53EF\u80FD\u6F0F\u62A5\u5386\u53F2\u8F93\u5165\u548C\u7F13\u5B58\uFF0C\u82B1\u8D39\u4E0E\u989D\u5EA6\u53EF\u80FD\u504F\u4F4E\uFF1B\u5B9E\u9645\u8D39\u7528\u4EE5\u670D\u52A1\u5546\u8D26\u5355\u4E3A\u51C6\u3002`);
       lines.push("", "\u3010\u8FD17\u5929\u3011");
       for (const [day, by] of daily(7)) {
         const sum = Object.values(by).reduce((a, b) => a + b, 0);
@@ -9160,6 +9195,7 @@ var memory = obj(
     dailyDays: int("\u6BCF\u65E5\u6982\u8981\u4FDD\u7559\u5929\u6570", { min: 1, max: 3650 }),
     crossChatRecall: bool("\u79C1\u804A\u53EF\u68C0\u7D22\u5BF9\u65B9\u6240\u5728\u7FA4\u7684\u65E7\u804A\u5929"),
     groupChatArchive: bool("\u6574\u7406\u7FA4\u91CC\u6CA1\u6709@\u673A\u5668\u4EBA\u7684\u804A\u5929"),
+    recallLimit: int("\u6BCF\u6B21\u68C0\u7D22\u65E7\u804A\u5929\u6700\u591A\u8FD4\u56DE\u51E0\u6761", { min: 1, max: 100 }),
     embedding: obj(
       {
         enable: bool("\u65E7\u804A\u5929\u5411\u91CF\u68C0\u7D22\uFF08\u9700 API Key\uFF09"),
@@ -9552,7 +9588,7 @@ async function vectorSpace(q) {
     if (!embeddingReady()) throw fail("\u6CA1\u6709\u914D\u7F6E\u5411\u91CF\u6A21\u578B\u7684 API Key");
     const [qv] = await embed([text2], "query");
     const sims = points.map((p) => dot(qv, p.vec));
-    const nearest = sims.map((s, i) => [s, i]).sort((a, b) => b[0] - a[0]).slice(0, 8).map(([score, i]) => ({ index: i, score }));
+    const nearest = sims.map((s, i) => [s, i]).sort((a, b) => b[0] - a[0]).slice(0, config.get().memory.recallLimit).map(([score, i]) => ({ index: i, score }));
     query = { text: text2, xyz: project(qv).map((x) => x / scale), nearest, minScore: config.get().memory.embedding.minScore };
   }
   return {
@@ -9616,6 +9652,7 @@ var routes = [
     const c = config.get();
     return {
       totals: totals(),
+      incompleteModels: incompleteUsageModels(),
       daily: daily(14),
       topUsers: topUsers(WINDOW_WEEK, 15).map(([id, usd]) => ({ id, name: nameOf("user", id), usd })),
       topUsers5h: topUsers(WINDOW_5H, 10).map(([id, usd]) => ({ id, name: nameOf("user", id), usd })),

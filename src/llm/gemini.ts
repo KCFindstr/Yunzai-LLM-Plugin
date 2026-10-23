@@ -1,6 +1,7 @@
 import { deepMerge } from '../core/util.ts'
 import { genCallId, geminiThinking, parseArgs } from './common.ts'
 import { joinUrl, requestJson } from './http.ts'
+import { usesServerState } from './state.ts'
 import type { Adapter, ChatParams, ChatResult, ToolCall } from './types.ts'
 import { LLMError } from './types.ts'
 
@@ -13,11 +14,8 @@ export const gemini: Adapter = {
   async chat(p: ChatParams): Promise<ChatResult> {
     const base = p.provider.baseUrl || 'https://generativelanguage.googleapis.com'
     const url = /\/v1beta\/?$/.test(base) ? joinUrl(base, 'interactions') : joinUrl(base, 'v1beta/interactions')
-    // a model may opt out of chaining (see ModelConfig.serverState): then every turn resends the transcript,
-    // nothing is stored server-side, and no response id is handed back for the agent to chain on
-    const chain = p.model.serverState ?? true
-    const state = chain ? p.state : undefined
-    const store = chain ? (p.store ?? p.provider.store ?? true) : false
+    const store = usesServerState(p.provider, p.model, p.store)
+    const state = store ? p.state : undefined
     const vision = p.model.vision !== false
     const msgs = state ? p.messages.slice(state.skip) : p.messages
     const input: any[] = []
@@ -66,6 +64,9 @@ export const gemini: Adapter = {
     if (p.nativeSearch) tools.push({ type: 'google_search' }, { type: 'url_context' })
     if (tools.length) body.tools = tools
     if (p.model.extraBody) body = deepMerge(body, p.model.extraBody)
+    // A one-shot store=false or disabled chain must also override extraBody storage settings.
+    body.store = store
+    if (!store) delete body.previous_interaction_id
 
     const res = await requestJson(p.provider, key => ({ url, headers: { 'x-goog-api-key': key }, body }), p.signal)
 
@@ -102,6 +103,9 @@ export const gemini: Adapter = {
         output: (u.total_output_tokens ?? 0) + thought,
         reasoning: thought,
         webSearches: grounding ?? searchSteps,
+        // Google currently omits historical input/cache usage on some chained Interactions.
+        // https://discuss.ai.google.dev/t/187450 — keep the reported numbers, flag their limits.
+        ...(state ? { inputIncomplete: true } : {}),
       },
       native: { provider: 'gemini', model: p.model.model, data: steps },
       stopReason: res?.status ?? 'unknown',
