@@ -841,11 +841,11 @@ var init_store = __esm({
 });
 
 // src/llm/state.ts
-function usesServerState(provider2, model2, store10) {
+function usesServerState(provider2, model2, store11) {
   if (provider2.type === "gemini")
-    return (model2?.serverState ?? provider2.serverState ?? true) && (store10 ?? model2?.extraBody?.store ?? provider2.store ?? true);
+    return (model2?.serverState ?? provider2.serverState ?? true) && (store11 ?? model2?.extraBody?.store ?? provider2.store ?? true);
   if (provider2.type === "openai-responses")
-    return (provider2.serverState ?? false) && (store10 ?? provider2.store ?? provider2.serverState ?? false);
+    return (provider2.serverState ?? false) && (store11 ?? provider2.store ?? provider2.serverState ?? false);
   return false;
 }
 var init_state = __esm({
@@ -2334,10 +2334,10 @@ async function recallSession(key, query, count = 3, opts = {}) {
 function groupSessionsFor(selfId, userId, groups) {
   return groups.flatMap((g) => [`${selfId}:g${g.id}`, `${selfId}:g${g.id}:u${userId}`].filter((key) => store4.data[key]).map((key) => ({ key, label: `\u7FA4\u300C${g.name ?? g.id}\u300D` })));
 }
-function setSummary(key, summary) {
+function setSummary(key, summary2) {
   const s = store4.data[key];
   if (!s) return;
-  s.summary = summary;
+  s.summary = summary2;
   s.state = void 0;
   store4.save();
 }
@@ -2626,8 +2626,8 @@ var init_gemini = __esm({
       async chat(p) {
         const base = p.provider.baseUrl || "https://generativelanguage.googleapis.com";
         const url = /\/v1beta\/?$/.test(base) ? joinUrl(base, "interactions") : joinUrl(base, "v1beta/interactions");
-        const store10 = usesServerState(p.provider, p.model, p.store);
-        const state = store10 ? p.state : void 0;
+        const store11 = usesServerState(p.provider, p.model, p.store);
+        const state = store11 ? p.state : void 0;
         const vision = p.model.vision !== false;
         const msgs = state ? p.messages.slice(state.skip) : p.messages;
         const input = [];
@@ -2662,14 +2662,14 @@ var init_gemini = __esm({
         if (thinkingLevel) generation_config.thinking_level = thinkingLevel;
         if (p.temperature != null) generation_config.temperature = p.temperature;
         if (p.model.topP != null) generation_config.top_p = p.model.topP;
-        let body = { model: p.model.model, input, system_instruction: p.system, store: store10, generation_config };
+        let body = { model: p.model.model, input, system_instruction: p.system, store: store11, generation_config };
         if (state) body.previous_interaction_id = state.previousId;
         const tools2 = p.tools.map((t) => ({ type: "function", name: t.name, description: t.description, parameters: t.parameters }));
         if (p.nativeSearch) tools2.push({ type: "google_search" }, { type: "url_context" });
         if (tools2.length) body.tools = tools2;
         if (p.model.extraBody) body = deepMerge(body, p.model.extraBody);
-        body.store = store10;
-        if (!store10) delete body.previous_interaction_id;
+        body.store = store11;
+        if (!store11) delete body.previous_interaction_id;
         const res = await requestJson(p.provider, (key) => ({ url, headers: { "x-goog-api-key": key }, body }), p.signal);
         if (res?.status === "failed") {
           const e = res?.errors?.[0];
@@ -2707,7 +2707,7 @@ var init_gemini = __esm({
           },
           native: { provider: "gemini", model: p.model.model, data: steps },
           stopReason: res?.status ?? "unknown",
-          responseId: store10 ? res?.id : void 0
+          responseId: store11 ? res?.id : void 0
         };
       }
     };
@@ -2838,7 +2838,7 @@ var init_openaiResponses = __esm({
         const base = p.provider.baseUrl || "https://api.openai.com/v1";
         const official = /api\.openai\.com/i.test(base);
         const vision = p.model.vision !== false;
-        const store10 = p.provider.store ?? p.provider.serverState ?? false;
+        const store11 = p.provider.store ?? p.provider.serverState ?? false;
         const msgs = p.state ? p.messages.slice(p.state.skip) : p.messages;
         const input = [];
         for (const m of msgs) {
@@ -2861,7 +2861,7 @@ var init_openaiResponses = __esm({
             for (const r of m.results) input.push({ type: "function_call_output", call_id: r.id, output: r.content });
           }
         }
-        let body = { model: p.model.model, input, instructions: p.system, max_output_tokens: p.maxTokens, store: store10 };
+        let body = { model: p.model.model, input, instructions: p.system, max_output_tokens: p.maxTokens, store: store11 };
         if (p.state) body.previous_response_id = p.state.previousId;
         const tools2 = p.tools.map((t) => ({ type: "function", name: t.name, description: t.description, parameters: t.parameters }));
         if (p.nativeSearch) tools2.push({ type: "web_search" });
@@ -2869,7 +2869,7 @@ var init_openaiResponses = __esm({
         const effort = openaiEffort(p.thinking);
         if (effort) {
           body.reasoning = { effort };
-          if (!store10) body.include = ["reasoning.encrypted_content"];
+          if (!store11) body.include = ["reasoning.encrypted_content"];
         }
         if (p.temperature != null) body.temperature = p.temperature;
         if (p.model.topP != null) body.top_p = p.model.topP;
@@ -2909,7 +2909,7 @@ var init_openaiResponses = __esm({
           },
           native: { provider: "openai-responses", model: p.model.model, data: output },
           stopReason: res?.status === "incomplete" ? `incomplete:${res?.incomplete_details?.reason ?? ""}` : res?.status ?? "unknown",
-          responseId: store10 ? res?.id : void 0
+          responseId: store11 ? res?.id : void 0
         };
       }
     };
@@ -3077,7 +3077,7 @@ function addMfaceSticker(m, preview, addedBy) {
     file = `${hash.slice(0, 16)}.${MIME_EXT[mime] ?? "img"}`;
     fs5.writeFileSync(path6.join(STICKER_DIR, file), preview);
   }
-  const summary = (m.summary ?? "").replace(/[[\]]/g, "");
+  const summary2 = (m.summary ?? "").replace(/[[\]]/g, "");
   const s = {
     id: uniqueId(hash),
     hash,
@@ -3085,8 +3085,8 @@ function addMfaceSticker(m, preview, addedBy) {
     mime,
     kind: "mface",
     mface: m,
-    name: uniqueName(summary || "\u5546\u57CE\u8868\u60C5"),
-    desc: summary,
+    name: uniqueName(summary2 || "\u5546\u57CE\u8868\u60C5"),
+    desc: summary2,
     use: "",
     tags: [],
     indexed: false,
@@ -3553,20 +3553,27 @@ var init_registry = __esm({
           return { name: d.name, description: limit ? `${d.description}\uFF08\u6BCF\u6B21\u56DE\u590D${limit}\uFF09` : d.description, parameters: d.parameters };
         });
       }
-      async execute(calls, ctx, offered) {
+      async execute(calls, ctx, offered, onResult) {
         const allowed = new Map(offered.map((d) => [d.name, d]));
         let terminal = false;
         const results = await Promise.all(
           calls.map(async (call) => {
+            const started = Date.now();
+            const done = (result) => {
+              try {
+                onResult?.(result, Date.now() - started);
+              } catch {
+              }
+              return result;
+            };
             const def = allowed.get(call.name);
             if (!def) {
               log.warn(`\u6A21\u578B\u8C03\u7528\u4E86\u672A\u63D0\u4F9B\u7684\u5DE5\u5177 ${call.name}(${brief(call.args ?? {})})`);
-              return { id: call.id, name: call.name, content: `\u5DE5\u5177 ${call.name} \u4E0D\u53EF\u7528`, isError: true };
+              return done({ id: call.id, name: call.name, content: `\u5DE5\u5177 ${call.name} \u4E0D\u53EF\u7528`, isError: true });
             }
             if (call.args?._invalid_json)
-              return { id: call.id, name: call.name, content: "\u53C2\u6570\u4E0D\u662F\u5408\u6CD5 JSON\uFF0C\u8BF7\u91CD\u8BD5", isError: true };
+              return done({ id: call.id, name: call.name, content: "\u53C2\u6570\u4E0D\u662F\u5408\u6CD5 JSON\uFF0C\u8BF7\u91CD\u8BD5", isError: true });
             try {
-              const started = Date.now();
               const out = await Promise.race([
                 def.run(call.args ?? {}, ctx),
                 new Promise((_, rej) => setTimeout(() => rej(new Error("\u5DE5\u5177\u6267\u884C\u8D85\u65F6")), TOOL_TIMEOUT_MS).unref?.())
@@ -3575,10 +3582,10 @@ var init_registry = __esm({
               if (o.terminal) terminal = true;
               log.info(`\u5DE5\u5177 ${call.name}(${brief(call.args ?? {})}) ${o.isError ? "\u5931\u8D25" : "\u5B8C\u6210"} ${Date.now() - started}ms \u2192 ${(o.content ?? "").length}\u5B57`);
               log.debug(`\u5DE5\u5177 ${call.name} \u7ED3\u679C\uFF1A${brief(o.content, 600)}`);
-              return { id: call.id, name: call.name, content: truncate(o.content || "(\u65E0\u7ED3\u679C)", MAX_RESULT_CHARS), isError: o.isError };
+              return done({ id: call.id, name: call.name, content: truncate(o.content || "(\u65E0\u7ED3\u679C)", MAX_RESULT_CHARS), isError: o.isError });
             } catch (err) {
               log.warn(`\u5DE5\u5177 ${call.name}(${brief(call.args ?? {})}) \u51FA\u9519: ${err?.message ?? err}`);
-              return { id: call.id, name: call.name, content: `\u6267\u884C\u51FA\u9519: ${err?.message ?? err}`, isError: true };
+              return done({ id: call.id, name: call.name, content: `\u6267\u884C\u51FA\u9519: ${err?.message ?? err}`, isError: true });
             }
           })
         );
@@ -4405,6 +4412,317 @@ var init_turnLog = __esm({
   }
 });
 
+// src/agy/privacy.ts
+import os from "os";
+function privateValues(config2) {
+  const values = [];
+  function visit(value, key = "") {
+    if (typeof value === "string" && /key|secret|password|token|authorization/i.test(key) && value.length >= 6 && !value.startsWith("env:")) values.push(value);
+    else if (value && typeof value === "object") for (const [k, v] of Object.entries(value)) visit(v, k);
+  }
+  visit(config2);
+  for (const [key, value] of Object.entries(process.env)) if (/key|secret|password|token|authorization/i.test(key) && value && value.length >= 6) values.push(value);
+  return [...new Set([...values, os.homedir(), os.hostname(), os.userInfo().username].filter((v) => v.length >= 3))];
+}
+function redact(text2, secrets = []) {
+  let result = String(text2);
+  for (const secret2 of secrets.sort((a, b) => b.length - a.length)) {
+    for (const value of /* @__PURE__ */ new Set([secret2, encodeURIComponent(secret2), Buffer.from(secret2).toString("base64")])) result = result.split(value).join("[redacted]");
+  }
+  return result.replace(/-----BEGIN [\w ]*PRIVATE KEY-----[\s\S]*?-----END [\w ]*PRIVATE KEY-----/g, "[redacted]").replace(/\b(?:Bearer|Basic)\s+[\w.+/=-]+/gi, "[redacted]").replace(/\beyJ[\w-]+\.[\w-]+\.[\w-]+\b/g, "[redacted]").replace(/\b(?:sk-|AIza|ghp_|gho_|AKIA|ya29\.)[\w.-]{15,}/g, "[redacted]").replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, "[redacted]").replace(/(?:\b[A-Za-z]:[\\/]|\\\\)[^\s<>"'`，。；]+/g, "[private path]").replace(/\/(?:home|Users|root|mnt|var\/lib)\/[^\s<>"'`，。；]+/g, "[private path]").replace(/\b(?:10|127)\.\d{1,3}\.\d{1,3}\.\d{1,3}\b|\b192\.168\.\d{1,3}\.\d{1,3}\b|\b172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}\b/g, "[private address]").replace(/([?&](?:key|api_?key|token|password|auth|authorization|secret|signature|session|code)=)[^&#\s)]+/gi, "$1[redacted]").replace(/["']?\b(?:password|api[_ -]?key|secret|access[_ -]?token|refresh[_ -]?token|session[_ -]?id|cookie|sid)["']?\s*[:=]\s*["']?[^\s,;"']+["']?/gi, "[redacted]").replace(/(?<!\w)(?:\+?\d[ -]?){9,16}(?!\w)/g, (value, offset, text3) => (
+    // Public artwork IDs are evidence identifiers, not personal phone/account numbers.
+    /https?:\/\/(?:www\.)?pixiv\.net\/(?:[a-z]{2}\/)?artworks\/$/i.test(text3.slice(0, offset)) ? value : "[private number]"
+  ));
+}
+var init_privacy = __esm({
+  "src/agy/privacy.ts"() {
+    "use strict";
+  }
+});
+
+// src/agy/history.ts
+import fs14 from "fs";
+import path13 from "path";
+function directory2(id) {
+  if (!/^[a-f0-9]{10}$/.test(id)) throw Error("\u65E0\u6548\u7684 AGY \u4EFB\u52A1\u7F16\u53F7");
+  const target = path13.resolve(ROOT2, id);
+  if (!target.startsWith(ROOT2 + path13.sep)) throw Error("\u65E0\u6548\u7684 AGY \u8BB0\u5F55\u8DEF\u5F84");
+  return target;
+}
+function storeFor2(id) {
+  const dir = directory2(id);
+  let store11 = stores3.get(id);
+  if (!store11) {
+    store11 = new JsonStore(path13.join(dir, "history.json"), { seq: 0, dropped: 0, events: [] });
+    stores3.set(id, store11);
+  }
+  return store11;
+}
+function agyHistoryText(value, secrets = privateValues(config.get()), max = 12e3) {
+  const hidden = /password|secret|token|cookie|authorization|api.?key|^data$|^native$|reasoning|thinking|signature/i;
+  const text2 = typeof value === "string" ? value : JSON.stringify(value, (key, entry) => hidden.test(key) ? "[redacted]" : entry) ?? "";
+  return redact(text2.replace(/data:[^;,\s]+;base64,[\w+/=]+/gi, "[binary omitted]").replace(/[A-Za-z0-9+/=_-]{512,}/g, "[opaque data omitted]"), secrets).slice(0, max);
+}
+function cleanEvent(event) {
+  const secrets = privateValues(config.get());
+  return {
+    seq: event.seq,
+    at: event.at,
+    kind: event.kind,
+    text: agyHistoryText(event.text, secrets),
+    step: event.step,
+    model: event.model ? agyHistoryText(event.model, secrets, 100) : void 0,
+    tool: event.tool ? agyHistoryText(event.tool, secrets, 100) : void 0,
+    args: event.args ? agyHistoryText(event.args, secrets) : void 0,
+    phase: event.phase,
+    ms: event.ms,
+    inputTokens: event.inputTokens,
+    outputTokens: event.outputTokens,
+    isError: event.isError,
+    delivery: event.delivery
+  };
+}
+function recordAgyEvent(id, event) {
+  try {
+    const store11 = storeFor2(id);
+    const safe = cleanEvent({ ...event, seq: ++store11.data.seq, at: Date.now() });
+    store11.data.events.push(safe);
+    log.debug(`[AGY ${id}] ${safe.kind} ${[
+      safe.model ? `model=${safe.model}` : "",
+      safe.step != null ? `step=${safe.step}` : "",
+      safe.tool ? `tool=${safe.tool}` : "",
+      safe.phase ? `phase=${safe.phase}` : "",
+      safe.inputTokens != null ? `in=${safe.inputTokens} out=${safe.outputTokens ?? 0}` : "",
+      safe.delivery ? `delivery=${safe.delivery}` : ""
+    ].filter(Boolean).join(" ")} text=${safe.text.slice(0, 4e3)}${safe.args ? ` args=${safe.args.slice(0, 4e3)}` : ""}`);
+    while (store11.data.events.length > 500 || Buffer.byteLength(JSON.stringify(store11.data)) > 2 * 1024 * 1024) {
+      store11.data.events.shift();
+      store11.data.dropped++;
+    }
+    store11.save();
+  } catch {
+    log.warn("AGY \u6267\u884C\u8BB0\u5F55\u4FDD\u5B58\u5931\u8D25");
+  }
+}
+function agyHistory(id) {
+  const { events, dropped } = storeFor2(id).data;
+  return { events: events.map(cleanEvent), dropped };
+}
+function agyJobView(job) {
+  const secrets = privateValues(config.get());
+  const text2 = (value) => value ? agyHistoryText(value, secrets, 16e3) : void 0;
+  return {
+    id: job.id,
+    status: job.status,
+    createdAt: job.createdAt,
+    updatedAt: job.updatedAt,
+    task: text2(job.task),
+    requesterText: text2(job.requesterText),
+    report: text2(job.report),
+    progress: text2(job.progress),
+    steps: job.steps,
+    modelId: text2(job.modelId),
+    inputTokens: job.inputTokens,
+    outputTokens: job.outputTokens,
+    cacheReadTokens: job.cacheReadTokens,
+    inputImageCount: job.inputImages?.length ?? 0,
+    deliveryError: job.deliveryError
+  };
+}
+function pruneAgyHistory(ids) {
+  for (const id of /* @__PURE__ */ new Set([...stores3.keys(), ...fs14.existsSync(ROOT2) ? fs14.readdirSync(ROOT2) : []])) {
+    if (!/^[a-f0-9]{10}$/.test(id) || ids.has(id)) continue;
+    const target = directory2(id);
+    stores3.get(id)?.dispose();
+    stores3.delete(id);
+    fs14.rmSync(target, { recursive: true, force: true });
+  }
+}
+function observeAgyJob(job, changed2) {
+  const texts = /* @__PURE__ */ new Map();
+  const finished = /* @__PURE__ */ new Set();
+  const progress = (text2) => {
+    job.progress = text2;
+    job.updatedAt = Date.now();
+    changed2();
+  };
+  const count = (value) => Number.isFinite(value) && value >= 0 ? Math.floor(value) : void 0;
+  return (event) => {
+    if (event.event === "init") {
+      progress("\u6A21\u578B\u5DF2\u542F\u52A8");
+      recordAgyEvent(job.id, { kind: "progress", text: "\u6A21\u578B\u5DF2\u542F\u52A8", model: job.modelId });
+      return;
+    }
+    if (event.event === "result") {
+      const usage2 = event.result?.usage;
+      if (usage2) {
+        job.inputTokens = count(usage2.input_tokens);
+        job.outputTokens = count(usage2.output_tokens);
+        job.cacheReadTokens = count(usage2.cache_read_tokens);
+      }
+      progress(event.result?.status === "SUCCESS" ? "\u6267\u884C\u5DF2\u7ED3\u675F\uFF0C\u6B63\u5728\u6574\u7406\u5BF9\u8BDD\u56DE\u590D" : "\u6267\u884C\u672A\u5B8C\u6210\uFF0C\u6B63\u5728\u6574\u7406\u7ED3\u679C");
+      return;
+    }
+    if (event.event !== "step_update") return;
+    const step = event.step_update;
+    if (!step || !Number.isInteger(step.step_index) || step.step_index < 0) return;
+    const index = step.step_index;
+    const key = `${index}:${step.step_type}`;
+    if (finished.has(key)) return;
+    if (step.step_type === "agent_response") {
+      const delta = typeof step.text_delta === "string" ? step.text_delta : "";
+      if (delta) texts.set(index, ((texts.get(index) ?? "") + delta).slice(0, 12e3));
+      if (step.state !== "DONE") return;
+      finished.add(key);
+      const text2 = typeof step.text === "string" ? step.text : texts.get(index) ?? "";
+      texts.delete(index);
+      job.steps = (job.steps ?? 0) + 1;
+      progress(`\u5DF2\u5B8C\u6210 ${job.steps} \u8F6E\u5904\u7406`);
+      recordAgyEvent(job.id, {
+        kind: "response",
+        text: text2,
+        step: job.steps,
+        model: job.modelId,
+        ms: count(step.duration_seconds * 1e3),
+        inputTokens: count(step.usage?.input_tokens),
+        outputTokens: count(step.usage?.output_tokens)
+      });
+    } else if (step.step_type === "tool") {
+      const tool = String(step.tool_name ?? step.tool_info?.name ?? "tool");
+      const done = ["DONE", "ERROR", "FAILED"].includes(step.state);
+      if (!done && step.state !== "ACTIVE") return;
+      const activeKey = `${key}:active`;
+      if (!done && finished.has(activeKey)) return;
+      finished.add(done ? key : activeKey);
+      progress(done ? "\u5DE5\u5177\u5DF2\u8FD4\u56DE\uFF0C\u7EE7\u7EED\u5904\u7406" : `${agyHistoryText(tool, void 0, 100)} \u6267\u884C\u4E2D`);
+      const isError = step.state !== "DONE" && done;
+      recordAgyEvent(job.id, {
+        kind: "tool",
+        text: done ? agyHistoryText(step.tool_info?.output ?? (isError ? "\u5DE5\u5177\u6267\u884C\u5931\u8D25" : "\u5DE5\u5177\u8C03\u7528\u5B8C\u6210")) : "\u6B63\u5728\u6267\u884C",
+        tool,
+        args: agyHistoryText(step.tool_info?.parameters),
+        phase: done ? "completed" : "running",
+        isError,
+        ms: count(step.duration_seconds * 1e3)
+      });
+    }
+  };
+}
+var ROOT2, stores3;
+var init_history = __esm({
+  "src/agy/history.ts"() {
+    "use strict";
+    init_config();
+    init_paths();
+    init_store();
+    init_log();
+    init_privacy();
+    ROOT2 = path13.resolve(DATA_DIR, "agy-history");
+    stores3 = /* @__PURE__ */ new Map();
+  }
+});
+
+// src/chat/rollouts.ts
+import { randomBytes as randomBytes4 } from "crypto";
+function cleanEvent2(event) {
+  return {
+    seq: event.seq,
+    at: event.at,
+    kind: event.kind,
+    text: agyHistoryText(event.text),
+    step: event.step,
+    tool: event.tool && agyHistoryText(event.tool, void 0, 100),
+    callId: event.callId && agyHistoryText(event.callId, void 0, 100),
+    args: event.args && agyHistoryText(event.args),
+    phase: event.phase,
+    ms: event.ms,
+    inputTokens: event.inputTokens,
+    outputTokens: event.outputTokens,
+    isError: event.isError
+  };
+}
+function save() {
+  while (store8.data.rollouts.length > 300 || Buffer.byteLength(JSON.stringify(store8.data)) > 8 * 1024 * 1024) {
+    const index = store8.data.rollouts.findIndex((rollout) => !active(rollout));
+    if (index < 0) break;
+    store8.data.rollouts.splice(index, 1);
+  }
+  store8.save();
+}
+function startRollout(input) {
+  const id = randomBytes4(8).toString("hex"), now = Date.now();
+  store8.data.rollouts.push({
+    ...input,
+    input: agyHistoryText(input.input),
+    id,
+    createdAt: now,
+    updatedAt: now,
+    status: "queued",
+    steps: 0,
+    cost: 0,
+    ms: 0,
+    seq: 0,
+    dropped: 0,
+    events: []
+  });
+  recordRolloutEvent(id, { kind: "request", text: input.input });
+  return id;
+}
+function updateRollout(id, patch) {
+  const rollout = store8.data.rollouts.find((entry) => entry.id === id);
+  if (!rollout) return;
+  Object.assign(rollout, patch, { updatedAt: Date.now() });
+  if (patch.model) rollout.model = agyHistoryText(patch.model, void 0, 100);
+  if (patch.reply) rollout.reply = agyHistoryText(patch.reply);
+  rollout.ms = rollout.updatedAt - rollout.createdAt;
+  save();
+}
+function recordRolloutEvent(id, event) {
+  const rollout = store8.data.rollouts.find((entry) => entry.id === id);
+  if (!rollout) return;
+  rollout.events.push(cleanEvent2({ ...event, seq: ++rollout.seq, at: Date.now() }));
+  while (rollout.events.length > 500 || Buffer.byteLength(JSON.stringify(rollout.events)) > 256 * 1024) {
+    rollout.events.shift();
+    rollout.dropped++;
+  }
+  rollout.updatedAt = Date.now();
+  rollout.ms = rollout.updatedAt - rollout.createdAt;
+  save();
+}
+function summary({ events, seq: seq3, dropped, ...rollout }) {
+  return {
+    ...rollout,
+    input: agyHistoryText(rollout.input),
+    reply: rollout.reply && agyHistoryText(rollout.reply),
+    model: rollout.model && agyHistoryText(rollout.model, void 0, 100),
+    ms: active(rollout) ? Date.now() - rollout.createdAt : rollout.ms,
+    dropped
+  };
+}
+function recentRollouts(conv) {
+  return store8.data.rollouts.filter((rollout) => !conv || rollout.conv === conv).slice().reverse().map(summary);
+}
+function rolloutHistory(id) {
+  const rollout = store8.data.rollouts.find((entry) => entry.id === id);
+  return rollout ? { ...summary(rollout), events: rollout.events.map(cleanEvent2) } : void 0;
+}
+var store8, active;
+var init_rollouts = __esm({
+  "src/chat/rollouts.ts"() {
+    "use strict";
+    init_store();
+    init_history();
+    store8 = new JsonStore("rollouts.json", { v: 1, rollouts: [] });
+    active = (rollout) => ["queued", "running"].includes(rollout.status);
+    for (const rollout of store8.data.rollouts) {
+      if (active(rollout)) {
+        rollout.status = "interrupted";
+        store8.save();
+      }
+    }
+  }
+});
+
 // src/chat/archiveJobs.ts
 async function summarizeChatter(key, ctx) {
   const pending = pendingChatter(key).slice(0, 3);
@@ -4649,10 +4967,32 @@ function selectModel(eff, ctx, exact) {
 }
 async function runTurn(req) {
   semaphore.max = Math.max(1, req.eff.reply.concurrency || 3);
-  const ref = {};
+  const rolloutId = startRollout({
+    conv: req.convKey,
+    input: req.input.text || (req.input.images.length ? "\uFF08\u53D1\u4E86\u56FE\u7247\uFF09" : "\uFF08\u53EA@\u4E86\u4F60\uFF0C\u6CA1\u8BF4\u8BDD\uFF09"),
+    inputImageCount: req.input.images.length,
+    source: req.asyncResult?.kind ?? (req.computerResult ? "computer" : "chat"),
+    jobId: req.asyncResult?.id ?? req.computerResult?.id
+  });
+  const ref = { rolloutId };
   try {
-    const result = await semaphore.run(() => runTurnInner(req, ref));
+    const result = await semaphore.run(() => {
+      updateRollout(rolloutId, { status: "running" });
+      return runTurnInner(req, ref);
+    });
+    if (result.kind === "reply") {
+      const text2 = result.text || (result.dispatched ? `\uFF08\u6267\u884C\u6307\u4EE4 ${result.dispatched}\uFF09` : "\uFF08\u65E0\u6587\u5B57\u56DE\u590D\uFF09");
+      recordRolloutEvent(rolloutId, { kind: "reply", text: text2 });
+      updateRollout(rolloutId, { status: "completed", reply: text2 });
+    } else {
+      recordRolloutEvent(rolloutId, { kind: "error", text: result.kind === "quota" ? "\u989D\u5EA6\u5DF2\u7528\u5B8C\uFF0C\u672A\u8C03\u7528\u6A21\u578B" : result.message, isError: true });
+      updateRollout(rolloutId, { status: result.kind === "quota" ? "blocked" : "failed", ...result.kind === "quota" ? { model: result.modelId } : {} });
+    }
     return { ...result, afterReply: ref.turn?.afterReply };
+  } catch (error) {
+    recordRolloutEvent(rolloutId, { kind: "error", text: error?.message ?? String(error), isError: true });
+    updateRollout(rolloutId, { status: "failed" });
+    throw error;
   } finally {
     if (ref.turn?.sandboxSession) cleanupSandbox(req.eff.tools.exec, ref.turn.sandboxSession);
   }
@@ -4666,6 +5006,7 @@ async function runTurnInner(req, ref) {
     return { kind: "error", unconfigured: true, message: "\u6CA1\u6709\u53EF\u7528\u7684\u6A21\u578B\uFF0C\u8BF7\u68C0\u67E5\u6A21\u578B\u4E0E API Key \u914D\u7F6E\uFF08#llm\u6A21\u578B\u5217\u8868 / #llm\u8BBE\u7F6E\u5BC6\u94A5\uFF09" };
   }
   const { model: model2, provider: provider2 } = picked;
+  updateRollout(ref.rolloutId, { model: model2.id });
   const price = resolvePrice(model2);
   const dropped = degraded.get(model2.id) ?? /* @__PURE__ */ new Set();
   let thinking = dropped.has("thinking") ? "off" : await resolveThinking(
@@ -4742,6 +5083,7 @@ ${session.summary}` }] });
         if (state && !retriedStateless && err instanceof LLMError && [400, 404].includes(err.status ?? 0)) {
           retriedStateless = true;
           state = void 0;
+          recordRolloutEvent(ref.rolloutId, { kind: "progress", text: "\u670D\u52A1\u7AEF\u4F1A\u8BDD\u72B6\u6001\u5931\u6548\uFF0C\u4F7F\u7528\u5B8C\u6574\u4E0A\u4E0B\u6587\u91CD\u8BD5" });
           log.warn(`\u670D\u52A1\u7AEF\u4F1A\u8BDD\u72B6\u6001\u5931\u6548\uFF0C\u6539\u4E3A\u53D1\u9001\u5B8C\u6574\u4E0A\u4E0B\u6587\u91CD\u8BD5: ${err.message.slice(0, 100)}`);
           continue;
         }
@@ -4749,6 +5091,7 @@ ${session.summary}` }] });
         if (!drop) throw err;
         if (!degraded.has(model2.id)) degraded.set(model2.id, /* @__PURE__ */ new Set());
         degraded.get(model2.id).add(drop);
+        recordRolloutEvent(ref.rolloutId, { kind: "progress", text: `\u63A5\u53E3\u4E0D\u652F\u6301 ${drop}\uFF0C\u5173\u95ED\u8BE5\u529F\u80FD\u540E\u91CD\u8BD5` });
         log.warn(`\u6A21\u578B ${model2.id} \u7684\u63A5\u53E3\u4E0D\u652F\u6301 ${drop}\uFF0C\u5DF2\u81EA\u52A8\u5173\u95ED\u8BE5\u529F\u80FD\u540E\u91CD\u8BD5\uFF08${err.message.slice(0, 120)}\uFF09`);
         if (drop === "nativeSearch") nativeSearch = false;
         if (drop === "thinking") thinking = "off";
@@ -4761,6 +5104,7 @@ ${session.summary}` }] });
     }
   };
   const turnInfo = () => ({
+    rolloutId: ref.rolloutId,
     at: started,
     conv: convKey,
     userId: e.user_id != null ? String(e.user_id) : void 0,
@@ -4775,11 +5119,22 @@ ${session.summary}` }] });
   });
   try {
     for (let round = 0; round < maxRounds; round++) {
+      const step = round + 1, callStarted = Date.now();
+      recordRolloutEvent(ref.rolloutId, { kind: "progress", text: "\u7B49\u5F85\u6A21\u578B\u54CD\u5E94", step });
       const res = await call();
       const c = computeCost(res.usage, price);
       cost += c;
       usage2 = addUsage(usage2, res.usage);
       record(model2, quotaCtx, c, res.usage);
+      updateRollout(ref.rolloutId, { steps: step, cost, tokens: turnInfo().tokens });
+      recordRolloutEvent(ref.rolloutId, {
+        kind: "response",
+        text: res.text || (res.toolCalls.length ? "\u6A21\u578B\u8BF7\u6C42\u8C03\u7528\u5DE5\u5177" : res.pause ? "\u6A21\u578B\u8BF7\u6C42\u7EE7\u7EED\u5904\u7406" : "\uFF08\u65E0\u53EF\u89C1\u6587\u5B57\uFF09"),
+        step,
+        ms: Date.now() - callStarted,
+        inputTokens: res.usage.input,
+        outputTokens: res.usage.output
+      });
       msgs.push({ role: "assistant", content: res.text, toolCalls: res.toolCalls, native: res.native, responseId: res.responseId });
       lastResponseId = res.responseId;
       state = res.responseId && serverState ? { previousId: res.responseId, skip: msgs.length } : void 0;
@@ -4792,8 +5147,28 @@ ${session.summary}` }] });
       }
       finalText = res.text;
       if (res.text) log.debug(`[${model2.id}] \u7B2C${round + 1}\u8F6E\u9644\u5E26\u6587\u5B57\uFF1A${brief(res.text, 300)}`);
+      for (const call2 of res.toolCalls) recordRolloutEvent(ref.rolloutId, {
+        kind: "tool",
+        text: round >= maxRounds - 1 ? "\u5DF2\u8FBE\u5230\u5DE5\u5177\u8F6E\u6570\u4E0A\u9650\uFF0C\u672A\u6267\u884C" : "\u6B63\u5728\u6267\u884C",
+        step,
+        tool: call2.name,
+        callId: call2.id,
+        args: agyHistoryText(call2.args),
+        phase: round >= maxRounds - 1 ? "skipped" : "running"
+      });
       if (round >= maxRounds - 1) break;
-      const { results, terminal } = await registry.execute(res.toolCalls, ctx, offered);
+      const { results, terminal } = await registry.execute(res.toolCalls, ctx, offered, (result, ms) => {
+        recordRolloutEvent(ref.rolloutId, {
+          kind: "tool",
+          text: result.content,
+          step,
+          tool: result.name,
+          callId: result.id,
+          phase: "completed",
+          ms,
+          isError: result.isError
+        });
+      });
       if (round === maxRounds - 2)
         for (const r of results) r.content += "\n\uFF08\u5DE5\u5177\u8C03\u7528\u6B21\u6570\u5DF2\u7528\u5B8C\uFF0C\u8BF7\u76F4\u63A5\u7ED9\u51FA\u6700\u7EC8\u56DE\u590D\uFF09";
       msgs.push({ role: "tool", results });
@@ -4806,6 +5181,7 @@ ${session.summary}` }] });
       recordTurn({ ...turnInfo(), reply: "", error: err?.message ?? String(err) });
       return { kind: "error", message: err?.message ?? String(err) };
     }
+    recordRolloutEvent(ref.rolloutId, { kind: "error", text: err?.message ?? String(err), isError: true });
   }
   log.info(
     `[${model2.id}] ${Date.now() - started}ms think=${thinking} in=${usage2.input} cache=${usage2.cacheRead}/${usage2.cacheWrite + usage2.cacheWrite1h} out=${usage2.output}${usage2.reasoning ? `(\u601D\u8003${usage2.reasoning})` : ""}${usage2.webSearches ? ` \u81EA\u5E26\u641C\u7D22${usage2.webSearches}\u6B21` : ""} $${cost.toFixed(5)}${usage2.inputIncomplete ? " (\u4E0A\u6E38\u5386\u53F2\u7528\u91CF\u53EF\u80FD\u7F3A\u5931)" : ""}${turn.dispatched ? ` cmd=${turn.dispatched}` : ""}`
@@ -4894,6 +5270,8 @@ var init_agent = __esm({
     init_session();
     init_utility();
     init_turnLog();
+    init_rollouts();
+    init_history();
     init_dates();
     init_archiveJobs();
     init_tool();
@@ -6007,12 +6385,12 @@ function directory(id) {
 }
 function storeFor(id) {
   directory(id);
-  let store10 = stores2.get(id);
-  if (!store10) {
-    store10 = new JsonStore(path11.join(directory(id), "history.json"), { seq: 0, dropped: 0, events: [], images: [] });
-    stores2.set(id, store10);
+  let store11 = stores2.get(id);
+  if (!store11) {
+    store11 = new JsonStore(path11.join(directory(id), "history.json"), { seq: 0, dropped: 0, events: [], images: [] });
+    stores2.set(id, store11);
   }
-  return store10;
+  return store11;
 }
 function historyText(value, max = 8e3) {
   const text2 = typeof value === "string" ? value : JSON.stringify(value, (key, entry) => /password|secret|token|cookie|authorization|api.?key|^data$|^native$|reasoning|signature/i.test(key) ? "[redacted]" : entry) ?? "";
@@ -6020,13 +6398,13 @@ function historyText(value, max = 8e3) {
 }
 function recordComputerEvent(id, event) {
   try {
-    const store10 = storeFor(id);
-    store10.data.events.push({ ...event, text: historyText(event.text), seq: ++store10.data.seq, at: Date.now() });
-    while (store10.data.events.length > 1e3 || Buffer.byteLength(JSON.stringify(store10.data)) > MAX_HISTORY_BYTES) {
-      store10.data.events.shift();
-      store10.data.dropped++;
+    const store11 = storeFor(id);
+    store11.data.events.push({ ...event, text: historyText(event.text), seq: ++store11.data.seq, at: Date.now() });
+    while (store11.data.events.length > 1e3 || Buffer.byteLength(JSON.stringify(store11.data)) > MAX_HISTORY_BYTES) {
+      store11.data.events.shift();
+      store11.data.dropped++;
     }
-    store10.save();
+    store11.save();
   } catch (error) {
     log.warn(`\u7535\u8111\u4EFB\u52A1\u8BB0\u5F55\u4FDD\u5B58\u5931\u8D25\uFF1A${error?.message}`);
   }
@@ -6035,16 +6413,16 @@ function saveComputerScreenshot(id, buffer) {
   try {
     const mime = detectImageMime(buffer);
     if (!mime || buffer.length > MAX_IMAGE_BYTES2) return;
-    const store10 = storeFor(id);
+    const store11 = storeFor(id);
     const hash = sha1(buffer);
-    const existing = store10.data.images.find((image2) => image2.id === hash);
+    const existing = store11.data.images.find((image2) => image2.id === hash);
     if (existing) return existing;
-    if (store10.data.images.length >= 64 || store10.data.images.reduce((total, image2) => total + image2.bytes, 0) + buffer.length > MAX_IMAGES_BYTES) return;
+    if (store11.data.images.length >= 64 || store11.data.images.reduce((total, image2) => total + image2.bytes, 0) + buffer.length > MAX_IMAGES_BYTES) return;
     fs12.mkdirSync(directory(id), { recursive: true });
     fs12.writeFileSync(path11.join(directory(id), `${hash}.image`), buffer);
     const image = { id: hash, mime, bytes: buffer.length };
-    store10.data.images.push(image);
-    store10.save();
+    store11.data.images.push(image);
+    store11.save();
     return image;
   } catch (error) {
     log.warn(`\u7535\u8111\u4EFB\u52A1\u622A\u56FE\u4FDD\u5B58\u5931\u8D25\uFF1A${error?.message}`);
@@ -6375,15 +6753,15 @@ var conversationLocks = new KeyedLock();
 
 // src/tools/computer.ts
 init_util();
-var store8 = new JsonStore("computer-jobs.json", []);
+var store9 = new JsonStore("computer-jobs.json", []);
 var retainedJobs;
-var computerQueue = new ComputerQueue(store8.data, () => {
-  store8.save();
-  const ids = store8.data.map((job) => job.id).join(",");
+var computerQueue = new ComputerQueue(store9.data, () => {
+  store9.save();
+  const ids = store9.data.map((job) => job.id).join(",");
   if (ids !== retainedJobs) {
     retainedJobs = ids;
     try {
-      pruneComputerHistory(new Set(store8.data.map((job) => job.id)));
+      pruneComputerHistory(new Set(store9.data.map((job) => job.id)));
     } catch (error) {
       log.warn(`\u7535\u8111\u4EFB\u52A1\u8BB0\u5F55\u6E05\u7406\u5931\u8D25\uFF1A${error?.message}`);
     }
@@ -8176,30 +8554,8 @@ init_browser();
 // src/tools/googleLens.ts
 init_config();
 init_log();
-import { randomBytes as randomBytes4 } from "crypto";
-
-// src/agy/privacy.ts
-import os from "os";
-function privateValues(config2) {
-  const values = [];
-  function visit(value, key = "") {
-    if (typeof value === "string" && /key|secret|password|token|authorization/i.test(key) && value.length >= 6 && !value.startsWith("env:")) values.push(value);
-    else if (value && typeof value === "object") for (const [k, v] of Object.entries(value)) visit(v, k);
-  }
-  visit(config2);
-  for (const [key, value] of Object.entries(process.env)) if (/key|secret|password|token|authorization/i.test(key) && value && value.length >= 6) values.push(value);
-  return [...new Set([...values, os.homedir(), os.hostname(), os.userInfo().username].filter((v) => v.length >= 3))];
-}
-function redact(text2, secrets = []) {
-  let result = String(text2);
-  for (const secret2 of secrets.sort((a, b) => b.length - a.length)) {
-    for (const value of /* @__PURE__ */ new Set([secret2, encodeURIComponent(secret2), Buffer.from(secret2).toString("base64")])) result = result.split(value).join("[redacted]");
-  }
-  return result.replace(/-----BEGIN [\w ]*PRIVATE KEY-----[\s\S]*?-----END [\w ]*PRIVATE KEY-----/g, "[redacted]").replace(/\b(?:Bearer|Basic)\s+[\w.+/=-]+/gi, "[redacted]").replace(/\beyJ[\w-]+\.[\w-]+\.[\w-]+\b/g, "[redacted]").replace(/\b(?:sk-|AIza|ghp_|gho_|AKIA|ya29\.)[\w.-]{15,}/g, "[redacted]").replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, "[redacted]").replace(/(?:\b[A-Za-z]:[\\/]|\\\\)[^\s<>"'`，。；]+/g, "[private path]").replace(/\/(?:home|Users|root|mnt|var\/lib)\/[^\s<>"'`，。；]+/g, "[private path]").replace(/\b(?:10|127)\.\d{1,3}\.\d{1,3}\.\d{1,3}\b|\b192\.168\.\d{1,3}\.\d{1,3}\b|\b172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}\b/g, "[private address]").replace(/([?&](?:key|api_?key|token|password|auth|authorization|secret|signature|session|code)=)[^&#\s)]+/gi, "$1[redacted]").replace(/["']?\b(?:password|api[_ -]?key|secret|access[_ -]?token|refresh[_ -]?token|session[_ -]?id|cookie|sid)["']?\s*[:=]\s*["']?[^\s,;"']+["']?/gi, "[redacted]").replace(/(?<!\w)(?:\+?\d[ -]?){9,16}(?!\w)/g, (value, offset, text3) => (
-    // Public artwork IDs are evidence identifiers, not personal phone/account numbers.
-    /https?:\/\/(?:www\.)?pixiv\.net\/(?:[a-z]{2}\/)?artworks\/$/i.test(text3.slice(0, offset)) ? value : "[private number]"
-  ));
-}
+import { randomBytes as randomBytes5 } from "crypto";
+init_privacy();
 
 // src/lens/runtime.ts
 import { spawn as spawn3 } from "child_process";
@@ -8259,7 +8615,7 @@ function registerGoogleLensTool(bridge = lensBridge) {
       if ((ctx.turn.lensSearches ?? 0) >= 2) return { content: "\u672C\u8F6E\u4EE5\u56FE\u641C\u56FE\u6B21\u6570\u5DF2\u8FBE\u4E0A\u9650", isError: true };
       const images = ctx.turn.inputImages ?? [];
       if (!images.length) return { content: "\u672C\u8F6E\u6CA1\u6709\u53EF\u4E0A\u4F20\u7684\u539F\u56FE\uFF0C\u8BF7\u8BA9\u7528\u6237\u9644\u56FE\u6216\u5F15\u7528\u539F\u56FE\uFF1B\u5386\u53F2\u56FE\u7247\u5360\u4F4D\u7B26\u4E0D\u80FD\u7528\u4E8E\u53CD\u641C\u3002", isError: true };
-      const job = randomBytes4(5).toString("hex");
+      const job = randomBytes5(5).toString("hex");
       const signal = AbortSignal.any([AbortSignal.timeout(55e3), ...ctx.signal ? [ctx.signal] : []]);
       try {
         const inputs = captureComputerImages(job, images, [args.image_index ?? 1]);
@@ -8312,187 +8668,12 @@ init_paths();
 import fs15 from "fs";
 import path14 from "path";
 import { spawn as spawn4 } from "child_process";
+init_privacy();
 init_log();
 
 // src/agy/debug.ts
 init_log();
-
-// src/agy/history.ts
-init_config();
-init_paths();
-init_store();
-init_log();
-import fs14 from "fs";
-import path13 from "path";
-var ROOT2 = path13.resolve(DATA_DIR, "agy-history");
-var stores3 = /* @__PURE__ */ new Map();
-function directory2(id) {
-  if (!/^[a-f0-9]{10}$/.test(id)) throw Error("\u65E0\u6548\u7684 AGY \u4EFB\u52A1\u7F16\u53F7");
-  const target = path13.resolve(ROOT2, id);
-  if (!target.startsWith(ROOT2 + path13.sep)) throw Error("\u65E0\u6548\u7684 AGY \u8BB0\u5F55\u8DEF\u5F84");
-  return target;
-}
-function storeFor2(id) {
-  const dir = directory2(id);
-  let store10 = stores3.get(id);
-  if (!store10) {
-    store10 = new JsonStore(path13.join(dir, "history.json"), { seq: 0, dropped: 0, events: [] });
-    stores3.set(id, store10);
-  }
-  return store10;
-}
-function agyHistoryText(value, secrets = privateValues(config.get()), max = 12e3) {
-  const hidden = /password|secret|token|cookie|authorization|api.?key|^data$|^native$|reasoning|thinking|signature/i;
-  const text2 = typeof value === "string" ? value : JSON.stringify(value, (key, entry) => hidden.test(key) ? "[redacted]" : entry) ?? "";
-  return redact(text2.replace(/data:[^;,\s]+;base64,[\w+/=]+/gi, "[binary omitted]").replace(/[A-Za-z0-9+/=_-]{512,}/g, "[opaque data omitted]"), secrets).slice(0, max);
-}
-function cleanEvent(event) {
-  const secrets = privateValues(config.get());
-  return {
-    seq: event.seq,
-    at: event.at,
-    kind: event.kind,
-    text: agyHistoryText(event.text, secrets),
-    step: event.step,
-    model: event.model ? agyHistoryText(event.model, secrets, 100) : void 0,
-    tool: event.tool ? agyHistoryText(event.tool, secrets, 100) : void 0,
-    args: event.args ? agyHistoryText(event.args, secrets) : void 0,
-    phase: event.phase,
-    ms: event.ms,
-    inputTokens: event.inputTokens,
-    outputTokens: event.outputTokens,
-    isError: event.isError,
-    delivery: event.delivery
-  };
-}
-function recordAgyEvent(id, event) {
-  try {
-    const store10 = storeFor2(id);
-    const safe = cleanEvent({ ...event, seq: ++store10.data.seq, at: Date.now() });
-    store10.data.events.push(safe);
-    log.debug(`[AGY ${id}] ${safe.kind} ${[
-      safe.model ? `model=${safe.model}` : "",
-      safe.step != null ? `step=${safe.step}` : "",
-      safe.tool ? `tool=${safe.tool}` : "",
-      safe.phase ? `phase=${safe.phase}` : "",
-      safe.inputTokens != null ? `in=${safe.inputTokens} out=${safe.outputTokens ?? 0}` : "",
-      safe.delivery ? `delivery=${safe.delivery}` : ""
-    ].filter(Boolean).join(" ")} text=${safe.text.slice(0, 4e3)}${safe.args ? ` args=${safe.args.slice(0, 4e3)}` : ""}`);
-    while (store10.data.events.length > 500 || Buffer.byteLength(JSON.stringify(store10.data)) > 2 * 1024 * 1024) {
-      store10.data.events.shift();
-      store10.data.dropped++;
-    }
-    store10.save();
-  } catch {
-    log.warn("AGY \u6267\u884C\u8BB0\u5F55\u4FDD\u5B58\u5931\u8D25");
-  }
-}
-function agyHistory(id) {
-  const { events, dropped } = storeFor2(id).data;
-  return { events: events.map(cleanEvent), dropped };
-}
-function agyJobView(job) {
-  const secrets = privateValues(config.get());
-  const text2 = (value) => value ? agyHistoryText(value, secrets, 16e3) : void 0;
-  return {
-    id: job.id,
-    status: job.status,
-    createdAt: job.createdAt,
-    updatedAt: job.updatedAt,
-    task: text2(job.task),
-    requesterText: text2(job.requesterText),
-    report: text2(job.report),
-    progress: text2(job.progress),
-    steps: job.steps,
-    modelId: text2(job.modelId),
-    inputTokens: job.inputTokens,
-    outputTokens: job.outputTokens,
-    cacheReadTokens: job.cacheReadTokens,
-    inputImageCount: job.inputImages?.length ?? 0,
-    deliveryError: job.deliveryError
-  };
-}
-function pruneAgyHistory(ids) {
-  for (const id of /* @__PURE__ */ new Set([...stores3.keys(), ...fs14.existsSync(ROOT2) ? fs14.readdirSync(ROOT2) : []])) {
-    if (!/^[a-f0-9]{10}$/.test(id) || ids.has(id)) continue;
-    const target = directory2(id);
-    stores3.get(id)?.dispose();
-    stores3.delete(id);
-    fs14.rmSync(target, { recursive: true, force: true });
-  }
-}
-function observeAgyJob(job, changed2) {
-  const texts = /* @__PURE__ */ new Map();
-  const finished = /* @__PURE__ */ new Set();
-  const progress = (text2) => {
-    job.progress = text2;
-    job.updatedAt = Date.now();
-    changed2();
-  };
-  const count = (value) => Number.isFinite(value) && value >= 0 ? Math.floor(value) : void 0;
-  return (event) => {
-    if (event.event === "init") {
-      progress("\u6A21\u578B\u5DF2\u542F\u52A8");
-      recordAgyEvent(job.id, { kind: "progress", text: "\u6A21\u578B\u5DF2\u542F\u52A8", model: job.modelId });
-      return;
-    }
-    if (event.event === "result") {
-      const usage2 = event.result?.usage;
-      if (usage2) {
-        job.inputTokens = count(usage2.input_tokens);
-        job.outputTokens = count(usage2.output_tokens);
-        job.cacheReadTokens = count(usage2.cache_read_tokens);
-      }
-      progress(event.result?.status === "SUCCESS" ? "\u6267\u884C\u5DF2\u7ED3\u675F\uFF0C\u6B63\u5728\u6574\u7406\u5BF9\u8BDD\u56DE\u590D" : "\u6267\u884C\u672A\u5B8C\u6210\uFF0C\u6B63\u5728\u6574\u7406\u7ED3\u679C");
-      return;
-    }
-    if (event.event !== "step_update") return;
-    const step = event.step_update;
-    if (!step || !Number.isInteger(step.step_index) || step.step_index < 0) return;
-    const index = step.step_index;
-    const key = `${index}:${step.step_type}`;
-    if (finished.has(key)) return;
-    if (step.step_type === "agent_response") {
-      const delta = typeof step.text_delta === "string" ? step.text_delta : "";
-      if (delta) texts.set(index, ((texts.get(index) ?? "") + delta).slice(0, 12e3));
-      if (step.state !== "DONE") return;
-      finished.add(key);
-      const text2 = typeof step.text === "string" ? step.text : texts.get(index) ?? "";
-      texts.delete(index);
-      job.steps = (job.steps ?? 0) + 1;
-      progress(`\u5DF2\u5B8C\u6210 ${job.steps} \u8F6E\u5904\u7406`);
-      recordAgyEvent(job.id, {
-        kind: "response",
-        text: text2,
-        step: job.steps,
-        model: job.modelId,
-        ms: count(step.duration_seconds * 1e3),
-        inputTokens: count(step.usage?.input_tokens),
-        outputTokens: count(step.usage?.output_tokens)
-      });
-    } else if (step.step_type === "tool") {
-      const tool = String(step.tool_name ?? step.tool_info?.name ?? "tool");
-      const done = ["DONE", "ERROR", "FAILED"].includes(step.state);
-      if (!done && step.state !== "ACTIVE") return;
-      const activeKey = `${key}:active`;
-      if (!done && finished.has(activeKey)) return;
-      finished.add(done ? key : activeKey);
-      progress(done ? "\u5DE5\u5177\u5DF2\u8FD4\u56DE\uFF0C\u7EE7\u7EED\u5904\u7406" : `${agyHistoryText(tool, void 0, 100)} \u6267\u884C\u4E2D`);
-      const isError = step.state !== "DONE" && done;
-      recordAgyEvent(job.id, {
-        kind: "tool",
-        text: done ? agyHistoryText(step.tool_info?.output ?? (isError ? "\u5DE5\u5177\u6267\u884C\u5931\u8D25" : "\u5DE5\u5177\u8C03\u7528\u5B8C\u6210")) : "\u6B63\u5728\u6267\u884C",
-        tool,
-        args: agyHistoryText(step.tool_info?.parameters),
-        phase: done ? "completed" : "running",
-        isError,
-        ms: count(step.duration_seconds * 1e3)
-      });
-    }
-  };
-}
-
-// src/agy/debug.ts
+init_history();
 function agyDiagnosticLogger(id, stream, secrets) {
   let pending = "", dropping = false, privateKey = false;
   const emit = (line) => {
@@ -8536,6 +8717,7 @@ function agyDiagnosticLogger(id, stream, secrets) {
 }
 
 // src/agy/runtime.ts
+init_history();
 var AGY_MODEL = "gemini-3.8-flash-medium";
 var AGY_EFFORT = "medium";
 function agyConversationFlags(conversationId) {
@@ -8726,17 +8908,19 @@ User clarification: ${redact(job.response, secrets)}` : ""}`;
 }
 
 // src/tools/agy.ts
+init_privacy();
+init_history();
 init_registry();
 init_session();
-var store9 = new JsonStore("agy-jobs.json", []);
+var store10 = new JsonStore("agy-jobs.json", []);
 var retainedJobs2;
-var agyQueue = new ComputerQueue(store9.data, () => {
-  store9.save();
-  const ids = store9.data.map((job) => job.id).join(",");
+var agyQueue = new ComputerQueue(store10.data, () => {
+  store10.save();
+  const ids = store10.data.map((job) => job.id).join(",");
   if (ids !== retainedJobs2) {
     retainedJobs2 = ids;
     try {
-      pruneAgyHistory(new Set(store9.data.map((job) => job.id)));
+      pruneAgyHistory(new Set(store10.data.map((job) => job.id)));
     } catch {
     }
   }
@@ -9421,12 +9605,14 @@ init_paths();
 init_util();
 init_session();
 init_turnLog();
+init_rollouts();
 init_roster();
 init_utility();
 init_types();
 init_embed();
 init_store2();
 init_store3();
+init_history();
 init_registry();
 init_skills();
 var startedAt = Date.now();
@@ -9830,6 +10016,12 @@ var routes = [
     return { id, messages: recentMessages(scope, id), turns: turns.map((t) => ({ at: t.at, input: t.input, reply: t.reply })) };
   }),
   R("GET", "/api/turns", ({ query }) => recentTurns({ limit: Math.min(300, Number(query.get("limit")) || 100) }).map((t) => ({ ...t, label: sessionLabel(t.conv).label }))),
+  R("GET", "/api/rollouts", ({ query }) => recentRollouts(query.get("conv") || void 0).map((r) => ({ ...r, label: sessionLabel(r.conv).label }))),
+  R("GET", "/api/rollouts/:id/history", ({ params }) => {
+    const history = rolloutHistory(params[0]);
+    if (!history) throw fail("\u6267\u884C\u8BB0\u5F55\u4E0D\u5B58\u5728\u6216\u5DF2\u6E05\u7406", 404);
+    return { ...history, label: sessionLabel(history.conv).label };
+  }),
   R("GET", "/api/vectors", ({ query }) => vectorSpace(query)),
   R("GET", "/api/memory", () => {
     const row = (scope) => (key) => ({ key, name: nameOf(scope, key), entries: listMemory(scope, key), usage: usage(scope, key) });

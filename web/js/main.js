@@ -5,6 +5,7 @@ const PAGES = [
   ['overview', '概览', 'overview', () => import('./pages/overview.js'), '工作台'],
   ['usage', '用量与额度', 'usage', () => import('./pages/usage.js'), '工作台'],
   ['conversations', '对话', 'chat', () => import('./pages/conversations.js'), '对话与记忆'],
+  ['rollouts', '执行记录', 'layers', () => import('./pages/rollouts.js'), '对话与记忆'],
   ['memory', '长期记忆', 'memory', () => import('./pages/memory.js'), '对话与记忆'],
   ['roster', '群友称呼', 'users', () => import('./pages/roster.js'), '对话与记忆'],
   ['vectors', '向量空间', 'vectors', () => import('./pages/vectors.js'), '对话与记忆'],
@@ -13,7 +14,7 @@ const PAGES = [
   ['stickers', '表情包', 'sticker', () => import('./pages/stickers.js'), '模型与资源'],
   ['tools', '工具与技能', 'tools', () => import('./pages/tools.js'), '模型与资源'],
   ['computer', '电脑任务', 'computer', () => import('./pages/computer.js'), '系统管理'],
-  ['agy', '异步代理（AGY）', 'models', () => import('./pages/agy.js'), '系统管理'],
+  ['agy', '异步代理', 'models', () => import('./pages/agy.js'), '系统管理'],
   ['config', '配置', 'settings', () => import('./pages/config.js'), '系统管理'],
   ['logs', '日志', 'logs', () => import('./pages/logs.js'), '系统管理'],
 ]

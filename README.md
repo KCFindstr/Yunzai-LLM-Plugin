@@ -92,3 +92,5 @@ pnpm sandbox      # 本地沙盒：真实 Yunzai + 模拟 NapCat，见 sandbox/R
 日志：每轮会输出思考强度及判断来源、每次工具调用（含参数、耗时）和用量汇总。启动前设置环境变量 `YZ_LLM_DEBUG=1`（如写进 `start.bat`）还会输出工具结果和回复全文，且不需要把整个 Yunzai 调成 debug 级别。
 
 实现细节与交接说明见 [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md)。
+
+主聊天模型的逐轮响应、工具参数与结果可在 **执行记录（Rollouts）** 中查看，布局与 AGY 相同，支持实时更新。记录范围、保留上限及接口见 [执行记录说明](docs/ROLLOUTS.md)。

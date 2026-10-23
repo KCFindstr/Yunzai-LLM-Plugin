@@ -13,6 +13,7 @@ import { CONFIG_DIR, DEFAULT_CONFIG_FILE } from '../core/paths.ts'
 import { deepMerge, detectImageMime, formatDuration, isPlainObject, maskSecret, truncate } from '../core/util.ts'
 import { allVectors, archiveInfo, clearSession, dayInfo, deleteArchiveEntry, listSessions, peekSession } from '../chat/session.ts'
 import { recentTurns } from '../chat/turnLog.ts'
+import { recentRollouts, rolloutHistory } from '../chat/rollouts.ts'
 import { configuredName, recentMessages, rosterSnapshot } from '../chat/roster.ts'
 import { utilityChat } from '../chat/utility.ts'
 import { partsToText } from '../llm/types.ts'
@@ -453,6 +454,12 @@ export const routes: Route[] = [
     return { id, messages: recentMessages(scope, id), turns: turns.map(t => ({ at: t.at, input: t.input, reply: t.reply })) }
   }),
   R('GET', '/api/turns', ({ query }) => recentTurns({ limit: Math.min(300, Number(query.get('limit')) || 100) }).map(t => ({ ...t, label: sessionLabel(t.conv).label }))),
+  R('GET', '/api/rollouts', ({ query }) => recentRollouts(query.get('conv') || undefined).map(r => ({ ...r, label: sessionLabel(r.conv).label }))),
+  R('GET', '/api/rollouts/:id/history', ({ params }) => {
+    const history = rolloutHistory(params[0])
+    if (!history) throw fail('执行记录不存在或已清理', 404)
+    return { ...history, label: sessionLabel(history.conv).label }
+  }),
 
   R('GET', '/api/vectors', ({ query }) => vectorSpace(query)),
 

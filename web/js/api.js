@@ -16,7 +16,7 @@ export async function api(method, path, body) {
     onUnauthorized()
     throw new Error('登录已失效')
   }
-  if (!res.ok) throw new Error(data?.error || `请求失败（${res.status}）`)
+  if (!res.ok) throw Object.assign(new Error(data?.error || `请求失败（${res.status}）`), { status: res.status })
   return data
 }
 

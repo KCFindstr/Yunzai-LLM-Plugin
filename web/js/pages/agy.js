@@ -75,7 +75,7 @@ export async function render(root, [id]) {
             job.inputImageCount ? `${job.inputImageCount} 张输入图片` : null].filter(Boolean).join(' · ')),
         job.deliveryError ? h('p', { class: 'small bad' }, '结果未能完整送达聊天，请查看下方对话回复记录。') : null,
         ['queued', 'running', 'waiting'].includes(job.status) ? h('button', { class: 'btn danger', style: { marginTop: '12px' }, onclick: async () => {
-          if (await confirmDanger('取消这个 异步代理（AGY）？')) {
+          if (await confirmDanger('取消这个异步代理？')) {
             await act(() => post(`/api/agy/${enc(job.id)}/cancel`), '已取消')
             await refresh()
           }
@@ -107,7 +107,7 @@ export async function render(root, [id]) {
     finally { busy = false; refreshButton.disabled = false }
   }
 
-  mount(root, h('div', { class: 'page-head' }, menuButton(), h('h1', '异步代理（AGY）'), h('span', { class: 'spacer' }), connection, refreshButton),
+  mount(root, h('div', { class: 'page-head' }, menuButton(), h('h1', '异步代理'), h('span', { class: 'spacer' }), connection, refreshButton),
     h('div', { class: 'split computer-split' }, list, detail))
   drawList()
   mount(detail, card(null, h('div', { class: 'empty loading' }, spinner(), '加载执行记录…')))

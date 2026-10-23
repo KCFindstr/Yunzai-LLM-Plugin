@@ -3,6 +3,7 @@ import { truncate } from '../core/util.ts'
 
 /** One chat-model turn, as shown in the web UI's recent-turns list. */
 export interface TurnRecord {
+  rolloutId?: string
   at: number
   conv: string
   userId?: string

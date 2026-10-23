@@ -98,20 +98,25 @@ class Registry {
     })
   }
 
-  async execute(calls: ToolCall[], ctx: ToolCtx, offered: ToolDef[]): Promise<{ results: ToolResult[]; terminal: boolean }> {
+  async execute(calls: ToolCall[], ctx: ToolCtx, offered: ToolDef[], onResult?: (result: ToolResult, ms: number) => void): Promise<{ results: ToolResult[]; terminal: boolean }> {
     const allowed = new Map(offered.map(d => [d.name, d]))
     let terminal = false
     const results = await Promise.all(
       calls.map(async (call): Promise<ToolResult> => {
+        const started = Date.now()
+        const done = (result: ToolResult) => {
+          // Observability must never change a tool's result or interrupt parallel calls.
+          try { onResult?.(result, Date.now() - started) } catch { /* best effort */ }
+          return result
+        }
         const def = allowed.get(call.name)
         if (!def) {
           log.warn(`模型调用了未提供的工具 ${call.name}(${brief(call.args ?? {})})`)
-          return { id: call.id, name: call.name, content: `工具 ${call.name} 不可用`, isError: true }
+          return done({ id: call.id, name: call.name, content: `工具 ${call.name} 不可用`, isError: true })
         }
         if (call.args?._invalid_json)
-          return { id: call.id, name: call.name, content: '参数不是合法 JSON，请重试', isError: true }
+          return done({ id: call.id, name: call.name, content: '参数不是合法 JSON，请重试', isError: true })
         try {
-          const started = Date.now()
           const out = await Promise.race([
             def.run(call.args ?? {}, ctx),
             new Promise<never>((_, rej) => setTimeout(() => rej(new Error('工具执行超时')), TOOL_TIMEOUT_MS).unref?.()),
@@ -120,10 +125,10 @@ class Registry {
           if (o.terminal) terminal = true
           log.info(`工具 ${call.name}(${brief(call.args ?? {})}) ${o.isError ? '失败' : '完成'} ${Date.now() - started}ms → ${(o.content ?? '').length}字`)
           log.debug(`工具 ${call.name} 结果：${brief(o.content, 600)}`)
-          return { id: call.id, name: call.name, content: truncate(o.content || '(无结果)', MAX_RESULT_CHARS), isError: o.isError }
+          return done({ id: call.id, name: call.name, content: truncate(o.content || '(无结果)', MAX_RESULT_CHARS), isError: o.isError })
         } catch (err: any) {
           log.warn(`工具 ${call.name}(${brief(call.args ?? {})}) 出错: ${err?.message ?? err}`)
-          return { id: call.id, name: call.name, content: `执行出错: ${err?.message ?? err}`, isError: true }
+          return done({ id: call.id, name: call.name, content: `执行出错: ${err?.message ?? err}`, isError: true })
         }
       }),
     )

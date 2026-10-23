@@ -28,6 +28,7 @@ function showTurn(t) {
     t.tokens?.inputIncomplete ? h('div', { class: 'small muted' }, '上游可能漏报历史输入和缓存 token，以上花费可能偏低；实际费用以服务商账单为准。') : null,
     h('div', { class: 'chat' }, h('div', { class: 'bubble user' }, t.input), t.reply ? h('div', { class: 'bubble assistant' }, t.reply) : null),
     t.tools.length ? h('div', h('span', { class: 'small muted' }, '工具调用：'), t.tools.join(' → ')) : null,
+    t.rolloutId ? h('a', { class: 'btn', href: `#/rollouts/${enc(t.rolloutId)}`, onclick: e => e.currentTarget.closest('.modal-bg')?.querySelector('header button')?.click() }, '查看完整执行记录 →') : null,
     t.error ? h('pre', { class: 'bad' }, t.error) : null,
   ))
 }

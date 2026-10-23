@@ -19,6 +19,8 @@ import { memoryHash } from '../memory/store.ts'
 import { appendTurn, getSession, peekSession, indexArchive, pendingArchive, recallSession, setEpisode, setServerState, setSummary, truncateIfNeeded } from './session.ts'
 import { pickModel, utilityCandidates, utilityChat, type Picked } from './utility.ts'
 import { recordTurn } from './turnLog.ts'
+import { recordRolloutEvent, startRollout, updateRollout } from './rollouts.ts'
+import { agyHistoryText } from '../agy/history.ts'
 import { localDay, parseDateHints } from './dates.ts'
 import { maintainArchive } from './archiveJobs.ts'
 import { recallSources } from '../memory/tool.ts'
@@ -77,17 +79,35 @@ function selectModel(eff: EffectiveConfig, ctx: QuotaCtx, exact?: string): { pic
 
 export async function runTurn(req: TurnRequest): Promise<TurnOutcome> {
   semaphore.max = Math.max(1, req.eff.reply.concurrency || 3)
-  const ref: { turn?: TurnState } = {}
+  const rolloutId = startRollout({ conv: req.convKey, input: req.input.text || (req.input.images.length ? '（发了图片）' : '（只@了你，没说话）'),
+    inputImageCount: req.input.images.length, source: req.asyncResult?.kind ?? (req.computerResult ? 'computer' : 'chat'),
+    jobId: req.asyncResult?.id ?? req.computerResult?.id })
+  const ref: { turn?: TurnState; rolloutId: string } = { rolloutId }
   try {
-    const result = await semaphore.run(() => runTurnInner(req, ref))
+    const result = await semaphore.run(() => {
+      updateRollout(rolloutId, { status: 'running' })
+      return runTurnInner(req, ref)
+    })
+    if (result.kind === 'reply') {
+      const text = result.text || (result.dispatched ? `（执行指令 ${result.dispatched}）` : '（无文字回复）')
+      recordRolloutEvent(rolloutId, { kind: 'reply', text })
+      updateRollout(rolloutId, { status: 'completed', reply: text })
+    } else {
+      recordRolloutEvent(rolloutId, { kind: 'error', text: result.kind === 'quota' ? '额度已用完，未调用模型' : result.message, isError: true })
+      updateRollout(rolloutId, { status: result.kind === 'quota' ? 'blocked' : 'failed', ...(result.kind === 'quota' ? { model: result.modelId } : {}) })
+    }
     return { ...result, afterReply: ref.turn?.afterReply }
+  } catch (error: any) {
+    recordRolloutEvent(rolloutId, { kind: 'error', text: error?.message ?? String(error), isError: true })
+    updateRollout(rolloutId, { status: 'failed' })
+    throw error
   } finally {
     // run_code / render_html workspace lives only for this reply
     if (ref.turn?.sandboxSession) cleanupSandbox(req.eff.tools.exec, ref.turn.sandboxSession)
   }
 }
 
-async function runTurnInner(req: TurnRequest, ref: { turn?: TurnState }): Promise<TurnOutcome> {
+async function runTurnInner(req: TurnRequest, ref: { turn?: TurnState; rolloutId: string }): Promise<TurnOutcome> {
   const { e, eff, input, isAdmin, convKey } = req
   const quotaCtx: QuotaCtx = { userId: e.user_id, groupId: e.group_id, isAdmin }
   const { picked, block } = selectModel(eff, quotaCtx, req.modelId)
@@ -96,6 +116,7 @@ async function runTurnInner(req: TurnRequest, ref: { turn?: TurnState }): Promis
     return { kind: 'error', unconfigured: true, message: '没有可用的模型，请检查模型与 API Key 配置（#llm模型列表 / #llm设置密钥）' }
   }
   const { model, provider } = picked
+  updateRollout(ref.rolloutId, { model: model.id })
   const price = resolvePrice(model)
   const dropped = degraded.get(model.id) ?? new Set<Feature>()
   let thinking: ThinkingLevel = dropped.has('thinking')
@@ -195,6 +216,7 @@ async function runTurnInner(req: TurnRequest, ref: { turn?: TurnState }): Promis
         if (state && !retriedStateless && err instanceof LLMError && [400, 404].includes(err.status ?? 0)) {
           retriedStateless = true
           state = undefined
+          recordRolloutEvent(ref.rolloutId, { kind: 'progress', text: '服务端会话状态失效，使用完整上下文重试' })
           log.warn(`服务端会话状态失效，改为发送完整上下文重试: ${err.message.slice(0, 100)}`)
           continue
         }
@@ -203,6 +225,7 @@ async function runTurnInner(req: TurnRequest, ref: { turn?: TurnState }): Promis
         if (!drop) throw err
         if (!degraded.has(model.id)) degraded.set(model.id, new Set())
         degraded.get(model.id)!.add(drop)
+        recordRolloutEvent(ref.rolloutId, { kind: 'progress', text: `接口不支持 ${drop}，关闭该功能后重试` })
         log.warn(`模型 ${model.id} 的接口不支持 ${drop}，已自动关闭该功能后重试（${(err as Error).message.slice(0, 120)}）`)
         if (drop === 'nativeSearch') nativeSearch = false
         if (drop === 'thinking') thinking = 'off'
@@ -216,6 +239,7 @@ async function runTurnInner(req: TurnRequest, ref: { turn?: TurnState }): Promis
   }
 
   const turnInfo = () => ({
+    rolloutId: ref.rolloutId,
     at: started, conv: convKey, userId: e.user_id != null ? String(e.user_id) : undefined, userName: senderName(e),
     groupId: e.group_id != null ? String(e.group_id) : undefined, model: model.id, input: text, cost, ms: Date.now() - started,
     tools: msgs.flatMap(m => (m.role === 'assistant' ? (m.toolCalls ?? []).map(call => call.name) : [])),
@@ -223,11 +247,16 @@ async function runTurnInner(req: TurnRequest, ref: { turn?: TurnState }): Promis
   })
   try {
     for (let round = 0; round < maxRounds; round++) {
+      const step = round + 1, callStarted = Date.now()
+      recordRolloutEvent(ref.rolloutId, { kind: 'progress', text: '等待模型响应', step })
       const res = await call()
       const c = computeCost(res.usage, price)
       cost += c
       usage = addUsage(usage, res.usage)
       record(model, quotaCtx, c, res.usage)
+      updateRollout(ref.rolloutId, { steps: step, cost, tokens: turnInfo().tokens })
+      recordRolloutEvent(ref.rolloutId, { kind: 'response', text: res.text || (res.toolCalls.length ? '模型请求调用工具' : res.pause ? '模型请求继续处理' : '（无可见文字）'),
+        step, ms: Date.now() - callStarted, inputTokens: res.usage.input, outputTokens: res.usage.output })
       msgs.push({ role: 'assistant', content: res.text, toolCalls: res.toolCalls, native: res.native, responseId: res.responseId })
       lastResponseId = res.responseId
       state = res.responseId && serverState ? { previousId: res.responseId, skip: msgs.length } : undefined
@@ -241,8 +270,13 @@ async function runTurnInner(req: TurnRequest, ref: { turn?: TurnState }): Promis
       }
       finalText = res.text
       if (res.text) log.debug(`[${model.id}] 第${round + 1}轮附带文字：${brief(res.text, 300)}`)
+      for (const call of res.toolCalls) recordRolloutEvent(ref.rolloutId, { kind: 'tool', text: round >= maxRounds - 1 ? '已达到工具轮数上限，未执行' : '正在执行',
+        step, tool: call.name, callId: call.id, args: agyHistoryText(call.args), phase: round >= maxRounds - 1 ? 'skipped' : 'running' })
       if (round >= maxRounds - 1) break
-      const { results, terminal } = await registry.execute(res.toolCalls, ctx, offered)
+      const { results, terminal } = await registry.execute(res.toolCalls, ctx, offered, (result, ms) => {
+        recordRolloutEvent(ref.rolloutId, { kind: 'tool', text: result.content, step, tool: result.name,
+          callId: result.id, phase: 'completed', ms, isError: result.isError })
+      })
       if (round === maxRounds - 2)
         for (const r of results) r.content += '\n（工具调用次数已用完，请直接给出最终回复）'
       msgs.push({ role: 'tool', results })
@@ -255,6 +289,7 @@ async function runTurnInner(req: TurnRequest, ref: { turn?: TurnState }): Promis
       recordTurn({ ...turnInfo(), reply: '', error: err?.message ?? String(err) })
       return { kind: 'error', message: err?.message ?? String(err) }
     }
+    recordRolloutEvent(ref.rolloutId, { kind: 'error', text: err?.message ?? String(err), isError: true })
   }
 
   log.info(
