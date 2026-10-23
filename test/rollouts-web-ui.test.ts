@@ -8,6 +8,7 @@ import { config } from '../src/core/config.ts'
 import { startWeb, stopWeb } from '../src/web/server.ts'
 import { recordRolloutEvent, startRollout, updateRollout } from '../src/chat/rollouts.ts'
 import { recordTurn } from '../src/chat/turnLog.ts'
+import { appendTurn } from '../src/chat/session.ts'
 
 it('serves authenticated rollout history and renders live timelines, links and safe arguments on desktop/mobile', async () => {
   const port = await new Promise<number>(resolve => {
@@ -24,7 +25,11 @@ it('serves authenticated rollout history and renders live timelines, links and s
   recordRolloutEvent(completed, { kind: 'tool', tool: 'search_web', callId: 'call-1', phase: 'running', step: 1, text: '正在执行', args: '<script>window.__rollout_xss=true</script> alice@example.com password=secret-password' })
   recordRolloutEvent(completed, { kind: 'tool', tool: 'search_web', callId: 'call-1', phase: 'completed', step: 1, text: '匹配到公开图片页面', ms: 500 })
   recordRolloutEvent(completed, { kind: 'reply', text: '我找到了这张图的来源。' })
-  updateRollout(completed, { status: 'completed', model: 'main-model', steps: 2, reply: '我找到了这张图的来源。', cost: 0.012, tokens: { input: 4200, output: 200, cacheRead: 1000 } })
+  updateRollout(completed, { status: 'completed', model: 'main-model', thinking: 'medium', thinkingDecision: {
+    setting: 'auto', level: 'medium', source: 'systemone', kind: 'question', ms: 85,
+    judge: { kind: 'question', model: 'jev-latest', response: JSON.stringify({ answers: { kind: { choice: 'question', confidence: 0.92, probabilities: { casual: 0.05, question: 0.92, complex: 0.03 } } } }, null, 2), inputTokens: 120, outputTokens: 1, cost: 0.00000504 },
+  }, steps: 2, reply: '我找到了这张图的来源。', cost: 0.012, tokens: { input: 4200, output: 200, cacheRead: 1000 } })
+  appendTurn('bot:p20001', { role: 'user', content: [{ type: 'text', text: '查找这张图片的原始出处' }] }, { role: 'assistant', content: '我找到了这张图的来源。' })
   recordTurn({ rolloutId: completed, conv: 'bot:p20001', at: Date.now(), input: '查找这张图片的原始出处', reply: '我找到了这张图的来源。', tools: ['search_web'], cost: 0.012, ms: 1700 })
   const running = startRollout({ conv: 'bot:p20002', input: '搜索引用图片', source: 'chat', inputImageCount: 0 })
   updateRollout(running, { status: 'running', model: 'main-model' })
@@ -65,7 +70,9 @@ it('serves authenticated rollout history and renders live timelines, links and s
     await page.waitForFunction(() => document.querySelector('.computer-task-text')?.textContent === '查找这张图片的原始出处')
     await page.click('.computer-arguments summary')
     const body = await page.evaluate(() => document.body.innerText)
-    for (const expected of ['最终回复', '我找到了这张图的来源', '正在核对图片来源', '匹配到公开图片页面', '输入 4,200', 'call-1']) assert.ok(body.includes(expected), expected)
+    for (const expected of ['最终回复', '我找到了这张图的来源', '正在核对图片来源', '匹配到公开图片页面', '输入 4,200', 'call-1', '思考 medium', '自动 → medium', 'jev-latest', 'confidence', '0.92', 'probabilities', '判断费用 $0.000005']) assert.ok(body.includes(expected), expected)
+    assert.equal(await page.$eval('.rollout-detail a[href^="#/conversations/"]', (el: HTMLAnchorElement) => el.getAttribute('href')), '#/conversations/bot%3Ap20001')
+    assert.equal(await page.$eval('.rollout-detail a[href^="#/vectors/"]', (el: HTMLAnchorElement) => el.getAttribute('href')), '#/vectors/bot%3Ap20001')
     assert.ok(body.includes('<script>window.__rollout_xss=true</script>'))
     assert.equal(await page.evaluate(() => (window as any).__rollout_xss), undefined)
     assert.ok(!body.includes('alice@example.com')); assert.ok(!body.includes('secret-password'))
@@ -81,6 +88,14 @@ it('serves authenticated rollout history and renders live timelines, links and s
     await page.waitForFunction(() => document.querySelector('aside.side')!.getBoundingClientRect().right <= 0)
     await screenshot(page, 'rollouts-mobile.png')
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false)
+    await page.click('.rollout-detail a[href^="#/vectors/"]')
+    await page.waitForSelector('[data-page=vectors] h1')
+    assert.equal(await page.$eval('[data-page=vectors] h1', (el: HTMLElement) => el.textContent), '向量空间')
+    await page.goto(base + `/#/rollouts/${completed}`)
+    await page.waitForSelector('.rollout-detail a[href^="#/conversations/"]')
+    await page.click('.rollout-detail a[href^="#/conversations/"]')
+    await page.waitForSelector('[data-page=conversations] .split .card')
+    assert.ok(await page.$eval('[data-page=conversations]', (el: HTMLElement) => el.textContent!.includes('bot:p20001')))
     await page.goto(base + '/#/conversations/turns')
     await page.waitForSelector('tbody tr')
     await page.click('tbody tr')

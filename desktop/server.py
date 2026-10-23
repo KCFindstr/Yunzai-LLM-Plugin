@@ -12,6 +12,7 @@ import tempfile
 import time
 import urllib.request
 from urllib.parse import urlsplit
+from supervisor import ProcessSupervisor
 
 os.environ['DISPLAY'] = ':99'
 os.environ['HOME'] = '/home/pc'
@@ -36,13 +37,33 @@ subprocess.run(['xrdb', '-merge', '/home/pc/.Xresources'], check=False)
 start(['tint2'])
 start(['xterm', '-geometry', '32x9+32+430', '-title', '像素终端 · ピクセル端末'])
 # Optional remote viewer shares this exact display and namespace; no second desktop is created.
-if pathlib.Path('/home/pc/.config/llm-desktop/rustdesk-enabled').is_file() and pathlib.Path('/usr/local/lib/llm-desktop/rustdesk-launch.py').is_file():
-    start(['python3', '/usr/local/lib/llm-desktop/rustdesk-launch.py'])
+rustdesk = ProcessSupervisor(['python3', '/usr/local/lib/llm-desktop/rustdesk-launch.py'],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def supervise_rustdesk():
+    if pathlib.Path('/home/pc/.config/llm-desktop/rustdesk-enabled').is_file() and pathlib.Path('/usr/local/lib/llm-desktop/rustdesk-launch.py').is_file():
+        rustdesk.tick()
+
+
+supervise_rustdesk()
 chrome = pathlib.Path('/usr/local/lib/llm-desktop/chrome-path').read_text().strip()
-chrome_arguments = [chrome, '--no-sandbox', '--disable-dev-shm-usage', '--no-first-run', '--disable-features=Translate',
+chrome_arguments = [chrome, '--disable-dev-shm-usage', '--no-first-run', '--disable-features=Translate',
        '--password-store=basic', '--remote-debugging-address=127.0.0.1', '--remote-debugging-port=9223',
        '--user-data-dir=/home/pc/browser', '--window-size=980,680', '--window-position=20,35', 'about:blank']
-browser_process = start(chrome_arguments)
+
+
+def start_browser():
+    # Retain native Chrome diagnostics instead of discarding evidence of crashes.
+    log = pathlib.Path('/home/pc/.config/llm-desktop/chrome.log')
+    log.parent.mkdir(parents=True, exist_ok=True)
+    if log.exists() and log.stat().st_size > 4 * 1024 * 1024:
+        log.replace(log.with_suffix('.previous.log'))
+    with log.open('a') as output:
+        return subprocess.Popen(chrome_arguments, stdout=output, stderr=output, start_new_session=True)
+
+
+browser_process = start_browser()
 
 import pyautogui
 import pyperclip
@@ -95,7 +116,7 @@ def cdp(endpoint, method, params=None):
 def browser(url=None):
     global active_target, browser_process
     if browser_process.poll() is not None:
-        browser_process = start(chrome_arguments)
+        browser_process = start_browser()
         active_target = None
     for attempt in range(30):
         try:
@@ -221,8 +242,13 @@ with socket.socket(socket.AF_UNIX) as server:
     server.bind(path)
     os.chmod(path, 0o600)
     server.listen(8)
+    server.settimeout(2)
     while True:
-        connection, address = server.accept()
+        supervise_rustdesk()
+        try:
+            connection, address = server.accept()
+        except socket.timeout:
+            continue
         with connection:
             connection.settimeout(5)
             try:

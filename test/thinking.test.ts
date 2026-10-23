@@ -26,7 +26,7 @@ chat:
 `)
 
 const { config } = await import('../src/core/config.ts')
-const { classifyMessage, judgeMessage, resolveThinking } = await import('../src/chat/thinking.ts')
+const { classifyMessage, judgeMessage, resolveThinking, resolveThinkingDecision } = await import('../src/chat/thinking.ts')
 const q = { userId: 1, groupId: 2, isAdmin: false }
 
 describe('keyword heuristic', () => {
@@ -44,6 +44,8 @@ describe('thinking judge', () => {
   it('asks the judge model with thinking off and a tiny output budget', async () => {
     const j = await judgeMessage({ text: '胡桃和行秋怎么配队' }, cfg(), q)
     assert.deepEqual([j.kind, j.source], ['complex', 'model'])
+    assert.equal(j.judge?.model, 'judge')
+    assert.equal(j.judge?.response, 'complex')
     const body = llm.requests.at(-1)!.body
     assert.equal(body.model, 'tiny-judge')
     assert.equal(body.max_tokens, 8)
@@ -117,6 +119,12 @@ describe('thinking judge', () => {
       )
       assert.equal(j.kind, 'question')
       assert.equal(j.source, 'systemone')
+      const response = JSON.parse(j.judge!.response)
+      assert.equal(response.model, 'jev-latest')
+      assert.equal(response.answers.kind.choice, 'question')
+      assert.equal(response.answers.kind.confidence, 0.92)
+      assert.deepEqual(response.answers.kind.probabilities, { casual: 0.05, question: 0.92, complex: 0.03 })
+      assert.equal(j.judge?.inputTokens, 120)
       const debugLog = logs.find(l => l.includes('[systemone jev-latest]'))
       assert.ok(debugLog, `should log [systemone jev-latest], got: ${JSON.stringify(logs)}`)
       assert.ok(debugLog.includes('choice=question'), 'should include choice')
@@ -151,6 +159,23 @@ describe('thinking judge', () => {
     assert.equal(await resolveThinking('auto', chat, { text: '胡桃和行秋怎么配队' }, q), 'high')
     assert.equal(await resolveThinking('auto', chat, { text: '哈哈' }, q), 'low')
     assert.equal(await resolveThinking('medium', chat, { text: '胡桃和行秋怎么配队' }, q), 'medium')
+  })
+
+  it('keeps the automatic decision and fallback reason without calling a judge for fixed or uniform levels', async () => {
+    const chat = config.effective().chat
+    const auto = await resolveThinkingDecision('auto', chat, { text: '胡桃和行秋怎么配队' }, q)
+    assert.equal(auto.level, 'high')
+    assert.equal(auto.kind, 'complex')
+    assert.equal(auto.judge?.response, 'complex')
+    const fallback = await resolveThinkingDecision('auto', chat, { text: 'broken 今天吃什么' }, q)
+    assert.equal(fallback.source, 'heuristic')
+    assert.ok(fallback.fallbackReason)
+    const calls = llm.requests.length
+    assert.equal((await resolveThinkingDecision('medium', chat, { text: '帮我写脚本' }, q)).source, 'fixed')
+    const uniform = await resolveThinkingDecision('auto', { ...chat, autoThinking: { casual: 'low', question: 'low', complex: 'low' } }, { text: '帮我写脚本' }, q)
+    assert.equal(uniform.level, 'low')
+    assert.equal(uniform.source, 'uniform')
+    assert.equal(llm.requests.length, calls)
   })
 })
 

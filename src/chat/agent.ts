@@ -10,7 +10,7 @@ import { addUsage, chat, emptyUsage, LLMError, partsToText, usesServerState, typ
 import { cleanupSandbox } from '../tools/exec.ts'
 import { registry, type ToolCtx, type TurnState } from '../tools/registry.ts'
 import type { ExtractedInput } from './message.ts'
-import { resolveThinking } from './thinking.ts'
+import { resolveThinkingDecision, type ThinkingDecision } from './thinking.ts'
 import { markHandled } from './groupLog.ts'
 import { markdownEnabled } from './format.ts'
 import { buildHeader, buildMemoryBlock, buildSystemPrompt, SUMMARY_PROMPT } from './prompt.ts'
@@ -119,14 +119,20 @@ async function runTurnInner(req: TurnRequest, ref: { turn?: TurnState; rolloutId
   updateRollout(ref.rolloutId, { model: model.id })
   const price = resolvePrice(model)
   const dropped = degraded.get(model.id) ?? new Set<Feature>()
-  let thinking: ThinkingLevel = dropped.has('thinking')
-    ? 'off'
-    : await resolveThinking(
-        model.thinking ?? eff.chat.thinking,
+  const thinkingSetting = model.thinking ?? eff.chat.thinking
+  if (thinkingSetting === 'auto' && !dropped.has('thinking')) recordRolloutEvent(ref.rolloutId, { kind: 'progress', text: '正在判断思考强度' })
+  const decision: ThinkingDecision = dropped.has('thinking')
+    ? { setting: thinkingSetting, level: 'off', source: 'unsupported', ms: 0 }
+    : await resolveThinkingDecision(
+        thinkingSetting,
         eff.chat,
         { text: input.text.replaceAll('[at:you]', '').trim(), images: input.images.length, quoted: Boolean(input.quoted), quotedText: input.quoted?.text },
         quotaCtx,
       )
+  let thinking = decision.level
+  updateRollout(ref.rolloutId, { thinking, thinkingDecision: decision })
+  recordRolloutEvent(ref.rolloutId, { kind: 'thinking', thinking,
+    text: decision.source === 'unsupported' ? '接口不支持思考强度设置' : thinkingSetting === 'auto' ? '自动思考强度已确定' : '使用配置的思考强度' })
   const temperature = model.temperature ?? eff.chat.temperature
   const maxTokens = model.maxTokens ?? eff.chat.maxOutputTokens
 
@@ -228,7 +234,10 @@ async function runTurnInner(req: TurnRequest, ref: { turn?: TurnState; rolloutId
         recordRolloutEvent(ref.rolloutId, { kind: 'progress', text: `接口不支持 ${drop}，关闭该功能后重试` })
         log.warn(`模型 ${model.id} 的接口不支持 ${drop}，已自动关闭该功能后重试（${(err as Error).message.slice(0, 120)}）`)
         if (drop === 'nativeSearch') nativeSearch = false
-        if (drop === 'thinking') thinking = 'off'
+        if (drop === 'thinking') {
+          thinking = 'off'
+          updateRollout(ref.rolloutId, { thinking })
+        }
         if (drop === 'tools') {
           offered = []
           specs = []
@@ -256,7 +265,7 @@ async function runTurnInner(req: TurnRequest, ref: { turn?: TurnState; rolloutId
       record(model, quotaCtx, c, res.usage)
       updateRollout(ref.rolloutId, { steps: step, cost, tokens: turnInfo().tokens })
       recordRolloutEvent(ref.rolloutId, { kind: 'response', text: res.text || (res.toolCalls.length ? '模型请求调用工具' : res.pause ? '模型请求继续处理' : '（无可见文字）'),
-        step, ms: Date.now() - callStarted, inputTokens: res.usage.input, outputTokens: res.usage.output })
+        step, thinking, ms: Date.now() - callStarted, inputTokens: res.usage.input, outputTokens: res.usage.output })
       msgs.push({ role: 'assistant', content: res.text, toolCalls: res.toolCalls, native: res.native, responseId: res.responseId })
       lastResponseId = res.responseId
       state = res.responseId && serverState ? { previousId: res.responseId, skip: msgs.length } : undefined

@@ -42,13 +42,14 @@ export function registerMemoryTool() {
     name: 'recall', source: 'builtin',
     // a getter: the registry reads it every turn, so it follows memory.recallLimit
     get description() {
-      return '检索当前会话更早的聊天：每段聊天摘要（保留30天）和每天一条的「当日概要」（保留更久），按语义和关键词综合匹配。' +
-        `需要之前的约定、称呼、话题细节，或被问到某天/某段时间聊过什么时，先查再答；可按日期筛选。仅当前会话，最多返回${config.get().memory.recallLimit}条。`
+      return '检索当前会话更早的历史聊天记录（每段摘要及当日概要，语义+关键词综合匹配）。' +
+        '积极查证历史细节：凡是对方提起过去（如“上次说的”、“之前那个”、“你还记得吗”、“我们说到哪了”）、续接旧话题、探讨早先决定/约定/称呼，或被问到某天聊了什么时，先检索确认真实背景再答，不要凭印象编；可按日期筛选。' +
+        `仅当前会话，最多返回${config.get().memory.recallLimit}条。`
     },
     parameters: {
       type: 'object',
       properties: {
-        query: { type: 'string', description: '要找的事或话题的简短描述，尽量带上当时可能出现的人名、游戏名等关键词，如「阿明 周六 看猫的约定」；只按日期查时可留空' },
+        query: { type: 'string', description: '要找的事、话题或旧对话的简短描述，尽量带上可能出现的人名、游戏名等关键词，如「阿明 周六 看猫的约定」；只按日期查时可留空' },
         date: { type: 'string', description: '只看某一天：YYYY-MM-DD，或「昨天」「上周六」「10月20日」这类说法' },
         from: { type: 'string', description: '日期范围起点 YYYY-MM-DD（含）' },
         to: { type: 'string', description: '日期范围终点 YYYY-MM-DD（含）' },

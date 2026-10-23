@@ -75,6 +75,24 @@ export interface Judgement {
   /** who decided: skipped the judge (obvious), the judge, or the keyword fallback */
   source: 'obvious' | 'model' | 'systemone' | 'heuristic'
   ms: number
+  judge?: JudgeResponse
+  fallbackReason?: string
+}
+
+export interface JudgeResponse {
+  kind?: MessageKind
+  model: string
+  response: string
+  inputTokens?: number
+  outputTokens?: number
+  cost?: number
+}
+
+export interface ThinkingDecision extends Omit<Judgement, 'kind' | 'source'> {
+  setting: ThinkingSetting
+  level: ThinkingLevel
+  kind?: MessageKind
+  source: Judgement['source'] | 'fixed' | 'uniform' | 'unsupported'
 }
 
 /** Cases not worth a judge call: nothing to read, a few characters of chit-chat, or a wall of text. */
@@ -100,7 +118,7 @@ function formatProbabilities(probs: any): string {
     .join(' ')
 }
 
-async function judgeWithModel(input: JudgeInput, cfg: ThinkingJudgeConfig, quotaCtx: QuotaCtx): Promise<MessageKind | undefined> {
+async function judgeWithModel(input: JudgeInput, cfg: ThinkingJudgeConfig, quotaCtx: QuotaCtx): Promise<JudgeResponse> {
   const started = Date.now()
   const { text, model, usage, cost } = await utilityChat({
     candidates: utilityCandidates(cfg.model || undefined),
@@ -119,11 +137,11 @@ async function judgeWithModel(input: JudgeInput, cfg: ThinkingJudgeConfig, quota
   log.debug(
     `[model-judge ${model.id}] ${Date.now() - started}ms choice=${kind ?? 'unknown'}(${text.trim()}) in=${usage?.input ?? '?'} price=${priceStr} cost=${costStr}`,
   )
-  return kind
+  return { kind, model: model.id, response: text, inputTokens: usage.input, outputTokens: usage.output, cost }
 }
 
 /** TypeSafe System One API (Jev), also served by self-hosted Kev. */
-async function judgeWithSystemOne(input: JudgeInput, cfg: ThinkingJudgeConfig): Promise<MessageKind | undefined> {
+async function judgeWithSystemOne(input: JudgeInput, cfg: ThinkingJudgeConfig): Promise<JudgeResponse> {
   const started = Date.now()
   const res = await fetch(cfg.url, {
     method: 'POST',
@@ -158,13 +176,35 @@ async function judgeWithSystemOne(input: JudgeInput, cfg: ThinkingJudgeConfig): 
   log.debug(
     `[systemone ${modelName}] ${ms}ms choice=${kindAns?.choice ?? '?'}${confStr}${probs ? ` probs=(${probs})` : ''} in=${inputTokens ?? '?'} price=${priceStr} cost=${costStr}`,
   )
-  return kind
+  // Keep the classification response, without arbitrary provider metadata or hidden reasoning.
+  const probabilities = kindAns?.probabilities
+  const probability = (name: string) => {
+    const value = Array.isArray(probabilities)
+      ? probabilities.find((entry: any) => (entry?.choice ?? entry?.name) === name)
+      : probabilities?.[name]
+    const score = value && typeof value === 'object' ? value.probability ?? value.score ?? value.prob : value
+    return typeof score === 'number' && Number.isFinite(score) ? score : undefined
+  }
+  const response = JSON.stringify({
+    model: String(modelName),
+    answers: { kind: {
+      choice: typeof kindAns?.choice === 'string' ? kindAns.choice : undefined,
+      confidence: typeof kindAns?.confidence === 'number' && Number.isFinite(kindAns.confidence) ? kindAns.confidence : undefined,
+      probabilities: Object.fromEntries(['casual', 'question', 'complex'].map(name => [name, probability(name)]).filter(([, value]) => value != null)),
+    } },
+    usage: { input_tokens: inputTokens, output_tokens: outputTokens },
+    cost,
+  }, null, 2)
+  return { kind, model: String(modelName), response, inputTokens, outputTokens, cost }
 }
 
 /** Classify a message for thinking=auto; any judge failure or timeout falls back to the keyword heuristic. */
 export async function judgeMessage(input: JudgeInput, cfg: ThinkingJudgeConfig, quotaCtx: QuotaCtx): Promise<Judgement> {
   const started = Date.now()
-  const done = (kind: MessageKind, source: Judgement['source']) => ({ kind, source, ms: Date.now() - started })
+  let judge: JudgeResponse | undefined, fallbackReason: string | undefined
+  const done = (kind: MessageKind, source: Judgement['source']): Judgement => ({
+    kind, source, ms: Date.now() - started, ...(judge ? { judge } : {}), ...(fallbackReason ? { fallbackReason } : {}),
+  })
   const t = input.text.replace(/【[^】]*】/g, '').trim()
   // a reply that has to read a picture is never "casual", whatever the judge says
   const photos = photoCount(`${t}${input.quotedText ?? ''}`, input.images)
@@ -173,10 +213,12 @@ export async function judgeMessage(input: JudgeInput, cfg: ThinkingJudgeConfig, 
   if (fast) return done(atLeast(fast), 'obvious')
   if (cfg.mode !== 'heuristic') {
     try {
-      const kind = cfg.mode === 'systemone' ? await judgeWithSystemOne({ ...input, text: t }, cfg) : await judgeWithModel({ ...input, text: t }, cfg, quotaCtx)
-      if (kind) return done(atLeast(kind), cfg.mode)
+      judge = cfg.mode === 'systemone' ? await judgeWithSystemOne({ ...input, text: t }, cfg) : await judgeWithModel({ ...input, text: t }, cfg, quotaCtx)
+      if (judge.kind) return done(atLeast(judge.kind), cfg.mode)
+      fallbackReason = '无法解析判断响应，改用关键词规则'
       log.info('思考强度判断：无法解析结果，改用关键词规则')
     } catch (err: any) {
+      fallbackReason = err?.message ?? String(err)
       log.info(`思考强度判断失败（${err?.message ?? err}），改用关键词规则`)
     }
   }
@@ -188,11 +230,15 @@ export async function judgeMessage(input: JudgeInput, cfg: ThinkingJudgeConfig, 
  * Note: on Anthropic, changing effort between turns invalidates the cached message prefix, so `auto` trades some
  * cache hits for cheaper casual replies there; Gemini/OpenAI caches are unaffected.
  */
-export async function resolveThinking(setting: ThinkingSetting, chat: ChatSection, input: JudgeInput, quotaCtx: QuotaCtx): Promise<ThinkingLevel> {
-  if (setting !== 'auto') return setting
+export async function resolveThinkingDecision(setting: ThinkingSetting, chat: ChatSection, input: JudgeInput, quotaCtx: QuotaCtx): Promise<ThinkingDecision> {
+  if (setting !== 'auto') return { setting, level: setting, source: 'fixed', ms: 0 }
   const levels = chat.autoThinking
-  if (levels.casual === levels.question && levels.question === levels.complex) return levels.casual
+  if (levels.casual === levels.question && levels.question === levels.complex) return { setting, level: levels.casual, source: 'uniform', ms: 0 }
   const j = await judgeMessage(input, chat.thinkingJudge, quotaCtx)
   log.info(`思考强度 ${levels[j.kind]}（${j.kind}，由 ${j.source} 判断${j.source === 'obvious' ? '' : `，${j.ms}ms`}）：${brief(input.text, 40)}`)
-  return levels[j.kind]
+  return { ...j, setting, level: levels[j.kind] }
+}
+
+export async function resolveThinking(setting: ThinkingSetting, chat: ChatSection, input: JudgeInput, quotaCtx: QuotaCtx): Promise<ThinkingLevel> {
+  return (await resolveThinkingDecision(setting, chat, input, quotaCtx)).level
 }

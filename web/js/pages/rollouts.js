@@ -8,9 +8,28 @@ const STATUS = {
 }
 const EVENT = {
   request: ['用户输入', 'chat'], progress: ['进度', 'clock'], response: ['模型响应', 'models'],
+  thinking: ['思考强度', 'models'],
   tool: ['工具调用', 'tools'], reply: ['最终回复', 'check'], error: ['执行错误', 'alert'],
 }
 const SOURCE = { chat: '聊天', agy: 'AGY 结果回复', computer: '电脑任务结果回复' }
+const THINKING_SOURCE = { fixed: '固定配置', uniform: '各类消息使用相同强度', unsupported: '接口不支持思考强度设置', obvious: '快速判断', model: '模型判断', systemone: 'System One', heuristic: '关键词规则' }
+
+function thinkingDetails(r) {
+  const decision = r.thinkingDecision
+  return card(h('span', { class: 'card-title' }, icon('models'), '思考强度', r.thinking ? badge(r.thinking, 'accent') : null),
+    decision ? h('div', { class: 'col' },
+      h('div', { class: 'small' }, decision.setting === 'auto' ? `自动 → ${decision.level}` : `固定 ${decision.setting}`),
+      h('div', { class: 'small muted' }, [THINKING_SOURCE[decision.source], decision.kind, decision.judge?.model, fmt.dur(decision.ms)].filter(Boolean).join(' · ')),
+      r.thinking && r.thinking !== decision.level ? h('p', { class: 'small warn' }, `模型接口不支持所选强度，实际使用 ${r.thinking}`) : null,
+      decision.judge?.kind && decision.kind !== decision.judge.kind ? h('p', { class: 'small muted' }, `判断返回 ${decision.judge.kind}；附带图片，按 ${decision.kind} 处理。`) : null,
+      decision.fallbackReason ? h('p', { class: 'small warn' }, `自动判断回退：${decision.fallbackReason}`) : null,
+      decision.judge ? h('div', { class: 'rollout-judge' },
+        h('div', { class: 'small muted' }, '判断响应'),
+        h('pre', { class: 'small mono', style: { marginTop: '8px' } }, decision.judge.response),
+        h('p', { class: 'small muted' }, [decision.judge.inputTokens != null ? `输入 ${fmt.num(decision.judge.inputTokens)} / 输出 ${fmt.num(decision.judge.outputTokens)}` : null,
+          decision.judge.cost != null ? `判断费用 $${decision.judge.cost.toFixed(6)}` : null].filter(Boolean).join(' · '))) : null,
+    ) : empty('此记录未保存思考强度。'))
+}
 
 function timelineEvent(event, opened) {
   const [label, ico] = EVENT[event.kind] ?? ['记录', 'logs']
@@ -19,6 +38,7 @@ function timelineEvent(event, opened) {
     h('div', { class: 'computer-event-content' },
       h('div', { class: 'computer-event-head' }, h('strong', label),
         event.step != null ? badge(`第 ${event.step} 轮`) : null,
+        event.thinking ? badge(`思考 ${event.thinking}`) : null,
         event.tool ? badge(event.tool) : null,
         event.phase ? badge(event.phase === 'running' ? '开始执行' : event.phase === 'skipped' ? '未执行' : event.isError ? '失败' : '已返回', event.isError ? 'bad' : event.phase === 'skipped' ? 'warn' : '') : null,
         h('time', { class: 'small muted', dateTime: new Date(event.at).toISOString() }, fmt.time(event.at))),
@@ -81,14 +101,18 @@ export async function render(root, [id]) {
       card(h('span', { class: 'card-title' }, icon('layers'), '执行详情', badge(label, kind)),
         h('pre', { class: 'computer-task-text' }, r.input),
         h('div', { class: 'row small muted', style: { marginTop: '12px' } },
-          h('a', { href: `#/conversations/${enc(r.conv)}` }, r.label), h('span', SOURCE[r.source]), h('time', fmt.time(r.createdAt))),
+          h('span', r.label), h('span', SOURCE[r.source]), h('time', fmt.time(r.createdAt))),
+        h('div', { class: 'row small', style: { marginTop: '10px' } },
+          h('a', { href: `#/conversations/${enc(r.conv)}` }, icon('chat', 14), '对话'),
+          h('a', { href: `#/vectors/${enc(r.conv)}` }, icon('vectors', 14), '向量空间')),
         h('div', { class: 'small muted', style: { marginTop: '10px' } },
-          [r.model, `${r.steps} 轮`, fmt.dur(r.ms), fmt.usd(r.cost), r.inputImageCount ? `${r.inputImageCount} 张输入图片` : null].filter(Boolean).join(' · ')),
+          [r.model, r.thinking ? `思考 ${r.thinking}` : null, `${r.steps} 轮`, fmt.dur(r.ms), fmt.usd(r.cost), r.inputImageCount ? `${r.inputImageCount} 张输入图片` : null].filter(Boolean).join(' · ')),
         r.tokens ? h('p', { class: 'small muted' }, `输入 ${fmt.num(r.tokens.input)} / 缓存 ${fmt.num(r.tokens.cacheRead)} / 输出 ${fmt.num(r.tokens.output)}`) : null,
         r.tokens?.inputIncomplete ? h('p', { class: 'small warn' }, '上游可能漏报历史输入与缓存用量，花费可能偏低。') : null,
         r.jobId ? h('a', { class: 'small', href: `#/${r.source === 'agy' ? 'agy' : 'computer'}/${enc(r.jobId)}` }, '查看来源任务 →') : null,
         ['running', 'queued'].includes(r.status) ? h('div', { class: 'computer-progress small', role: 'status' }, spinner(),
           r.status === 'queued' ? '等待处理' : progress?.kind === 'tool' ? `${progress.tool} ${progress.phase === 'running' ? '执行中' : '已返回'}` : progress?.text || '正在处理') : null),
+      thinkingDetails(r),
       card(h('span', { class: 'card-title' }, icon('chat'), '最终回复'),
         r.reply ? h('pre', { class: 'small' }, r.reply) : empty(['queued', 'running'].includes(r.status) ? '执行结束后会显示最终回复。' : '本次执行没有生成最终回复。')),
       card(h('span', { class: 'card-title' }, icon('logs'), '执行记录', badge(`${execution.length} 条`)),

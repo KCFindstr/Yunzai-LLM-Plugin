@@ -41,7 +41,6 @@ wsl(['sh', '-c', 'install -d -m 755 /opt/llm-agy; cat > /opt/llm-agy/mount.sh; c
 wsl(['sh', '-c', 'mkdir -p /etc/systemd/system/llm-desktop.service.d; cat > /etc/systemd/system/llm-desktop.service.d/agy-share.conf'], '[Service]\nExecStartPre=/opt/llm-agy/mount.sh\n')
 wsl(['sh', '-c', 'install -d -m 755 /opt/llm-agy; cat > /opt/llm-agy/exec.py; chmod 644 /opt/llm-agy/exec.py'], fs.readFileSync(path.join(root, 'desktop/agy-exec.py')))
 wsl(['sh', '-c', 'cat > /opt/llm-agy/google-image-search.py; chmod 644 /opt/llm-agy/google-image-search.py'], fs.readFileSync(path.join(root, 'desktop/agy-google-search.py')))
-wsl(['sh', '-c', 'cat > /opt/llm-agy/google-lens-text.js; chmod 644 /opt/llm-agy/google-lens-text.js'], fs.readFileSync(path.join(root, 'desktop/google-lens-text.js')))
 wsl(['sh', '-c', 'test -d /usr/local/lib/agy-browser/playwright || python3 -m pip install --target /usr/local/lib/agy-browser playwright==1.55.0 >/tmp/agy-browser-setup.log 2>&1'])
 const firewall = `#!/bin/sh
 set -e

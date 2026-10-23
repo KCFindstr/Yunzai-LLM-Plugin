@@ -40,6 +40,7 @@ describe('thinking judge with images', () => {
     for (const mode of ['model', 'systemone']) {
       const withPicture = await judgeMessage({ text: '帮我看看这个是什么东西[图片]', images: 1 }, cfg(mode), q)
       assert.deepEqual([withPicture.kind, withPicture.source], ['question', mode])
+      assert.equal(withPicture.judge?.kind, 'casual', 'retains the actual judge response before applying the photo minimum')
       const withSticker = await judgeMessage({ text: '哈哈哈笑死我了[表情包]', images: 1 }, cfg(mode), q)
       assert.equal(withSticker.kind, 'casual')
     }

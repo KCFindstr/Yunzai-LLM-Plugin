@@ -83,7 +83,8 @@ Restart=on-failure
 RestartSec=3
 MemoryMax=3G
 MemorySwapMax=0
-TasksMax=768
+# Browser tabs plus RustDesk share this budget, including all their threads.
+TasksMax=2048
 CPUQuota=200%
 LimitFSIZE=1073741824
 UMask=0077

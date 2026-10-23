@@ -48,6 +48,9 @@ it('records each live model round and parallel tool result, then persists a filt
     assert.equal(done.status, 'completed')
     assert.equal(done.steps, 2)
     assert.equal(done.reply, '检查完成')
+    assert.equal(done.thinking, 'off')
+    assert.equal(done.thinkingDecision?.source, 'fixed')
+    assert.ok(done.events.filter(event => event.kind === 'response').every(event => event.thinking === 'off'))
     assert.equal(done.tokens?.input, 240)
     assert.ok(done.cost > 0)
     assert.equal(done.events.filter(event => event.kind === 'response').length, 2)
@@ -62,6 +65,32 @@ it('records each live model round and parallel tool result, then persists a filt
     const persisted = fs.readFileSync(path.join(TMP, 'data/rollouts.json'), 'utf8')
     for (const hidden of [secret, 'alice@example.com', 'provider-private-reasoning']) assert.ok(!persisted.includes(hidden), hidden)
   } finally { release(); await pending; await server.close() }
+})
+
+it('retains the Jev response and selected level when the main endpoint requires thinking to be disabled', async () => {
+  let mainCalls = 0
+  const server = await mockServer(req => {
+    if (req.url === '/v1/systemone') return [200, {
+      model: 'jev-latest', answers: { kind: { choice: 'question', confidence: 0.92, probabilities: { casual: 0.05, question: 0.92, complex: 0.03 } } },
+      usage: { input_tokens: 120, output_tokens: 1 }, native: { reasoning: 'hidden-judge-reasoning' },
+    }]
+    if (++mainCalls === 1) return [400, { error: { message: 'reasoning_effort is unsupported' } }]
+    return [200, { choices: [{ message: { content: '已回答' }, finish_reason: 'stop' }], usage: { prompt_tokens: 100, completion_tokens: 10 } }]
+  })
+  writeUserConfig(`providers:\n  mock: { type: openai, baseUrl: '${server.url}', apiKey: test-secret, maxRetries: 0 }\nmodels:\n  - { id: thinking-main, provider: mock, model: fake }\ndefaultModel: thinking-main\nfallbackModels: []\nchat:\n  thinking: auto\n  summarize: false\n  autoThinking: { casual: low, question: medium, complex: high }\n  thinkingJudge: { mode: systemone, url: '${server.url}/v1/systemone', systemoneModel: jev-latest }\nmemory: { enable: false }\ntools: { enable: false }\n`)
+  config.load()
+  try {
+    const result = await runTurn({ e: fakeEvent().e, eff: config.effective(), input: { text: '中秋节是几月几号', images: [], imageSegments: [] }, isAdmin: true, convKey: 'test:thinking' })
+    assert.equal(result.kind, 'reply')
+    const rollout = rolloutHistory(recentRollouts()[0].id)!
+    assert.equal(rollout.thinking, 'off')
+    assert.equal(rollout.thinkingDecision?.level, 'medium')
+    assert.equal(rollout.thinkingDecision?.source, 'systemone')
+    assert.equal(JSON.parse(rollout.thinkingDecision!.judge!.response).answers.kind.confidence, 0.92)
+    assert.ok(!JSON.stringify(rollout).includes('hidden-judge-reasoning'))
+    assert.equal(server.requests.filter(req => req.url === '/v1/systemone').length, 1)
+    assert.equal(rollout.events.find(event => event.kind === 'response')?.thinking, 'off')
+  } finally { await server.close() }
 })
 
 it('bounds history and retention and marks unfinished records interrupted after restart', () => {

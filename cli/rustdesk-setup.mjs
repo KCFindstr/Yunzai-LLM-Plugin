@@ -9,6 +9,7 @@ const distro = index < 0 ? 'yunzai-sandbox' : process.argv[index + 1]
 if (process.platform !== 'win32' || !/^[\w.-]+$/.test(distro ?? '')) throw new Error('Requires Windows and the existing dedicated WSL desktop distro')
 const launcher = readFileSync(join(root, 'desktop/rustdesk-launch.py'), 'utf8').replace(/\r\n/g, '\n')
 let script = readFileSync(join(root, 'desktop/rustdesk-setup.sh'), 'utf8').replace(/\r\n/g, '\n')
+script += `\ncat > /usr/local/lib/llm-desktop/supervisor.py <<'SUPERVISOR_EOF'\n${readFileSync(join(root, 'desktop/supervisor.py'), 'utf8')}\nSUPERVISOR_EOF\nchmod 644 /usr/local/lib/llm-desktop/supervisor.py\n`
 script += `\ncat > /usr/local/lib/llm-desktop/rustdesk-launch.py <<'RUSTDESK_LAUNCH_EOF'\n${launcher}\nRUSTDESK_LAUNCH_EOF\nchmod 644 /usr/local/lib/llm-desktop/rustdesk-launch.py\n`
 script += `python3 - <<'RUSTDESK_HOOK_EOF'
 import pathlib, py_compile
