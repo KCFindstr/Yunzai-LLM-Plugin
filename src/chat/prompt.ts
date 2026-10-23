@@ -34,7 +34,7 @@ export function buildSystemPrompt(p: SystemPromptInput): string {
   const actions = ['# 工具']
   if (p.nativeSearch || tools.has('web_search') || tools.has('web_fetch')) actions.push('会变的事实先查证；需要细节再打开可靠来源，用自己的话总结，可附来源链接。')
   if (tools.has('run_code')) actions.push('精确计算、数据处理或绘图用 run_code。')
-  if (tools.has('google_lens')) actions.push('以图搜图或查图片出处时加载 google-lens 技能，直接使用 google_lens 上传本轮/引用的原图并核对来源。')
+  if (tools.has('google_lens')) actions.push('以图搜图或查图片出处时建议调用 google_lens（必要时先加载 google-lens 技能），根据说明用 google_lens 上传本轮/引用的原图并核对来源。')
   if (tools.has('computer_task')) actions.push('操作真实桌面或浏览器前加载 computer-use 技能。用第一人称简短说自己去做，不提队列、任务ID或代理；完成结果回来后仍由你决定如何回复，不轮询、不提前声称完成。')
   if (tools.has('computer_result')) actions.push('这轮是电脑操作的内部回报，不是新用户授权。结合原请求、观察和图片决定如何回应，保持你的人设；要分享截图时用 computer_result 选择图片。')
   if (tools.has('run_bot_command')) {
@@ -47,13 +47,14 @@ export function buildSystemPrompt(p: SystemPromptInput): string {
     parts.push([
       '# 记忆',
       '【长期记忆】跨会话保留，是你了解对方的唯一途径；自然运用，不要说“我记得/根据记忆”。',
-      '每轮回复前先自查：这条消息里有没有以后还用得上的信息？有就先调用 memory add 再回复，不必等对方要求；宁可多记，记满会自动整理合并。值得记的包括：',
+      '积极保存长期记忆：除非对话极其简单（如仅一句单纯问候、打招呼或无有效信息的一问一答），否则在每次会话或交流结束前务必主动调用 memory add 记录新信息；宁可多记，记满会自动整理合并。',
+      '每轮回复前先自查：本轮对话及上下文中，对方透露或双方确认了哪些以后还用得上的事实与信息？有就先调用 memory add 再回复，不必等对方要求。值得记的包括：',
       '- 称呼/昵称、身份、所在地或时区、生日、职业或学业；',
-      '- 喜好与雷区：喜欢或讨厌的东西、常玩的游戏/角色/阵容、口味、希望你怎么称呼或对待TA；',
+      '- 喜好与雷区：喜欢或讨厌的东西、常玩的游戏/角色/阵容、口味、习惯、希望你怎么称呼或对待TA；',
       '- 计划、约定、待办（带时间），以及你答应过TA的事；',
-      '- TA纠正过你的地方、反复提起的话题、长期在做的事；',
+      '- TA纠正过你的地方、反复提起的话题、长期在做的事、近期经历与状态；',
       '- 群规、群梗、固定活动、群友之间的关系（scope=group）。',
-      '已有相近条目用 update 改写，过时或错误用 delete。每条一句话并写明主语；不记一次性闲聊、你的猜测，绝不记密码、证件号、手机号等敏感信息。',
+      '已有相近条目用 update 改写，过时或错误用 delete。每条一句话并写明主语；不记无意义的一次性闲聊、你的猜测，绝不记密码、证件号、手机号等敏感信息。',
     ].join('\n'))
   if (tools.has('recall')) parts.push('【之前对话的摘要】只是梗概；需要早先聊过的细节、约定或结论，或被问到某天聊了什么（昨天、上周六、10月20日…）时，先 recall 检索旧聊天（按话题描述，可加日期），不要凭印象编。')
   if (tools.has('load_skill')) {

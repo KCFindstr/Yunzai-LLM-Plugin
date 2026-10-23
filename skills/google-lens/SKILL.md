@@ -1,14 +1,14 @@
 ---
 name: google-lens
-description: Reverse-image search an attached or quoted image with Google Lens to identify characters, stickers, artwork, objects or their sources. Uploads the actual image and returns visual-match evidence directly to you.
+description: 使用 Google Lens 对本轮或引用的图片进行以图搜图，识别角色、表情包、画作原图、物品或查找图片出处。直接上传原图并返回视觉匹配结果与来源。
 ---
 
-Call `google_lens(image_index=1)` directly. Select the relevant current/quoted image by its 1-based position when several are present. The tool snapshots the original bytes and uploads the file through Google Images/Lens in the existing VM browser, reusing its Google sign-in. You do not need a local path. Do not delegate this workflow to `agy` or `computer_task`.
+当被问及图片的来源、出处、画师、角色、番剧/游戏或背景时（例如查图片出处、这是谁、出自哪里、找原图/画师等），直接调用 `google_lens(image_index=1)`。严禁不搜凭空猜测或直接回答。当存在多张图片时，通过 `image_index`（从 1 开始）指定要查询的图片。工具会将原图快照直接上传到虚拟机浏览器的 Google Images/Lens（复用 Google 登录状态），无需本地文件路径。不要将此任务委托给 `agy` 或 `computer_task`。
 
-Use the returned public visual-match links to check the candidate against the original image. Read useful source pages with your web tools; prefer original/official sources where available. Compare distinctive visual details and names before answering. A match title alone may be wrong. Cite supporting source URLs and state uncertainty when results disagree.
+使用返回的公开视觉匹配链接，结合原始图片核对候选来源。必要时配合网络搜索工具查看来源网页，优先参考官方或一手出处。回答前务必对比特征细节和名称，仅凭单条匹配标题可能是错误的。回答时注明参考来源 URL，若结果存在争议或不确定时应如实说明。
 
-If the image is absent, ask the user to attach it or quote the original. Do not reconstruct an image from a historical placeholder. Upload only the image relevant to the requested lookup. Browser account details, cookies, local paths and personal data are never part of the answer.
+若消息中缺少图片，请引导用户发送图片或引用原图。不要从历史文本占位符中伪造图片。仅上传与当前查询相关的图片。浏览器的账户信息、Cookie、本地路径和个人隐私信息绝不能包含在回复中。
 
-If Google requires verification, tell the user the search was blocked and that they can complete verification in the VM browser through RustDesk before retrying. Do not claim a keyword search or a failed upload was a reverse-image search. Report actual findings in your normal voice without mentioning internal jobs or another agent.
+若遇到 Google 验证拦截，请告知用户搜图被拦截，用户可通过 RustDesk 进入虚拟机浏览器完成人机验证后再试。严禁将普通关键词搜索或上传失败的情况宣称为已完成以图搜图。保持正常人设口吻汇报实际查到的结果，切勿提及后台任务或内部代理。
 
-The result can also contain `description` (displayed Google result-page description) and `ai_overview` (explicitly labeled Google-generated summary with source links). Either is null when absent or not detected. Do not invent missing descriptions or treat Google AI text as verified fact. Compare it with the original image and source pages; keep it distinct from visual-match titles.
+结果中可能包含 `description`（Google 结果页展示的说明）和 `ai_overview`（明确标注为 Google 生成的 AI 总结及来源链接）。若未识别到则为 null。不得编造缺失的描述，也不要把 Google AI 总结当做必然事实；须结合原图和来源网页进行交叉核对，并与视觉匹配标题区分开。

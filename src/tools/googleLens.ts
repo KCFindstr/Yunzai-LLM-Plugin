@@ -9,7 +9,7 @@ import { registry } from './registry.ts'
 export function registerGoogleLensTool(bridge: typeof lensBridge = lensBridge) {
   registry.register({
     name: 'google_lens', source: 'builtin',
-    description: '将本轮或引用的原图直接上传到 Google Lens，返回公开视觉匹配链接，以及页面展示的描述与 AI Overview（如有）。图片编号从1开始，无需文件路径。使用前加载 google-lens 技能；由你直接核对证据并回答。',
+    description: '以图搜图与查图片出处。当被询问图片的来源、出处、画师、作品或角色时必须调用。将本轮或引用的原图直接上传到 Google Lens，返回公开视觉匹配链接，以及页面展示的描述与 AI Overview（如有）。图片编号从1开始，无需文件路径。使用前加载 google-lens 技能；由你直接核对证据并回答。',
     parameters: { type: 'object', properties: { image_index: { type: 'integer', minimum: 1, maximum: 8 } }, additionalProperties: false },
     available: ctx => process.platform === 'win32' && ctx.eff.tools.googleLens.enable && (ctx.eff.tools.googleLens.access === 'all' || ctx.isAdmin),
     limit: () => '最多调用 2 次',
