@@ -16,6 +16,7 @@
     "config": "node cli/config.mjs",
     "exec-setup": "node cli/exec-setup.mjs",
     "computer-setup": "node cli/computer-setup.mjs",
+    "rustdesk-setup": "node cli/rustdesk-setup.mjs",
     "agy-setup": "node cli/agy-setup.mjs"
   },
   "keywords": [

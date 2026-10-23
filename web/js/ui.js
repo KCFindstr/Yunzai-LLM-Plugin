@@ -65,7 +65,7 @@ export function mount(root, ...children) {
 }
 
 export function toast(msg, kind = '') {
-  const t = h('div', { class: `toast ${kind}` }, msg)
+  const t = h('div', { class: `toast ${kind}`, role: kind === 'bad' ? 'alert' : 'status' }, icon(kind === 'bad' ? 'alert' : 'check'), msg)
   document.getElementById('toasts').append(t)
   setTimeout(() => t.remove(), kind === 'bad' ? 6000 : 3000)
 }
@@ -85,11 +85,21 @@ export async function act(fn, okMsg) {
 /** Modal dialog. `actions`: [{ label, kind, value }]; resolves with the clicked value (undefined on dismiss). */
 export function modal(title, body, actions = [{ label: '关闭', value: undefined }]) {
   return new Promise(resolve => {
-    const close = v => { bg.remove(); document.removeEventListener('keydown', onKey); resolve(v) }
-    const onKey = e => { if (e.key === 'Escape') close(undefined) }
+    const previous = document.activeElement
+    const close = v => { bg.remove(); document.removeEventListener('keydown', onKey); if (previous?.isConnected) previous.focus(); resolve(v) }
+    const onKey = e => {
+      if (document.querySelector('.modal-bg:last-of-type') !== bg) return
+      if (e.key === 'Escape') { e.preventDefault(); close(undefined) }
+      if (e.key === 'Tab') {
+        const items = [...bg.querySelectorAll('button, input, textarea, select, a[href], [tabindex="0"]')].filter(el => !el.disabled && el.getClientRects().length)
+        const first = items[0], last = items.at(-1)
+        if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last?.focus() }
+        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first?.focus() }
+      }
+    }
     const bg = h('div', { class: 'modal-bg', onclick: e => { if (e.target === bg) close(undefined) } },
-      h('div', { class: 'modal', role: 'dialog' },
-        h('header', title),
+      h('div', { class: 'modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': title },
+        h('header', h('span', title), h('button', { class: 'btn ghost sm', 'aria-label': '关闭对话框', onclick: () => close(undefined) }, icon('close'))),
         h('div', { class: 'body' }, body),
         h('footer', actions.map(a => h('button', { class: `btn ${a.kind ?? ''}`, onclick: async () => {
           if (a.run) { const r = await a.run(); if (r === false) return }
@@ -98,7 +108,7 @@ export function modal(title, body, actions = [{ label: '关闭', value: undefine
       ))
     document.addEventListener('keydown', onKey)
     document.body.append(bg)
-    bg.querySelector('input, textarea')?.focus()
+    ;(bg.querySelector('input, textarea, select') ?? bg.querySelector('button'))?.focus()
   })
 }
 
@@ -149,8 +159,8 @@ export const stat = (k, v, s) => h('div', { class: 'stat' }, h('div', { class: '
 export const badge = (text, kind = '') => h('span', { class: `badge ${kind}` }, text)
 export const spinner = () => h('span', { class: 'spin' })
 
-export function switchEl(checked, onchange) {
-  const input = h('input', { type: 'checkbox', checked, onchange: () => onchange(input.checked, input) })
+export function switchEl(checked, onchange, label = '启用或停用') {
+  const input = h('input', { type: 'checkbox', role: 'switch', 'aria-label': label, checked, onchange: () => onchange(input.checked, input) })
   return h('label', { class: 'switch' }, input, h('span'))
 }
 

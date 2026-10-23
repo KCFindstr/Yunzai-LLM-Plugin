@@ -11,9 +11,19 @@ import { conversationLocks } from '../chat/coordination.ts'
 import type { TurnRequest, TurnOutcome } from '../chat/agent.ts'
 import type { JobResult } from '../computer/queue.ts'
 import { detectImageMime } from '../core/util.ts'
+import { captureComputerImages, computerImagePath } from '../computer/attachments.ts'
+import { pruneComputerHistory, recordComputerEvent, saveComputerScreenshot, type ComputerScreenshot } from '../computer/history.ts'
 
 const store = new JsonStore<ComputerJob[]>('computer-jobs.json', [])
-export const computerQueue = new ComputerQueue(store.data, () => store.save())
+let retainedJobs: string | undefined
+export const computerQueue = new ComputerQueue(store.data, () => {
+  store.save()
+  const ids = store.data.map(job => job.id).join(',')
+  if (ids !== retainedJobs) {
+    retainedJobs = ids
+    try { pruneComputerHistory(new Set(store.data.map(job => job.id))) } catch (error: any) { log.warn(`电脑任务记录清理失败：${error?.message}`) }
+  }
+})
 
 export function computerOwner(event: any) {
   return JSON.stringify([String(event.self_id), String(event.user_id), String(event.group_id ?? '')])
@@ -34,7 +44,10 @@ export async function completeComputerJob(entry: ComputerJob, result: JobResult,
       imageSegments: [],
     }
     const outcome = await agent.runTurn({ e: ctx.e, eff, input, isAdmin: ctx.isAdmin, convKey, modelId: ctx.model.id, computerResult: { id: entry.id, images } })
-    if (outcome.kind !== 'reply') throw new Error('原对话模型未能整理电脑操作结果')
+    if (outcome.kind !== 'reply') {
+      recordComputerEvent(entry.id, { kind: 'error', text: '原对话模型未能整理电脑操作结果' })
+      throw new Error('原对话模型未能整理电脑操作结果')
+    }
     let sent = 0
     const event = Object.create(ctx.e)
     event.reply = async (...args: any[]) => {
@@ -44,8 +57,18 @@ export async function completeComputerJob(entry: ComputerJob, result: JobResult,
       sent++
       return response
     }
-    await agent.deliver(event, outcome.text, eff, { startedAt: Date.now(), convKey, images: outcome.images, suppressText: Boolean(outcome.dispatched) && !eff.tools.botCommand.ack })
-    if (!deps && !outcome.dispatched && (outcome.text || outcome.images.length) && !sent) throw new Error('电脑操作结果达到发送频率上限')
+    const screenshots: ComputerScreenshot[] = []
+    let imageCount = 0
+    try {
+      await agent.deliver(event, outcome.text, eff, { startedAt: Date.now(), convKey, images: outcome.images, suppressText: Boolean(outcome.dispatched) && !eff.tools.botCommand.ack,
+        onImageSent: buffer => { imageCount++; const image = saveComputerScreenshot(entry.id, buffer); if (image) screenshots.push(image) },
+      })
+      if (!deps && !outcome.dispatched && (outcome.text || outcome.images.length) && !sent) throw new Error('电脑操作结果达到发送频率上限')
+      recordComputerEvent(entry.id, { kind: 'reply', text: outcome.text, model: outcome.modelId, images: screenshots, imageCount, delivery: sent || deps ? 'sent' : 'none' })
+    } catch (error: any) {
+      recordComputerEvent(entry.id, { kind: 'reply', text: outcome.text, model: outcome.modelId, images: screenshots, imageCount, delivery: 'failed', isError: true })
+      throw error
+    }
     if (!deps) await (await import('../chat/agent.ts')).compactSession(convKey, eff, { userId: ctx.e.user_id, groupId: ctx.e.group_id, isAdmin: ctx.isAdmin })
     for (const callback of outcome.afterReply ?? []) callback()
   })
@@ -77,8 +100,8 @@ export function registerComputerTool() {
   })
   registry.register({
     name: 'computer_task', source: 'builtin',
-    description: '使用你的持久桌面截图、浏览或运行长期操作，先读取 computer-use 技能。start 在当前回复后执行，结果会回到你这里再决定如何回复；先以第一人称简短回应，不提内部队列或ID。status/cancel/respond 查询、取消或回复暂停的操作；省略id使用当前用户最近一次操作，不循环轮询。',
-    parameters: { type: 'object', properties: { action: { type: 'string', enum: ['start', 'status', 'cancel', 'respond'] }, task: { type: 'string' }, id: { type: 'string' }, response: { type: 'string' } }, required: ['action'] },
+    description: '使用你的持久桌面截图、浏览或运行长期操作，先读取 computer-use 技能。本轮附带或引用的图片自动作为文件传给桌面，电脑模型会收到实际路径，无需用户提供路径。start 在当前回复后执行，结果会回到你这里再决定如何回复；先以第一人称简短回应，不提内部队列或ID。status/cancel/respond 查询、取消或回复暂停的操作；省略id使用当前用户最近一次操作，不循环轮询。',
+    parameters: { type: 'object', properties: { action: { type: 'string', enum: ['start', 'status', 'cancel', 'respond'] }, task: { type: 'string' }, id: { type: 'string' }, response: { type: 'string' }, image_indices: { type: 'array', items: { type: 'integer' }, description: '本轮图片编号（从1开始，与看到的图片顺序一致）；省略则携带全部本轮图片，空数组不携带。start/respond 可用。' } }, required: ['action'] },
     available: ctx => process.platform === 'win32' && ctx.eff.tools.computer.enable && (ctx.eff.tools.computer.access === 'all' || ctx.isAdmin),
     async run(args, ctx) {
       const cfg = ctx.eff.tools.computer
@@ -91,10 +114,14 @@ export function registerComputerTool() {
         const task = String(args.task ?? '').trim()
         if (!task || task.length > 12000) return { content: '请提供不超过12000字的完整任务及必要上下文', isError: true }
         const job = computerQueue.submit(identity, task, cfg.maxQueue)
+        try { job.inputImages = captureComputerImages(job.id, ctx.turn.inputImages ?? [], args.image_indices) }
+        catch (error) { computerQueue.cancel(job); throw error }
         job.requesterText = String(ctx.e.msg ?? '').slice(0, 12000)
+        computerQueue.touch()
         ctx.turn.computerJob = job.id
         ;(ctx.turn.afterReply ??= []).push(() => activate(job, ctx))
-        return `已接受操作。以第一人称简短说自己去做，不提队列、代理或ID；结果会回到你这里后再回复用户。不等待或轮询。内部关联：${job.id}`
+        const attachments = job.inputImages.map(image => `图片${image.index} → ${computerImagePath(job.id, image)}`).join('\n')
+        return `已接受操作。${attachments ? `以下图片会在执行前自动复制到桌面并告知电脑模型：\n${attachments}\n` : '本轮没有携带图片。'}以第一人称简短说自己去做，不提队列、代理或ID；结果会回到你这里后再回复用户。不等待或轮询。内部关联：${job.id}`
       }
       const job = args.id ? computerQueue.get(String(args.id), identity) : computerQueue.jobs.filter(entry => entry.owner === identity).at(-1)
       if (!job) return { content: '找不到属于你在此会话中的任务，请提供任务 id', isError: true }
@@ -102,7 +129,9 @@ export function registerComputerTool() {
       else if (args.action === 'respond') {
         const response = String(args.response ?? '').trim()
         if (!response || response.length > 6000) return { content: '请提供不超过6000字的用户回复', isError: true }
+        const images = ctx.turn.inputImages?.length || args.image_indices !== undefined ? captureComputerImages(job.id, ctx.turn.inputImages ?? [], args.image_indices) : undefined
         computerQueue.resume(job, String(ctx.e.msg || response).slice(0, 6000), cfg.maxQueue)
+        if (images) { job.inputImages = images; computerQueue.touch() }
         ;(ctx.turn.afterReply ??= []).push(() => activate(job, ctx))
       } else if (args.action !== 'status') return { content: '未知任务操作', isError: true }
       return JSON.stringify({ id: job.id, status: job.status, report: job.report, model: job.modelId, costUsd: job.costUsd, steps: job.steps, inputTokens: job.inputTokens, outputTokens: job.outputTokens, cacheReadTokens: job.cacheReadTokens, cacheWriteTokens: job.cacheWriteTokens, deliveryError: job.deliveryError })

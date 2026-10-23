@@ -142,6 +142,29 @@ describe('web panel', () => {
       assert.doesNotMatch(await (await fetch(base + p)).text(), /do-not-serve/)
   })
 
+  it('serves authenticated computer turns and images, and rejects missing jobs and traversal', async () => {
+    const { computerQueue } = await import('../src/tools/computer.ts')
+    const { recordComputerEvent, saveComputerScreenshot } = await import('../src/computer/history.ts')
+    const job = computerQueue.submit('history-test', 'Show the desktop', 5)
+    const bytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==', 'base64')
+    const image = saveComputerScreenshot(job.id, bytes)!
+    recordComputerEvent(job.id, { kind: 'response', text: 'The desktop is visible', step: 1 })
+    recordComputerEvent(job.id, { kind: 'reply', text: 'Here is the screenshot', delivery: 'sent', images: [image] })
+    const url = `/api/computer/${job.id}`
+    assert.equal((await fetch(base + url + '/history')).status, 401)
+    assert.equal((await fetch(base + url + `/images/${image.id}`)).status, 401)
+    const history = await (await call('GET', url + '/history')).json()
+    assert.equal(history.events[0].text, 'The desktop is visible')
+    assert.equal(history.events[1].delivery, 'sent')
+    const picture = await call('GET', url + `/images/${image.id}`)
+    assert.equal(picture.headers.get('content-type'), 'image/png')
+    assert.deepEqual(Buffer.from(await picture.arrayBuffer()), bytes)
+    assert.equal((await call('GET', '/api/computer/0000000000/history')).status, 404)
+    assert.equal((await call('GET', url + '/images/..%2fconfig.yaml')).status, 404)
+    assert.equal((await call('GET', url + '/images/0000000000000000000000000000000000000000')).status, 404)
+    computerQueue.cancel(job)
+  })
+
   it('protects AGY history and cancellation, filters private data, and rejects unknown jobs', async () => {
     const { agyQueue } = await import('../src/tools/agy.ts')
     const { recordAgyEvent } = await import('../src/agy/history.ts')

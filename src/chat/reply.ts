@@ -90,7 +90,7 @@ export async function deliver(
   e: any,
   raw: string,
   eff: EffectiveConfig,
-  opts: { startedAt: number; convKey: string; suppressText?: boolean; images?: Buffer[] },
+  opts: { startedAt: number; convKey: string; suppressText?: boolean; images?: Buffer[]; onImageSent?: (image: Buffer) => void },
 ) {
   const cfg = eff.reply
   const mentionBudget = { remaining: 5 }
@@ -144,6 +144,7 @@ export async function deliver(
       break
     }
     await e.reply(seg().image(img))
+    opts.onImageSent?.(img)
     recordBotMessage(e, '[图片]', opts.convKey)
   }
 

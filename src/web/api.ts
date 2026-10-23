@@ -23,6 +23,7 @@ import { addImageSticker, listStickers, removeSticker, stickerFile, updateSticke
 import { computerQueue } from '../tools/computer.ts'
 import { agyQueue, cancelAgyJob } from '../tools/agy.ts'
 import { agyHistory, agyJobView } from '../agy/history.ts'
+import { computerHistory, readComputerScreenshot } from '../computer/history.ts'
 import { registry } from '../tools/registry.ts'
 import { deleteSkill, listSkills, parseSkillMarkdown, saveSkill } from '../tools/skills.ts'
 
@@ -546,6 +547,16 @@ export const routes: Route[] = [
   R('GET', '/api/commands', () => ({ info: catalogInfo(), entries: catalogEntries() })),
 
   R('GET', '/api/computer', () => [...computerQueue.jobs].reverse()),
+  R('GET', '/api/computer/:id/history', ({ params }) => {
+    if (!computerQueue.jobs.some(job => job.id === params[0])) throw fail('任务不存在', 404)
+    return computerHistory(params[0])
+  }),
+  R('GET', '/api/computer/:id/images/:image', ({ params }) => {
+    if (!computerQueue.jobs.some(job => job.id === params[0])) throw fail('任务不存在', 404)
+    const image = readComputerScreenshot(params[0], params[1])
+    if (!image) throw fail('截图不存在或已清理', 404)
+    return image
+  }),
   R('POST', '/api/computer/:id/cancel', ({ params }) => {
     const job = computerQueue.jobs.find(j => j.id === params[0])
     if (!job) throw fail('没有这个任务', 404)

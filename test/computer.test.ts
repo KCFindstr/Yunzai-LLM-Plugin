@@ -125,6 +125,12 @@ describe('computer observations and worker limits', () => {
     assert.equal(calls, 2)
     assert.equal(result.images?.length, 1)
     assert.equal(result.report, 'Here is my desktop.')
+    const { computerHistory } = await import('../src/computer/history.ts')
+    const history = computerHistory(job.id)
+    assert.equal(history.events.filter(event => event.kind === 'response').length, 2)
+    assert.equal(history.events.find(event => event.kind === 'tool')?.tool, 'desktop')
+    assert.equal(history.events.at(-1)?.kind, 'report')
+    assert.match(history.events.find(event => event.kind === 'response')!.text, /intermediate narration/)
   })
 
   it('uses an independent model and per-step limits while preserving Claude cache segments', async () => {
@@ -294,13 +300,36 @@ describe('background delegation integration', () => {
       eff.reply = { ...eff.reply, typing: { minDelay: 0, maxDelay: 0, charsPerSecond: 1000 }, globalRate: { count: 100, perSeconds: 1 }, groupRate: { count: 100, perSeconds: 1 } }
       const job = new ComputerQueue([]).submit('owner', 'show desktop', 2)
       job.status = 'completed'
-      const screenshot = Buffer.from('screen')
+      const screenshot = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==', 'base64')
       await completeComputerJob(job, { report: 'Internal desktop observation', images: [screenshot] }, { e, eff, isAdmin: true, model: config.getModel('original')!, turn: { commands: 0, searches: 0, fetches: 0, images: [] } })
       assert.equal(server.requests.length, 2)
       assert.equal(sent[0].msg, '拍好啦喵！')
       assert.equal(sent[1].msg.type, 'image')
       assert.deepEqual(sent[1].msg.file, screenshot)
+      const { computerHistory, readComputerScreenshot } = await import('../src/computer/history.ts')
+      const reply = computerHistory(job.id).events.find(event => event.kind === 'reply')!
+      assert.equal(reply.delivery, 'sent')
+      assert.equal(reply.text, '拍好啦喵！')
+      assert.equal(reply.images?.length, 1)
+      assert.deepEqual(readComputerScreenshot(job.id, reply.images![0].id)?.raw, screenshot)
     } finally { await server.close() }
+  })
+
+  it('records partial delivery without labelling unsent images as sent', async () => {
+    const { completeComputerJob } = await import('../src/tools/computer.ts')
+    const { computerHistory } = await import('../src/computer/history.ts')
+    const { e } = fakeEvent()
+    const job = new ComputerQueue([]).submit('owner', 'partial delivery', 2)
+    const screenshot = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==', 'base64')
+    await assert.rejects(completeComputerJob(job, { report: 'Worker report', images: [screenshot, screenshot] }, { e, eff: config.effective(), model: { id: 'original' } } as any, {
+      runTurn: async () => ({ kind: 'reply', text: 'My response', images: [screenshot, screenshot], modelId: 'original', cost: 0, thinking: 'off' }),
+      deliver: async (_e, _text, _eff, opts) => { opts.onImageSent?.(screenshot); throw new Error('second image failed') },
+    }), /second image failed/)
+    const reply = computerHistory(job.id).events.at(-1)!
+    assert.equal(reply.kind, 'reply')
+    assert.equal(reply.delivery, 'failed')
+    assert.equal(reply.images?.length, 1)
+    assert.equal(reply.imageCount, 1)
   })
 
   it('lets the original model select result images and disallows worker self-approval', async () => {

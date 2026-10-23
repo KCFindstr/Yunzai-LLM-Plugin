@@ -35,6 +35,9 @@ start(['feh', '--bg-fill', '/home/pc/wallpaper.png'])
 subprocess.run(['xrdb', '-merge', '/home/pc/.Xresources'], check=False)
 start(['tint2'])
 start(['xterm', '-geometry', '32x9+32+430', '-title', '像素终端 · ピクセル端末'])
+# Optional remote viewer shares this exact display and namespace; no second desktop is created.
+if pathlib.Path('/home/pc/.config/llm-desktop/rustdesk-enabled').is_file() and pathlib.Path('/usr/local/lib/llm-desktop/rustdesk-launch.py').is_file():
+    start(['python3', '/usr/local/lib/llm-desktop/rustdesk-launch.py'])
 chrome = pathlib.Path('/usr/local/lib/llm-desktop/chrome-path').read_text().strip()
 chrome_arguments = [chrome, '--no-sandbox', '--disable-dev-shm-usage', '--no-first-run', '--disable-features=Translate',
        '--password-store=basic', '--remote-debugging-address=127.0.0.1', '--remote-debugging-port=9223',
