@@ -4,7 +4,7 @@ import { estimateTokens, similarity, truncate } from '../core/util.ts'
 import { config } from '../core/config.ts'
 import { log } from '../core/log.ts'
 import { isSensitive } from '../memory/store.ts'
-import { decodeVector, dot, embed, embeddingReady, embeddingTag, encodeVector } from '../memory/embed.ts'
+import { decodeVector, dot, embed, embedGroups, embeddingContextual, embeddingReady, embeddingTag, encodeVector } from '../memory/embed.ts'
 import type { AssistantMsg, Msg, UserMsg } from '../llm/types.ts'
 import { partsToText } from '../llm/types.ts'
 import { addDays, localDay, type DayRange } from './dates.ts'
@@ -305,8 +305,21 @@ export async function indexArchive(key: string, signal?: AbortSignal) {
   if (!items.length) return
   const tag = embeddingTag()
   const current = () => (vectors.data[key]?.tag === tag ? vectors.data[key].v : {})
-  const missing = items.filter(item => !current()[item.id])
-  const embedded = await embed(missing.map(item => item.text), 'document', signal)
+  const isMissing = (item: { id: string }) => !current()[item.id]
+  // contextualized models embed a day's entries together as one document: a day with any new entry is redone whole
+  // (its neighbours' context changed); each digest is a document of its own
+  let groups: { id: string; text: string }[][]
+  if (embeddingContextual()) {
+    const byDay = new Map<string, ArchiveEntry[]>()
+    for (const entry of [...(s.archive ?? [])].sort((a, b) => a.at - b.at)) byDay.set(dayOf(entry), [...(byDay.get(dayOf(entry)) ?? []), entry])
+    groups = [
+      ...[...byDay.values()].map(list => list.map(entry => ({ id: entry.id!, text: entry.text }))),
+      ...items.filter(item => item.id.startsWith('d') && (s.days ?? []).some(d => d.id === item.id)).map(item => [item]),
+    ].filter(g => g.some(isMissing))
+  } else groups = items.filter(isMissing).map(item => [item])
+  const missing = groups.flat()
+  const vecs = await embedGroups(groups.map(g => g.map(item => item.text)), 'document', signal)
+  const embedded = vecs.flat()
   // the session may have changed (or been cleared) while waiting; keep only vectors of entries still there
   const now = store.data[key]
   if (!now) return
@@ -347,7 +360,8 @@ export async function recallSession(key: string, query: string, count = 3, opts:
       for (const src of sources) await indexArchive(src.key, signal)
       const [q] = await embed([query], 'query', signal)
       for (const entry of entries) {
-        const vec = entry.id && vectors.data[entry.key]?.v[entry.id]
+        // vectors from another model share the dimension but not the space: never compare across them
+        const vec = entry.id && vectors.data[entry.key]?.tag === embeddingTag() && vectors.data[entry.key].v[entry.id]
         if (vec) cosine.set(entry, dot(q, decodeVector(vec)))
       }
     } catch (err: any) {
@@ -441,4 +455,32 @@ export function allVectors(onlyKey?: string): { key: string; id: string; at: num
     for (const entry of searchable(key)) if (entry.id && v[entry.id]) out.push({ key, id: entry.id, at: entry.at, day: entry.day, kind: entry.kind, text: entry.text, vec: decodeVector(v[entry.id]) })
   }
   return out
+}
+
+/** Sessions with archive entries or digests that have no vector in the current embedding space. */
+export function sessionsMissingVectors(): string[] {
+  if (!embeddingReady()) return []
+  const tag = embeddingTag()
+  return Object.entries(store.data).filter(([key, s]) => {
+    const v = vectors.data[key]?.tag === tag ? vectors.data[key].v : {}
+    return [...(s.archive ?? []), ...(s.days ?? [])].some(entry => !entry.id || !v[entry.id])
+  }).map(([key]) => key)
+}
+
+/**
+ * Re-embed everything with the current model (e.g. after switching models). Vectors from another model are never
+ * used for scoring; until a session is re-embedded its recall falls back to keywords. Returns sessions redone and
+ * the total vector count in the current space.
+ */
+export async function reindexAll(force = false): Promise<{ sessions: number; vectors: number }> {
+  if (!embeddingReady()) throw new Error('没有配置向量模型的 API Key')
+  if (force) for (const key of Object.keys(vectors.data)) vectors.data[key].tag = '' // mark stale so everything is redone
+  let sessions = 0
+  for (const key of sessionsMissingVectors()) {
+    await indexArchive(key)
+    sessions++
+  }
+  const count = Object.values(vectors.data).reduce((a, x) => a + (x.tag === embeddingTag() ? Object.keys(x.v).length : 0), 0)
+  vectors.save()
+  return { sessions, vectors: count }
 }

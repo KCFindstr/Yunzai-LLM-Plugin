@@ -25,14 +25,29 @@ export function classifyMessage(text: string, opts: { images?: number; quoted?: 
 /** System prompt for the model judge (stable, so providers can cache it). */
 export const JUDGE_PROMPT = [
   '你是消息分类器。QQ群里的聊天机器人收到一条消息，判断回复它需要多少思考。只输出一个英文单词：casual、question 或 complex。',
-  'casual：闲聊、打招呼、玩梗、逗机器人、问机器人自己（你是谁/你喜欢什么/你觉得呢）、让机器人执行查询指令（查面板、深渊、体力等）、让机器人记住某事或发表情。',
-  'question：有明确答案、一两步就能答的问题：一个事实、定义、日期、价格、版本、属性、简单用法、短句翻译、常识科普。',
-  'complex：需要多步推理或综合信息：配队/抽卡/资源规划、比较分析、写代码或排查报错、计算、写文章、制定计划、整理攻略、汇总多个来源的新闻、根据对方给出的条件出主意。',
+  'casual：闲聊、打招呼、玩梗、逗机器人、问机器人自己（你是谁/你喜欢什么/你觉得呢）、让机器人执行查询指令（查面板、深渊、体力等）、让机器人记住某事或发表情；只发表情包或梗图配一句玩笑。',
+  'question：有明确答案、一两步就能答的问题：一个事实、定义、日期、价格、版本、属性、简单用法、短句翻译、常识科普；看图回答：这是什么、图里写了什么、认出角色/物品/地点。',
+  'complex：需要多步推理或综合信息：配队/抽卡/资源规划、比较分析、写代码或排查报错、计算、写文章、制定计划、整理攻略、汇总多个来源的新闻、根据对方给出的条件出主意；看图分析：截图里的报错/代码/题目/图表数据、根据图片给建议、一张图问多件事。',
+  '附带图片（不是表情包）时回复要先看图，至少是 question。',
 ].join('\n')
+
+/**
+ * Real pictures in the message (not stickers). The image count includes stickers, which QQ also delivers as
+ * images; the message text marks each as [图片] or [表情包].
+ */
+export function photoCount(text: string, images = 0): number {
+  if (!images) return 0
+  const photos = (text.match(/\[图片\]/g) ?? []).length
+  const stickers = (text.match(/\[表情包\]/g) ?? []).length
+  // markers missing (e.g. only a quoted image): count them all as pictures
+  return photos || !stickers ? Math.max(photos, images - stickers) : 0
+}
 
 export function judgeUserText(text: string, opts: { images?: number; quotedText?: string }): string {
   const lines = [`消息：${text.slice(0, 600) || '（空）'}`]
-  if (opts.images) lines.push(`（附带 ${opts.images} 张图片）`)
+  const photos = photoCount(`${text}${opts.quotedText ?? ''}`, opts.images)
+  if (photos) lines.push(`（附带 ${photos} 张图片，回复需要先看图）`)
+  else if (opts.images) lines.push(`（附带 ${opts.images} 个表情包）`)
   if (opts.quotedText) lines.push(`引用的消息：${opts.quotedText.slice(0, 300)}`)
   return lines.join('\n')
 }
@@ -43,9 +58,9 @@ export function parseJudge(out: string): MessageKind | undefined {
 }
 
 const KIND_CRITERIA: Record<MessageKind, string> = {
-  casual: '闲聊、打招呼、玩梗、逗机器人、问机器人自己、让机器人执行查询指令/记住某事/发表情',
-  question: '有明确答案、一两步就能答的问题：事实、定义、日期、价格、版本、简单用法、短句翻译、常识科普',
-  complex: '需要多步推理或综合信息：规划、比较分析、写代码/排查报错、计算、写文章、制定计划、整理攻略、汇总新闻、按条件出主意',
+  casual: '闲聊、打招呼、玩梗、逗机器人、问机器人自己、让机器人执行查询指令/记住某事/发表情；只发表情包或梗图配一句玩笑',
+  question: '有明确答案、一两步就能答的问题：事实、定义、日期、价格、版本、简单用法、短句翻译、常识科普；看图回答这是什么、图里写了什么、认出角色或物品（附带图片时至少是这一档）',
+  complex: '需要多步推理或综合信息：规划、比较分析、写代码/排查报错、计算、写文章、制定计划、整理攻略、汇总新闻、按条件出主意；分析截图里的报错/代码/题目/图表、根据图片给建议、一张图问多件事',
 }
 
 export interface JudgeInput {
@@ -64,8 +79,10 @@ export interface Judgement {
 
 /** Cases not worth a judge call: nothing to read, a few characters of chit-chat, or a wall of text. */
 function obvious(t: string, input: JudgeInput): MessageKind | undefined {
-  if (!t) return input.images ? 'question' : 'casual'
-  if (t.length <= 4 && !/[?？]/.test(t) && !input.quoted) return 'casual'
+  const photos = photoCount(`${t}${input.quotedText ?? ''}`, input.images)
+  // a bare picture is something to look at; a bare sticker is chit-chat
+  if (!t.replace(/\[(图片|表情包)\]/g, '').trim()) return photos ? 'question' : 'casual'
+  if (t.length <= 4 && !/[?？]/.test(t) && !input.quoted && !photos) return 'casual'
   if (t.length > 300) return 'complex'
   return undefined
 }
@@ -149,18 +166,21 @@ export async function judgeMessage(input: JudgeInput, cfg: ThinkingJudgeConfig, 
   const started = Date.now()
   const done = (kind: MessageKind, source: Judgement['source']) => ({ kind, source, ms: Date.now() - started })
   const t = input.text.replace(/【[^】]*】/g, '').trim()
+  // a reply that has to read a picture is never "casual", whatever the judge says
+  const photos = photoCount(`${t}${input.quotedText ?? ''}`, input.images)
+  const atLeast = (kind: MessageKind): MessageKind => (photos && kind === 'casual' ? 'question' : kind)
   const fast = obvious(t, input)
-  if (fast) return done(fast, 'obvious')
+  if (fast) return done(atLeast(fast), 'obvious')
   if (cfg.mode !== 'heuristic') {
     try {
       const kind = cfg.mode === 'systemone' ? await judgeWithSystemOne({ ...input, text: t }, cfg) : await judgeWithModel({ ...input, text: t }, cfg, quotaCtx)
-      if (kind) return done(kind, cfg.mode)
+      if (kind) return done(atLeast(kind), cfg.mode)
       log.info('思考强度判断：无法解析结果，改用关键词规则')
     } catch (err: any) {
       log.info(`思考强度判断失败（${err?.message ?? err}），改用关键词规则`)
     }
   }
-  return done(classifyMessage(t, input), 'heuristic')
+  return done(atLeast(classifyMessage(t, { ...input, images: photos })), 'heuristic')
 }
 
 /**

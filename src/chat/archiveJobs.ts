@@ -3,7 +3,7 @@ import { config } from '../core/config.ts'
 import { log } from '../core/log.ts'
 import { flushChatter } from './chatter.ts'
 import { CHATTER_PROMPT, DAY_PROMPT } from './prompt.ts'
-import { indexArchive, pendingChatter, peekSession, sessionsWithWork, setDayDigest, setEpisode, staleDay } from './session.ts'
+import { indexArchive, pendingChatter, peekSession, sessionsMissingVectors, sessionsWithWork, setDayDigest, setEpisode, staleDay } from './session.ts'
 import { utilityCandidates, utilityChat } from './utility.ts'
 
 /**
@@ -72,19 +72,47 @@ export async function maintainArchive(key: string, ctx: QuotaCtx = {}) {
   }
 }
 
+/** Embed what has no vector in the current model yet, a few sessions per tick: after a model switch this migrates everything. */
+async function backfillVectors() {
+  const keys = sessionsMissingVectors().filter(key => !busy.has(key) && (failedUntil.get(key) ?? 0) <= Date.now())
+  if (!keys.length) return
+  let done = 0
+  for (const key of keys.slice(0, 20)) {
+    busy.add(key)
+    try {
+      await indexArchive(key)
+      done++
+    } catch (err: any) {
+      failedUntil.set(key, Date.now() + BACKOFF_MS)
+      log.warn(`旧聊天向量化失败（${key}，1小时后重试）: ${err?.message ?? err}`)
+    } finally {
+      busy.delete(key)
+    }
+  }
+  if (done) log.info(`已为 ${done} 个会话补全向量（${config.get().memory.embedding.model}）${keys.length > 20 ? `，还有 ${keys.length - 20} 个下次继续` : ''}`)
+}
+
 export async function runArchiveJobs() {
   if (!config.get().memory.enable) return
   flushChatter()
   for (const key of sessionsWithWork()) await maintainArchive(key)
+  await backfillVectors()
 }
+
+let first: NodeJS.Timeout | undefined
 
 export function startArchiveJobs() {
   if (timer) return
-  timer = setInterval(() => void runArchiveJobs().catch(err => log.warn('后台整理旧聊天出错', err)), TICK_MS)
+  const run = () => void runArchiveJobs().catch(err => log.warn('后台整理旧聊天出错', err))
+  timer = setInterval(run, TICK_MS)
   timer.unref?.()
+  // soon after start-up too, so a changed embedding model is migrated without waiting a full interval
+  first = setTimeout(run, 30_000)
+  first.unref?.()
 }
 
 export function stopArchiveJobs() {
+  clearTimeout(first)
   clearInterval(timer)
   timer = undefined
 }
