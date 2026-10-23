@@ -103,7 +103,7 @@ function modelOrThrow(id: string): ModelConfig {
 function targetGroup(e: any, arg?: string): string | undefined {
   if (!arg) return undefined
   if (arg === '本群') return e.group_id ? String(e.group_id) : undefined
-  return /^\d{5,}$/.test(arg) ? arg : undefined
+  return /^\d+$/.test(arg) ? arg : undefined
 }
 
 function priceLine(m: ModelConfig): string {

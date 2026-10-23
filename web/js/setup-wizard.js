@@ -1,5 +1,5 @@
 import { get, post, put } from './api.js'
-import { badge, h, mount, toast } from './ui.js'
+import { badge, combo, h, mount, toast } from './ui.js'
 
 const STEPS = [['models', '提供商与模型'], ['search', '联网与阅读'], ['embedding', '向量检索'], ['jev', '思考判断 / Jev'], ['budgets', '用量预算'], ['sandbox', '代码沙盒'], ['computer', '电脑操作'], ['lens', '图片反搜'], ['agy', 'AGY']]
 const change = (path, value) => ({ path, value })
@@ -40,7 +40,7 @@ export function setupWizard(initialData, onChange) {
 
   function modelsStep() {
     const c = data.effective, models = c.models ?? [], providers = Object.keys(c.providers ?? {})
-    const selected = field('默认聊天模型', status?.models.modelId || c.defaultModel || models[0]?.id || '', { options: models.map(m => [m.id, `${m.id} · ${m.model}`]) })
+    const selected = field('默认聊天模型', status?.models.modelId || c.defaultModel || models[0]?.id || '', { name: 'defaultModel', options: models.map(m => [m.id, `${m.id} · ${m.model}`]) })
     const existing = models.length ? form(grid(selected.view), () => save([change('defaultModel', selected.control.value)]), '设为默认模型') : null
     const test = models.length ? button('测试所选模型连接', () => run(async () => {
       const result = await post(`/api/models/${encodeURIComponent(selected.control.value)}/test`)
@@ -57,24 +57,42 @@ export function setupWizard(initialData, onChange) {
     const key = secret('提供商 API Key')
     key.control.required = true
     const newProvider = h('fieldset', { class: 'setup-provider' }, grid(preset.view, name.view, type.view, url.view, key.view))
-    const syncProvider = () => { newProvider.hidden = provider.control.value !== '__new'; newProvider.disabled = newProvider.hidden }
+    const upstream = combo([], '', { placeholder: '填写提供商的模型名称' })
+    upstream.querySelector('select').setAttribute('aria-label', '上游模型预设')
+    upstream.querySelector('input').setAttribute('aria-label', '自定义上游模型 ID')
+    let previousSuggestions = []
+    const syncModels = () => {
+      const presetIndex = presets.findIndex(([, t, u]) => t === type.control.value && u === url.control.value.trim())
+      const suggestions = provider.control.value === '__new'
+        ? (data.presetModels?.[presetIndex] ?? [])
+        : (data.schema.fields.models.item.fields.model.suggestByProvider?.[provider.control.value] ?? [])
+      const follow = !upstream.value || previousSuggestions.includes(upstream.value)
+      upstream.setOptions(suggestions)
+      if (follow) upstream.value = suggestions[0] || ''
+      previousSuggestions = suggestions
+    }
+    const syncProvider = () => { newProvider.hidden = provider.control.value !== '__new'; newProvider.disabled = newProvider.hidden; syncModels() }
     provider.control.addEventListener('change', syncProvider); syncProvider()
+    type.control.addEventListener('change', syncModels)
+    url.control.addEventListener('change', syncModels)
     preset.control.addEventListener('change', () => {
       const value = presets[Number(preset.control.value)]
       if (value) { type.control.value = value[1]; url.control.value = value[2] }
+      syncModels()
     })
-    const upstream = field('上游模型 ID', '', { required: true, placeholder: '填写提供商的模型名称' })
     const alias = field('模型别名', '', { placeholder: '留空自动使用模型名称' })
     return [h('p', { class: 'muted' }, '先填写提供商 API Key，再选择或添加聊天模型。测试连接会发送一次简短请求。'), providerCredentials(), existing, test, modelRoles(),
       h('details', { class: 'quiet-details', open: !status?.models.ready }, h('summary', '添加聊天模型'), form([
-        provider.view, newProvider, grid(upstream.view, alias.view),
+        provider.view, newProvider, grid(h('div', { class: 'setup-field' }, h('span', '上游模型 ID'), upstream), alias.view),
       ], async () => {
-        const id = (alias.control.value.trim() || upstream.control.value.trim().replace(/^.*\//, '').replace(/[^\p{L}\p{N}_.-]+/gu, '-'))
+        const model = upstream.value.trim()
+        if (!model) throw new Error('请选择或填写上游模型 ID')
+        const id = (alias.control.value.trim() || model.replace(/^.*\//, '').replace(/[^\p{L}\p{N}_.-]+/gu, '-'))
         if (!id || models.some(m => m.id === id)) throw new Error('请填写唯一的模型别名')
         const p = provider.control.value === '__new' ? name.control.value.trim() : provider.control.value
         if (provider.control.value === '__new' && providers.includes(p)) throw new Error('提供商名称已存在')
         const changes = provider.control.value === '__new' ? [change(`providers.${p}`, { type: type.control.value, baseUrl: url.control.value.trim(), apiKey: keyValue(key.control.value.trim()) })] : []
-        changes.push(change(`models.${models.length}`, { id, provider: p, model: upstream.control.value.trim(), pricing: 'auto' }), change('defaultModel', id))
+        changes.push(change(`models.${models.length}`, { id, provider: p, model, pricing: 'auto' }), change('defaultModel', id))
         await save(changes)
       }, '添加并设为默认模型'))]
   }

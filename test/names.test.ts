@@ -50,6 +50,14 @@ describe('configured names', () => {
     assert.equal(validate(SCHEMA, { names: { '40001': '阿明' }, groups: { '50001': { names: { '40001': '明哥' } } } }, config.get(), config.get()), undefined)
   })
 
+  it('accepts group IDs of any digit length without numeric conversion', () => {
+    for (const id of ['1', '2', '123456', '0001', '123456789012345678901234567890']) {
+      assert.equal(validatePath(['groups', id, 'enable']), undefined)
+      assert.equal(validate(SCHEMA, { groups: { [id]: { enable: true } } }, config.get(), config.get()), undefined)
+    }
+    for (const id of ['', '-1', '1.2', 'abc', '1 2']) assert.ok(validatePath(['groups', id, 'enable']))
+  })
+
   it('remembers the last few messages per person in each group, skipping sensitive text', () => {
     const e = (text: string) => fakeEvent({ group_id: 50004, user_id: 'OPAQUE01', sender: { user_id: 'OPAQUE01' }, message: [{ type: 'text', text }] }).e
     for (let i = 1; i <= 7; i++) {

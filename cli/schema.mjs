@@ -386,7 +386,7 @@ export const SCHEMA = obj(
       { botName: str('机器人名字（空=QQ昵称）'), active: oneOf(presetNames, '当前人设'), presets: map(text('人设内容'), '人设', { keyLabel: '人设名称' }) },
       '人设',
     ),
-    groups: map(groupOverride, '分群设置', { keyLabel: '群号', keyPattern: /^\d{5,}$/ }),
+    groups: map(groupOverride, '分群设置', { keyLabel: '群号', keyPattern: /^\d+$/ }),
     names: map(str('称呼'), '群友称呼', { keyLabel: '平台ID（QQ号，或 QQBot 的用户ID）', keyPattern: /^[\w-]{1,64}$/ }),
     trigger: obj(
       {

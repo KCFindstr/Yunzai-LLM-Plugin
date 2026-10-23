@@ -7935,7 +7935,7 @@ function modelOrThrow(id) {
 function targetGroup(e, arg) {
   if (!arg) return void 0;
   if (arg === "\u672C\u7FA4") return e.group_id ? String(e.group_id) : void 0;
-  return /^\d{5,}$/.test(arg) ? arg : void 0;
+  return /^\d+$/.test(arg) ? arg : void 0;
 }
 function priceLine(m) {
   const p = resolvePrice(m);
@@ -10548,7 +10548,7 @@ var SCHEMA = obj(
       { botName: str("\u673A\u5668\u4EBA\u540D\u5B57\uFF08\u7A7A=QQ\u6635\u79F0\uFF09"), active: oneOf(presetNames, "\u5F53\u524D\u4EBA\u8BBE"), presets: map(text("\u4EBA\u8BBE\u5185\u5BB9"), "\u4EBA\u8BBE", { keyLabel: "\u4EBA\u8BBE\u540D\u79F0" }) },
       "\u4EBA\u8BBE"
     ),
-    groups: map(groupOverride, "\u5206\u7FA4\u8BBE\u7F6E", { keyLabel: "\u7FA4\u53F7", keyPattern: /^\d{5,}$/ }),
+    groups: map(groupOverride, "\u5206\u7FA4\u8BBE\u7F6E", { keyLabel: "\u7FA4\u53F7", keyPattern: /^\d+$/ }),
     names: map(str("\u79F0\u547C"), "\u7FA4\u53CB\u79F0\u547C", { keyLabel: "\u5E73\u53F0ID\uFF08QQ\u53F7\uFF0C\u6216 QQBot \u7684\u7528\u6237ID\uFF09", keyPattern: /^[\w-]{1,64}$/ }),
     trigger: obj(
       {
@@ -11242,6 +11242,7 @@ var routes = [
       descriptions: configDescriptions(),
       groups: groupList(),
       presets: PRESET_PROVIDERS,
+      presetModels: PRESET_PROVIDERS.map(([, type, baseUrl]) => modelSuggestions({ type, baseUrl })),
       thinking: THINKING2,
       problems: configProblems(cfg)
     };

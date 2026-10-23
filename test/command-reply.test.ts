@@ -15,6 +15,19 @@ const isImage = (message: any) => message?.type === 'image' && Buffer.isBuffer(m
 after(closeOwnBrowser)
 
 describe('command reply formatting', () => {
+  it('accepts short and arbitrarily long numeric group IDs in admin commands', async () => {
+    config.set('reply.markdown', false)
+    for (const id of ['1', '2', '0001', '123456789012345678901234567890']) {
+      const text = `#llm关闭 ${id}`
+      const { e, sent } = fakeEvent({ isMaster: true, msg: text, message: [{ type: 'text', text }] })
+      const admin = new LLMAdmin()
+      admin.e = e
+      await admin.dispatch()
+      assert.equal(config.get().groups[id]?.enable, false)
+      assert.match(String(sent.at(-1)?.msg), new RegExp(`群 ${id} 已关闭`))
+    }
+  })
+
   it('preserves literal command syntax and dollar prices in short Markdown replies', () => {
     assert.match(commandMarkdown('【价格】\n#llm设置 <路径>\n$1/$2'), /` #llm设置 <路径> `/)
     assert.match(commandMarkdown('$1/$2'), /` \$1 `\/` \$2 `/)
