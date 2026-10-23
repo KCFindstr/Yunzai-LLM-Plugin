@@ -72,6 +72,12 @@ export interface ModelConfig {
   quota?: ModelQuota
   /** Merged verbatim into the request body (provider-specific knobs). */
   extraBody?: Record<string, any>
+  /**
+   * Gemini: override the provider's serverState for this model. Implicit caching differs per model: chaining
+   * turns via previous_interaction_id keeps the cache warm on some (gemini-4-argon) and defeats it on others
+   * (gemini-3.8-flash), where resending the transcript is what gets cache hits.
+   */
+  serverState?: boolean
 }
 
 export interface RateConfig {

@@ -13,9 +13,13 @@ export const gemini: Adapter = {
   async chat(p: ChatParams): Promise<ChatResult> {
     const base = p.provider.baseUrl || 'https://generativelanguage.googleapis.com'
     const url = /\/v1beta\/?$/.test(base) ? joinUrl(base, 'interactions') : joinUrl(base, 'v1beta/interactions')
-    const store = p.store ?? p.provider.store ?? true
+    // a model may opt out of chaining (see ModelConfig.serverState): then every turn resends the transcript,
+    // nothing is stored server-side, and no response id is handed back for the agent to chain on
+    const chain = p.model.serverState ?? true
+    const state = chain ? p.state : undefined
+    const store = chain ? (p.store ?? p.provider.store ?? true) : false
     const vision = p.model.vision !== false
-    const msgs = p.state ? p.messages.slice(p.state.skip) : p.messages
+    const msgs = state ? p.messages.slice(state.skip) : p.messages
     const input: any[] = []
 
     for (const m of msgs) {
@@ -57,7 +61,7 @@ export const gemini: Adapter = {
     if (p.temperature != null) generation_config.temperature = p.temperature
     if (p.model.topP != null) generation_config.top_p = p.model.topP
     let body: any = { model: p.model.model, input, system_instruction: p.system, store, generation_config }
-    if (p.state) body.previous_interaction_id = p.state.previousId
+    if (state) body.previous_interaction_id = state.previousId
     const tools: any[] = p.tools.map(t => ({ type: 'function', name: t.name, description: t.description, parameters: t.parameters }))
     if (p.nativeSearch) tools.push({ type: 'google_search' }, { type: 'url_context' })
     if (tools.length) body.tools = tools

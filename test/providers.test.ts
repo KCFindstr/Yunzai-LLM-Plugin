@@ -290,6 +290,18 @@ describe('gemini interactions', () => {
     assert.equal(res.text, '广州多云')
   })
 
+  it('a model with serverState: false resends the whole transcript and stores nothing', async () => {
+    const srv = await mockServer(() => [200, { id: 'int_3', status: 'completed', steps: [{ type: 'model_output', content: [{ type: 'text', text: 'ok' }] }], usage: {} }])
+    after(srv.close)
+    const msgs: Msg[] = [userMsg, { role: 'assistant', content: '之前的回复' }, { role: 'user', content: [{ type: 'text', text: '新问题' }] }]
+    const res = await chat(params({ type: 'gemini', baseUrl: srv.url, apiKey: 'gk' }, { serverState: false }, msgs, { state: { previousId: 'int_1', skip: 2 } }))
+    const b = srv.requests[0].body
+    assert.equal(b.previous_interaction_id, undefined)
+    assert.equal(b.store, false)
+    assert.equal(b.input.length, 3)
+    assert.equal(res.responseId, undefined)
+  })
+
   it('throws on failed interactions', async () => {
     const srv = await mockServer(() => [200, { id: 'x', status: 'failed', errors: [{ code: 'safety', message: 'blocked' }] }])
     after(srv.close)

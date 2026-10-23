@@ -85,6 +85,7 @@ const model = obj(
     vision: bool('支持图片输入'),
     toolUse: bool('支持工具调用'),
     nativeSearch: bool('使用模型自带搜索'),
+    serverState: bool('服务端会话状态（覆盖提供商设置，仅 Gemini）'),
     maxTokens: int('最大输出 token', { min: 1 }),
     temperature: num('温度', { min: 0, max: 2, nullable: true }),
     topP: num('top_p', { min: 0, max: 1, nullable: true }),

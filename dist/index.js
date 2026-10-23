@@ -2568,9 +2568,11 @@ var init_gemini = __esm({
       async chat(p) {
         const base = p.provider.baseUrl || "https://generativelanguage.googleapis.com";
         const url = /\/v1beta\/?$/.test(base) ? joinUrl(base, "interactions") : joinUrl(base, "v1beta/interactions");
-        const store10 = p.store ?? p.provider.store ?? true;
+        const chain = p.model.serverState ?? true;
+        const state = chain ? p.state : void 0;
+        const store10 = chain ? p.store ?? p.provider.store ?? true : false;
         const vision = p.model.vision !== false;
-        const msgs = p.state ? p.messages.slice(p.state.skip) : p.messages;
+        const msgs = state ? p.messages.slice(state.skip) : p.messages;
         const input = [];
         for (const m of msgs) {
           if (m.role === "user") {
@@ -2604,7 +2606,7 @@ var init_gemini = __esm({
         if (p.temperature != null) generation_config.temperature = p.temperature;
         if (p.model.topP != null) generation_config.top_p = p.model.topP;
         let body = { model: p.model.model, input, system_instruction: p.system, store: store10, generation_config };
-        if (p.state) body.previous_interaction_id = p.state.previousId;
+        if (state) body.previous_interaction_id = state.previousId;
         const tools2 = p.tools.map((t) => ({ type: "function", name: t.name, description: t.description, parameters: t.parameters }));
         if (p.nativeSearch) tools2.push({ type: "google_search" }, { type: "url_context" });
         if (tools2.length) body.tools = tools2;
@@ -8781,6 +8783,7 @@ var model = obj(
     vision: bool("\u652F\u6301\u56FE\u7247\u8F93\u5165"),
     toolUse: bool("\u652F\u6301\u5DE5\u5177\u8C03\u7528"),
     nativeSearch: bool("\u4F7F\u7528\u6A21\u578B\u81EA\u5E26\u641C\u7D22"),
+    serverState: bool("\u670D\u52A1\u7AEF\u4F1A\u8BDD\u72B6\u6001\uFF08\u8986\u76D6\u63D0\u4F9B\u5546\u8BBE\u7F6E\uFF0C\u4EC5 Gemini\uFF09"),
     maxTokens: int("\u6700\u5927\u8F93\u51FA token", { min: 1 }),
     temperature: num2("\u6E29\u5EA6", { min: 0, max: 2, nullable: true }),
     topP: num2("top_p", { min: 0, max: 1, nullable: true }),
