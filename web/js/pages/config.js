@@ -1,6 +1,6 @@
 import { api, del, get, put } from '../api.js'
 import { menuButton } from '../main.js'
-import { act, badge, card, confirmDanger, empty, h, mount, promptFields, switchEl, tabs, toast } from '../ui.js'
+import { act, badge, card, combo, confirmDanger, empty, h, modal, mount, promptFields, switchEl, tabs, toast } from '../ui.js'
 
 /**
  * Schema-driven config editor. Every write goes through PUT /api/config (validated server-side with the same
@@ -44,7 +44,7 @@ function draw() {
     tabs([['form', '表单'], ['yaml', 'config.yaml']], 'form', id => { if (id === 'yaml') location.hash = '#/config/yaml' }),
     h('div', { class: 'cfg' },
       h('nav', { class: 'cfg-nav card' }, secs.map(([id, label]) => h('a', { href: `#/config/${id}`, class: id === state.section ? 'on' : '' }, label))),
-      h('div', search, body),
+      h('div', problems(), search, body),
     ),
   )
   drawBody(body)
@@ -60,6 +60,15 @@ function drawBody(body) {
     h('div', { class: 'small muted mono', style: { marginBottom: '6px' } }, state.section),
     descFor([state.section]) ? h('div', { class: 'small muted', style: { whiteSpace: 'pre-wrap', marginBottom: '8px' } }, descFor([state.section])) : null,
     container(node, [state.section], effective[state.section], effective)))
+}
+
+/** Same checks as the terminal editor's 检查配置: models pointing at a missing provider, keyless defaults, ... */
+function problems() {
+  const list = state.data.problems ?? []
+  if (!list.length) return null
+  return h('div', { class: 'card', style: { borderColor: 'var(--warn)', marginBottom: '12px' } },
+    h('div', { class: 'warn', style: { fontWeight: 600, marginBottom: '4px' } }, '配置检查发现问题'),
+    h('ul', { class: 'small', style: { margin: 0, paddingLeft: '18px' } }, list.map(p => h('li', p))))
 }
 
 // ---------- descriptions ----------
@@ -133,19 +142,22 @@ function mapEditor(node, keys, value) {
   const entries = Object.entries(value)
   const isGroups = pathOf(keys) === 'groups'
   const add = async () => {
+    if (pathOf(keys) === 'providers') return addProvider()
     const fields = [{ name: 'key', label: node.keyLabel ?? '键名', list: isGroups ? 'cfg-groups' : undefined }]
-    if (!isContainer(node.value)) fields.push({ name: 'value', label: node.value.label ?? '值', multiline: node.value.t === 'text', rows: 10 })
-    if (pathOf(keys) === 'providers') fields.push({ name: 'type', label: '接口类型（openai / openai-responses / anthropic / gemini）', value: 'openai' })
+    if (!isContainer(node.value)) fields.push(fieldFor(node.value, 'value', node.value.label ?? '值', {}))
     const dl = isGroups ? h('datalist', { id: 'cfg-groups' }, state.data.groups.map(g => h('option', { value: g.id }, g.name))) : null
     if (dl) document.body.append(dl)
-    const r = await promptFields(`添加${node.label ?? ''}`, fields)
+    const r = await promptFields(`添加${node.label ?? ''}`, fields, '确定', r => {
+      const k = r.key.trim()
+      if (!k) return `请填写${node.keyLabel ?? '键名'}`
+      if (node.keyPattern && !new RegExp(node.keyPattern).test(k)) return `${node.keyLabel ?? '键名'}格式不正确`
+      if (k in value) return '已存在'
+    })
     dl?.remove()
-    if (!r?.key?.trim()) return
+    if (!r) return
     const k = r.key.trim()
-    if (node.keyPattern && !new RegExp(node.keyPattern).test(k)) return toast(`${node.keyLabel ?? '键名'}格式不正确`, 'bad')
-    const v = isContainer(node.value) ? (pathOf(keys) === 'providers' ? { type: r.type.trim() } : {}) : r.value
     state.open.add(pathOf([...keys, k]))
-    await save([...keys, k], v, '已添加')
+    await save([...keys, k], isContainer(node.value) ? {} : fieldValue(node.value, r.value), '已添加')
   }
   return [
     entries.length ? null : h('div', { class: 'small muted', style: { padding: '6px 0' } }, '（空）'),
@@ -165,13 +177,17 @@ function mapEditor(node, keys, value) {
 
 function arrEditor(node, keys, value) {
   const add = async () => {
+    if (pathOf(keys) === 'models') return addModel()
     const create = node.create ?? []
-    const fields = create.map(f => ({ name: f, label: node.item.fields?.[f]?.label ?? f, value: '' }))
+    const fields = create.map(f => fieldFor(node.item.fields?.[f], f, node.item.fields?.[f]?.label ?? f, {}))
     let item = {}
     if (fields.length) {
       const r = await promptFields(`添加${node.label ?? ''}`, fields)
       if (!r) return
-      item = Object.fromEntries(Object.entries(r).map(([k, v]) => [k, v.trim()]))
+      for (const f of create) {
+        const v = fieldValue(node.item.fields?.[f], r[f])
+        if (v !== undefined) item[f] = v
+      }
     }
     state.open.add(pathOf([...keys, value.length]))
     await save([...keys, value.length], item, '已添加')
@@ -220,11 +236,12 @@ function control(node, keys, value, parent) {
       return h('div', { class: 'col', style: { gap: '2px' } }, input, range ? h('span', { class: 'small muted' }, `${node.int ? '整数' : '数字'} ${range}`) : null)
     }
     case 'str': {
-      const listId = `dl-${pathOf(keys).replace(/\W/g, '_')}`
-      const sugg = node.suggestByProvider ? node.suggestByProvider[parent?.provider] ?? [] : node.suggest ?? []
-      const input = h('input', { type: 'text', value: value ?? '', list: sugg.length ? listId : undefined, placeholder: node.pattern ? `格式：${node.pattern}` : '' })
+      const sugg = suggestionsFor(node, parent)
+      // a real list to pick from (a datalist only shows what matches the text already typed)
+      if (sugg.length) return combo(sugg, value ?? '', { empty: node.required ? undefined : '（空）', onchange: v => (v === '' && !node.required ? reset(keys, '已清除') : save(keys, v)) })
+      const input = h('input', { type: 'text', value: value ?? '', placeholder: node.pattern ? `格式：${node.pattern}` : '' })
       input.addEventListener('change', () => save(keys, input.value))
-      return h('div', input, sugg.length ? h('datalist', { id: listId }, sugg.map(s => h('option', { value: s }))) : null)
+      return h('div', input)
     }
     case 'text': {
       const ta = h('textarea', { rows: Math.min(18, Math.max(4, String(value ?? '').split('\n').length + 1)) }, value ?? '')
@@ -243,10 +260,12 @@ function control(node, keys, value, parent) {
         h('span', { class: 'small muted' }, '多个 Key 用英文逗号分隔；env:变量名 从环境变量读取'))
     }
     case 'enum': {
-      const sel = h('select', { onchange: () => save(keys, sel.value === '' ? '' : sel.value) },
-        node.allowEmpty || value == null || value === '' ? h('option', { value: '', selected: value == null || value === '' }, '（空）') : null,
-        node.values.map(v => h('option', { value: v, selected: v === value }, v)))
-      if (value && !node.values.includes(value)) sel.prepend(h('option', { value, selected: true }, `${value}（无效）`))
+      // option values are strings; map back so enums mixing booleans (reply.markdown: false / true / auto) save the real value
+      const unset = value == null || value === ''
+      const sel = h('select', { onchange: () => (sel.value === '' ? reset(keys, '已清除') : save(keys, enumValue(node, sel.value))) },
+        node.allowEmpty || unset ? h('option', { value: '', selected: unset }, '（空）') : null,
+        node.values.map(v => h('option', { value: String(v), selected: v === value }, String(v))))
+      if (!unset && !node.values.includes(value)) sel.prepend(h('option', { value: String(value), selected: true }, `${value}（无效）`))
       return sel
     }
     case 'multi': {
@@ -284,6 +303,119 @@ function control(node, keys, value, parent) {
     default:
       return h('pre', { class: 'small' }, JSON.stringify(value))
   }
+}
+
+// ---------- typed dialog fields ----------
+
+const suggestionsFor = (node, parent) => (node.suggestByProvider ? node.suggestByProvider[parent?.provider] ?? [] : node.suggest ?? [])
+const enumValue = (node, raw) => node.values.find(v => String(v) === raw) ?? raw
+
+/** promptFields entry for a schema leaf, so add dialogs offer the same choices as the form. */
+function fieldFor(node, name, label, parent) {
+  if (!node) return { name, label }
+  if (node.t === 'enum') return { name, label, options: [...(node.allowEmpty ? [{ value: '', label: '（空）' }] : []), ...node.values.map(String)] }
+  if (node.t === 'bool') return { name, label, type: 'checkbox' }
+  if (node.t === 'num') return { name, label, type: 'number' }
+  if (node.t === 'text') return { name, label, multiline: true, rows: 10 }
+  if (node.t === 'list') return { name, label: `${label}（每行一个）`, multiline: true, rows: 4 }
+  if (node.t === 'str' && suggestionsFor(node, parent).length) return { name, label, combo: suggestionsFor(node, parent) }
+  return { name, label }
+}
+
+/** Dialog result → config value; undefined = leave unset. */
+function fieldValue(node, raw) {
+  if (typeof raw === 'boolean') return raw
+  const v = String(raw ?? '').trim()
+  if (v === '') return undefined
+  if (node?.t === 'enum') return enumValue(node, v)
+  if (node?.t === 'num') return Number(v)
+  if (node?.t === 'list') return v.split(/[\n,，]/).map(s => s.trim()).filter(Boolean)
+  return node?.t === 'text' ? raw : v
+}
+
+// ---------- guided add (same steps as the terminal editor's 添加提供商 / 添加模型) ----------
+
+const slug = s => String(s ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 12) || 'custom'
+
+async function addProvider() {
+  const existing = Object.keys(state.data.effective.providers ?? {})
+  const presets = state.data.presets ?? []
+  const types = state.data.schema.fields.providers.value.fields.type.values
+  const freeName = base => { let n = base, i = 2; while (existing.includes(n)) n = `${base}${i++}`; return n }
+  let autoName = freeName(slug(presets[0]?.[0]))
+  const r = await promptFields('添加提供商', [
+    { name: 'preset', label: '预设', value: '0',
+      options: [...presets.map(([n, t, u], i) => ({ value: String(i), label: `${n} · ${t} · ${u}` })), { value: 'custom', label: '自定义…' }],
+      onchange: inp => {
+        const p = presets[Number(inp.preset.value)]
+        if (!p) return
+        inp.type.value = p[1]
+        inp.baseUrl.value = p[2]
+        // follow the preset unless the name was typed by hand
+        if (inp.name.value === autoName) inp.name.value = autoName = freeName(slug(p[0]))
+      } },
+    { name: 'name', label: '名称（英文，用于模型配置）', value: autoName },
+    { name: 'type', label: '接口类型', value: presets[0]?.[1] ?? 'openai', options: types },
+    { name: 'baseUrl', label: '接口地址', value: presets[0]?.[2] ?? '' },
+    { name: 'apiKey', label: 'API Key（可留空稍后设置；多个用英文逗号分隔；env:变量名 读取环境变量）', type: 'password' },
+  ], '添加', r => {
+    const n = r.name.trim()
+    if (!/^[\w-]+$/.test(n)) return '名称只能包含字母数字下划线横线'
+    if (existing.includes(n)) return '名称已存在'
+    if (!/^https?:\/\/\S+$/.test(r.baseUrl.trim())) return '请输入 http(s) 接口地址'
+  })
+  if (!r) return
+  const name = r.name.trim()
+  const p = { type: r.type, baseUrl: r.baseUrl.trim() }
+  const key = r.apiKey.trim()
+  if (key) p.apiKey = key.includes(',') ? key.split(',').map(s => s.trim()).filter(Boolean) : key
+  if (/deepseek\.com/.test(p.baseUrl)) p.balance = 'deepseek'
+  state.open.add(pathOf(['providers', name]))
+  if (!(await save(['providers', name], p, `已添加提供商 ${name}`))) return
+  const next = await modal('提供商已添加', h('p', `现在为 ${name} 添加一个模型？`), [{ label: '稍后', value: false }, { label: '添加模型', kind: 'primary', value: true }])
+  if (next) await addModel(name)
+}
+
+const modelOptions = () => state.data.schema.fields.models.item.fields.model.suggestByProvider ?? {}
+
+async function addModel(providerName) {
+  const { effective, schema } = state.data
+  const providers = Object.keys(effective.providers ?? {})
+  if (!providers.length) return toast('请先添加提供商', 'bad')
+  const ids = (effective.models ?? []).map(m => m.id)
+  const byProvider = modelOptions()
+  const defId = m => m.replace(/^.*\//, '').replace(/[^\p{L}\p{N}_.-]+/gu, '-')
+  const provider = providerName ?? providers[0]
+  const first = p => byProvider[p]?.[0] ?? ''
+  let autoId = defId(first(provider))
+  const followModel = inp => {
+    if (inp.id.value === autoId) inp.id.value = autoId = defId(inp.model.value)
+    inp.vision.checked = !/deepseek/.test(inp.model.value)
+  }
+  const r = await promptFields('添加模型', [
+    { name: 'provider', label: '提供商', value: provider, options: providers.map(p => ({ value: p, label: `${p} · ${effective.providers[p].type}` })),
+      onchange: inp => {
+        inp.model.setOptions(byProvider[inp.provider.value] ?? [])
+        inp.model.value = first(inp.provider.value)
+        followModel(inp)
+      } },
+    { name: 'model', label: '上游模型（官方 API 的模型 ID）', value: first(provider), combo: byProvider[provider] ?? [], onchange: followModel },
+    { name: 'id', label: '别名 id（在指令里使用，可用中文）', value: autoId },
+    { name: 'thinking', label: '思考强度', value: 'low', options: state.data.thinking ?? schema.fields.models.item.fields.thinking.values },
+    { name: 'vision', label: '支持图片输入', type: 'checkbox', value: !/deepseek/.test(first(provider)) },
+    { name: 'makeDefault', label: '设为默认模型', type: 'checkbox', value: !effective.defaultModel },
+  ], '添加', r => {
+    if (!r.model.trim()) return '请填写上游模型名'
+    const id = r.id.trim()
+    if (!/^[\p{L}\p{N}_.-]+$/u.test(id)) return '别名只能包含中英文、数字和 . _ -（不能有空格）'
+    if (ids.includes(id)) return '别名已存在'
+  })
+  if (!r) return
+  const id = r.id.trim()
+  const entry = { id, provider: r.provider, model: r.model.trim(), thinking: r.thinking, pricing: 'auto', ...(r.vision ? {} : { vision: false }) }
+  state.open.add(pathOf(['models', ids.length]))
+  if (!(await save(['models', ids.length], entry, `已添加模型 ${id}`))) return
+  if (r.makeDefault) await save(['defaultModel'], id, `已设 ${id} 为默认模型`)
 }
 
 // ---------- search ----------

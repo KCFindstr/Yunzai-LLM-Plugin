@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import YAML from 'yaml'
 // shared with the terminal config editor, so both validate writes the same way
-import { PRICING_FIELDS, SCHEMA, schemaAt, validate, validatePath, valuesOf } from '../../cli/schema.mjs'
+import { configProblems, PRESET_PROVIDERS, PRICING_FIELDS, SCHEMA, schemaAt, THINKING, validate, validatePath, valuesOf } from '../../cli/schema.mjs'
 import { queryBalance } from '../billing/balance.ts'
 import { daily, incompleteUsageModels, limitsFor, resetStats, resetUsage, summarize, topUsers, totals, WINDOW_5H, WINDOW_WEEK } from '../billing/ledger.ts'
 import { priceCacheInfo, refreshPrices, resolvePrice } from '../billing/pricing.ts'
@@ -331,7 +331,8 @@ export const routes: Route[] = [
 
   R('GET', '/api/config', () => {
     const cfg = config.get()
-    return { schema: serializeSchema(SCHEMA, cfg), effective: maskSecrets(SCHEMA, cfg), overridden: overriddenPaths(), descriptions: configDescriptions(), groups: groupList() }
+    return { schema: serializeSchema(SCHEMA, cfg), effective: maskSecrets(SCHEMA, cfg), overridden: overriddenPaths(), descriptions: configDescriptions(), groups: groupList(),
+      presets: PRESET_PROVIDERS, thinking: THINKING, problems: configProblems(cfg) }
   }),
   R('PUT', '/api/config', ({ body }) => setConfig(String(body.path ?? ''), body.value)),
   R('DELETE', '/api/config', ({ query }) => {

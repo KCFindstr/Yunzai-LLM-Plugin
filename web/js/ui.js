@@ -116,18 +116,74 @@ export async function confirmDanger(text, label = '确定') {
   return (await modal('请确认', h('p', text), [{ label: '取消', value: false }, { label, kind: 'primary danger', value: true }])) === true
 }
 
-/** Prompt for one or more text fields; resolves with { name: value } or undefined. */
-export async function promptFields(title, fields, okLabel = '确定') {
+/**
+ * Pick from a list or type anything: a select with a trailing 自定义输入… option that reveals a text input.
+ * `.value` reads/writes the result; `.setOptions(list)` swaps the list (keeps the value). `empty` adds a blank choice.
+ */
+export function combo(options, value = '', { onchange, empty, placeholder = '' } = {}) {
+  const CUSTOM = '\u0000custom'
+  const input = h('input', { type: 'text', value: value ?? '', placeholder })
+  const sel = h('select')
+  const wrap = h('div', { class: 'col', style: { gap: '4px' } }, sel, input)
+  let opts = []
+  const sync = () => {
+    const v = input.value
+    const known = opts.includes(v) || (empty != null && v === '')
+    sel.value = known ? v : CUSTOM
+    sel.style.display = opts.length ? '' : 'none'
+    input.style.display = known ? 'none' : ''
+  }
+  wrap.setOptions = list => {
+    opts = [...new Set(list ?? [])].map(String)
+    sel.replaceChildren(...(empty != null ? [h('option', { value: '' }, empty)] : []), ...opts.map(o => h('option', { value: o }, o)), h('option', { value: CUSTOM }, '自定义输入…'))
+    sync()
+  }
+  sel.addEventListener('change', () => {
+    if (sel.value === CUSTOM) { input.style.display = ''; input.focus(); return }
+    input.value = sel.value
+    sync()
+    onchange?.(input.value)
+  })
+  input.addEventListener('change', () => { sync(); onchange?.(input.value) })
+  Object.defineProperty(wrap, 'value', { get: () => input.value, set: v => { input.value = v ?? ''; sync() } })
+  wrap.setOptions(options)
+  return wrap
+}
+
+/**
+ * Modal form; resolves with { name: value } or undefined. Field kinds: text (default), `multiline`, `type: 'password'`, `type: 'checkbox'` (returns a boolean),
+ * `options` (select; strings or {value, label}), `combo` (suggestions + free input). `f.onchange(inputs)` runs when the
+ * field changes, so one field can update others; `validate(values)` returns an error to keep the dialog open.
+ */
+export async function promptFields(title, fields, okLabel = '确定', validate) {
   const inputs = {}
-  const body = h('div', { class: 'col' }, fields.map(f => h('label', { class: 'col', style: { gap: '4px' } },
-    h('span', { class: 'small muted' }, f.label),
-    inputs[f.name] = f.multiline
-      ? h('textarea', { class: f.code ? 'code' : '', rows: f.rows ?? 8, placeholder: f.placeholder ?? '' }, f.value ?? '')
-      : h('input', { type: f.type ?? 'text', value: f.value ?? '', placeholder: f.placeholder ?? '', list: f.list }),
-  )))
-  const ok = await modal(title, body, [{ label: '取消', value: false }, { label: okLabel, kind: 'primary', value: true }])
+  const fire = f => () => f.onchange?.(inputs)
+  const make = f => {
+    if (f.type === 'checkbox') return h('input', { type: 'checkbox', checked: Boolean(f.value), onchange: fire(f) })
+    if (f.options) return h('select', { onchange: fire(f) }, f.options.map(o => {
+      const [value, label] = typeof o === 'object' ? [o.value, o.label] : [o, o]
+      return h('option', { value, selected: String(value) === String(f.value ?? '') }, label)
+    }))
+    if (f.combo) return combo(f.combo, f.value ?? '', { onchange: fire(f), placeholder: f.placeholder ?? '' })
+    if (f.multiline) return h('textarea', { class: f.code ? 'code' : '', rows: f.rows ?? 8, placeholder: f.placeholder ?? '', oninput: fire(f) }, f.value ?? '')
+    return h('input', { type: f.type ?? 'text', value: f.value ?? '', placeholder: f.placeholder ?? '', list: f.list, autocomplete: f.type === 'password' ? 'new-password' : undefined, oninput: fire(f) })
+  }
+  const body = h('div', { class: 'col' }, fields.map(f => {
+    const el = inputs[f.name] = make(f)
+    return f.type === 'checkbox'
+      ? h('label', { class: 'row small' }, el, f.label)
+      : h('label', { class: 'col', style: { gap: '4px' } }, h('span', { class: 'small muted' }, f.label), el)
+  }))
+  const values = () => Object.fromEntries(Object.entries(inputs).map(([k, el]) => [k, el.type === 'checkbox' ? el.checked : el.value]))
+  const ok = await modal(title, body, [{ label: '取消', value: false }, {
+    label: okLabel, kind: 'primary', value: true,
+    run: () => {
+      const err = validate?.(values())
+      if (err) { toast(err, 'bad'); return false }
+    },
+  }])
   if (!ok) return undefined
-  return Object.fromEntries(Object.entries(inputs).map(([k, el]) => [k, el.value]))
+  return values()
 }
 
 export const fmt = {

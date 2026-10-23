@@ -12,25 +12,12 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import YAML from 'yaml'
-import { MODEL_ID, modelSuggestions, PRICING_FIELDS, PROVIDER_TYPES, schemaAt, SCHEMA, suggestKeys, THINKING, validate, validatePath, valuesOf } from './schema.mjs'
+import { configProblems, MODEL_ID, modelSuggestions, PRESET_PROVIDERS, PRICING_FIELDS, PROVIDER_TYPES, schemaAt, SCHEMA, suggestKeys, THINKING, validate, validatePath, valuesOf } from './schema.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const CONFIG_DIR = process.env.YZ_LLM_CONFIG_DIR || path.resolve(here, '..', 'config')
 const DEFAULT_FILE = path.join(CONFIG_DIR, 'default_config.yaml')
 const USER_FILE = path.join(CONFIG_DIR, 'config.yaml')
-
-const PRESET_PROVIDERS = [
-  ['Anthropic', 'anthropic', 'https://api.anthropic.com'],
-  ['OpenAI', 'openai-responses', 'https://api.openai.com/v1'],
-  ['Google Gemini', 'gemini', 'https://generativelanguage.googleapis.com'],
-  ['DeepSeek', 'openai', 'https://api.deepseek.com'],
-  ['OpenRouter', 'openai', 'https://openrouter.ai/api/v1'],
-  ['通义千问 (DashScope)', 'openai', 'https://dashscope.aliyuncs.com/compatible-mode/v1'],
-  ['Moonshot / Kimi', 'openai', 'https://api.moonshot.cn/v1'],
-  ['智谱 GLM', 'openai', 'https://open.bigmodel.cn/api/paas/v4'],
-  ['SiliconFlow', 'openai', 'https://api.siliconflow.cn/v1'],
-  ['Ollama (本地)', 'openai', 'http://127.0.0.1:11434/v1'],
-]
 
 const C = { dim: s => `\x1b[90m${s}\x1b[0m`, ok: s => `\x1b[32m${s}\x1b[0m`, warn: s => `\x1b[33m${s}\x1b[0m`, err: s => `\x1b[31m${s}\x1b[0m`, h: s => `\x1b[36m${s}\x1b[0m` }
 const BACK = Symbol('back')
@@ -562,16 +549,7 @@ function check() {
   const problems = []
   const userErr = validate(SCHEMA, doc.toJS() ?? {}, c, undefined)
   if (userErr) problems.push(`config.yaml 中有无效配置：${userErr}`)
-  const providers = c.providers ?? {}
-  const models = c.models ?? []
-  const hasKey = p => (Array.isArray(p?.apiKey) ? p.apiKey.length > 0 : Boolean(p?.apiKey))
-  for (const m of models) if (!providers[m.provider]) problems.push(`模型 ${m.id} 的提供商 ${m.provider} 不存在`)
-  for (const id of [...new Set([c.defaultModel, ...(c.fallbackModels ?? [])].filter(Boolean))]) {
-    const m = models.find(x => x.id === id)
-    if (!m) problems.push(`模型 ${id}（默认/备用）不存在`)
-    else if (providers[m.provider] && !hasKey(providers[m.provider])) problems.push(`模型 ${id}（默认/备用）的提供商 ${m.provider} 未配置 Key，将被跳过`)
-  }
-  if (!models.some(m => hasKey(providers[m.provider]))) problems.push('没有任何可用模型（至少给一个提供商设置 Key）')
+  problems.push(...configProblems(c))
   return problems
 }
 

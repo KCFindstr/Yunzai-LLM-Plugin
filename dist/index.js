@@ -8921,6 +8921,32 @@ var KNOWN_MODELS = {
   gemini: ["gemini-4-argon", "gemini-3.8-flash", "gemini-3.5-flash-lite", "gemini-3.1-pro-preview", "gemini-3.1-flash-lite"],
   deepseek: ["deepseek-flash", "deepseek-v4-pro"]
 };
+var PRESET_PROVIDERS = [
+  ["Anthropic", "anthropic", "https://api.anthropic.com"],
+  ["OpenAI", "openai-responses", "https://api.openai.com/v1"],
+  ["Google Gemini", "gemini", "https://generativelanguage.googleapis.com"],
+  ["DeepSeek", "openai", "https://api.deepseek.com"],
+  ["OpenRouter", "openai", "https://openrouter.ai/api/v1"],
+  ["\u901A\u4E49\u5343\u95EE (DashScope)", "openai", "https://dashscope.aliyuncs.com/compatible-mode/v1"],
+  ["Moonshot / Kimi", "openai", "https://api.moonshot.cn/v1"],
+  ["\u667A\u8C31 GLM", "openai", "https://open.bigmodel.cn/api/paas/v4"],
+  ["SiliconFlow", "openai", "https://api.siliconflow.cn/v1"],
+  ["Ollama (\u672C\u5730)", "openai", "http://127.0.0.1:11434/v1"]
+];
+function configProblems(c) {
+  const problems = [];
+  const providers = c.providers ?? {};
+  const models = c.models ?? [];
+  const hasKey = (p) => Array.isArray(p?.apiKey) ? p.apiKey.length > 0 : Boolean(p?.apiKey);
+  for (const m of models) if (!providers[m.provider]) problems.push(`\u6A21\u578B ${m.id} \u7684\u63D0\u4F9B\u5546 ${m.provider} \u4E0D\u5B58\u5728`);
+  for (const id of [...new Set([c.defaultModel, ...c.fallbackModels ?? []].filter(Boolean))]) {
+    const m = models.find((x) => x.id === id);
+    if (!m) problems.push(`\u6A21\u578B ${id}\uFF08\u9ED8\u8BA4/\u5907\u7528\uFF09\u4E0D\u5B58\u5728`);
+    else if (providers[m.provider] && !hasKey(providers[m.provider])) problems.push(`\u6A21\u578B ${id}\uFF08\u9ED8\u8BA4/\u5907\u7528\uFF09\u7684\u63D0\u4F9B\u5546 ${m.provider} \u672A\u914D\u7F6E Key\uFF0C\u5C06\u88AB\u8DF3\u8FC7`);
+  }
+  if (!models.some((m) => hasKey(providers[m.provider]))) problems.push("\u6CA1\u6709\u4EFB\u4F55\u53EF\u7528\u6A21\u578B\uFF08\u81F3\u5C11\u7ED9\u4E00\u4E2A\u63D0\u4F9B\u5546\u8BBE\u7F6E Key\uFF09");
+  return problems;
+}
 function modelSuggestions(provider2) {
   if (!provider2) return [];
   const url = String(provider2.baseUrl ?? "");
@@ -9680,7 +9706,16 @@ var routes = [
   }),
   R("GET", "/api/config", () => {
     const cfg = config.get();
-    return { schema: serializeSchema(SCHEMA, cfg), effective: maskSecrets(SCHEMA, cfg), overridden: overriddenPaths(), descriptions: configDescriptions(), groups: groupList() };
+    return {
+      schema: serializeSchema(SCHEMA, cfg),
+      effective: maskSecrets(SCHEMA, cfg),
+      overridden: overriddenPaths(),
+      descriptions: configDescriptions(),
+      groups: groupList(),
+      presets: PRESET_PROVIDERS,
+      thinking: THINKING2,
+      problems: configProblems(cfg)
+    };
   }),
   R("PUT", "/api/config", ({ body }) => setConfig(String(body.path ?? ""), body.value)),
   R("DELETE", "/api/config", ({ query }) => {
