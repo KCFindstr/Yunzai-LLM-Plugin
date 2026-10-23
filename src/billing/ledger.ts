@@ -3,6 +3,7 @@ import type { Limits, ModelConfig, QuotaScope } from '../core/configTypes.ts'
 import { JsonStore } from '../core/store.ts'
 import type { Usage } from '../llm/types.ts'
 import { usesServerState } from '../llm/state.ts'
+import { recordUsageCall, resetUsageCalls } from './history.ts'
 
 export const WINDOW_5H = 5 * 3600_000
 export const WINDOW_WEEK = 7 * 24 * 3600_000
@@ -123,6 +124,7 @@ function pruneStale(now: number) {
 }
 
 export function record(model: ModelConfig, ctx: QuotaCtx, cost: number, usage?: Usage) {
+  recordUsageCall(model, cost, usage)
   const now = Date.now()
   const d = store.data
   pruneStale(now)
@@ -223,6 +225,7 @@ export function resetUsage(target: { userId?: string; all?: boolean }) {
 export function resetStats(models?: string[]): string[] {
   const d = store.data
   const ids = models?.length ? models : Object.keys(d.totals)
+  resetUsageCalls(models?.length ? models : undefined)
   for (const id of ids) delete d.totals[id]
   for (const day of Object.values(d.daily)) for (const id of ids) delete day[id]
   store.save()

@@ -77,12 +77,18 @@ function timelineEvent(event, opened, r) {
   const key = `event:${event.seq}`
   const argsKey = `args:${event.seq}`
   const title = h('div', { class: 'computer-event-head' }, h('strong', event.tool || label),
+    event.images?.length ? badge(`${event.images.length} 张图片`) : null,
     event.step != null ? badge(`第 ${event.step} 轮`) : null,
     event.thinking ? badge(`思考 ${event.thinking}`) : null,
     event.phase ? badge(event.phase === 'running' ? '执行中' : event.phase === 'skipped' ? '未执行' : event.isError ? '失败' : '已返回', event.isError ? 'bad' : event.phase === 'running' ? 'accent' : '') : null,
     event.ms != null ? h('span', { class: 'small muted' }, fmt.dur(event.ms)) : null,
     h('time', { class: 'small muted', dateTime: new Date(event.at).toISOString() }, new Date(event.at).toLocaleTimeString('zh-CN', { hour12: false })))
   const contents = [
+    event.images?.length ? h('div', { class: 'rollout-images' }, event.images.map((image, index) => {
+      const url = `/api/rollouts/${enc(r.id)}/images/${enc(image.id)}`
+      return h('a', { href: url, target: '_blank', rel: 'noopener' }, h('img', { src: url, loading: 'lazy', alt: `${event.tool ?? '工具'} 返回的图片 ${index + 1}` }))
+    })) : null,
+    event.omittedImages ? h('p', { class: 'small warn' }, `${event.omittedImages} 张图片无法保存或超出图片保存上限。`) : null,
     event.text ? textBlock(event.text, { key: `text:${event.seq}`, open: opened.get(`text:${event.seq}`), limit: 280, className: event.isError ? 'small bad' : 'small' }) : null,
     event.inputTokens != null ? h('div', { class: 'small muted' }, `输入 ${fmt.num(event.inputTokens)} / 输出 ${fmt.num(event.outputTokens)}`) : null,
     event.callId ? h('div', { class: 'small muted mono' }, event.callId) : null,
@@ -208,6 +214,7 @@ export async function render(root, [id]) {
   }
 
   mount(root, h('div', { class: 'page-head' }, menuButton(), h('h1', '执行记录'), h('span', { class: 'spacer' }), connection, refreshButton),
+    h('p', { class: 'small warn', role: 'note' }, '执行记录及工具返回的图片保留 30 天，到期自动删除。'),
     h('div', { class: 'split computer-split' }, list, detail))
   drawList()
   mount(detail, card(null, h('div', { class: 'empty loading' }, spinner(), '加载执行记录…')))

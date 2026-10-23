@@ -4,6 +4,7 @@ import YAML from 'yaml'
 // shared with the terminal config editor, so both validate writes the same way
 import { configProblems, PRESET_PROVIDERS, PRICING_FIELDS, SCHEMA, schemaAt, THINKING, validate, validatePath, valuesOf } from '../../cli/schema.mjs'
 import { queryBalance } from '../billing/balance.ts'
+import { queryUsageCalls } from '../billing/history.ts'
 import { daily, incompleteUsageModels, limitsFor, resetStats, resetUsage, summarize, topUsers, totals, WINDOW_5H, WINDOW_WEEK } from '../billing/ledger.ts'
 import { priceCacheInfo, refreshPrices, resolvePrice } from '../billing/pricing.ts'
 import { catalogEntries, catalogInfo, scanCatalog } from '../commands/catalog.ts'
@@ -13,7 +14,7 @@ import { CONFIG_DIR, DEFAULT_CONFIG_FILE } from '../core/paths.ts'
 import { deepMerge, detectImageMime, formatDuration, isPlainObject, maskSecret, truncate } from '../core/util.ts'
 import { allVectors, archiveInfo, clearSession, dayInfo, deleteArchiveEntry, listSessions, peekSession } from '../chat/session.ts'
 import { recentTurns } from '../chat/turnLog.ts'
-import { recentRollouts, rolloutHistory } from '../chat/rollouts.ts'
+import { readRolloutImage, recentRollouts, rolloutHistory } from '../chat/rollouts.ts'
 import { configuredName, recentMessages, rosterSnapshot } from '../chat/roster.ts'
 import { utilityChat } from '../chat/utility.ts'
 import { partsToText } from '../llm/types.ts'
@@ -337,6 +338,11 @@ export const routes: Route[] = [
       })),
     }
   }),
+  R('GET', '/api/usage/history', ({ query }) => {
+    const from = Number(query.get('from')), to = Number(query.get('to'))
+    if (!query.has('from') || !query.has('to') || !Number.isFinite(from) || !Number.isFinite(to) || from < 0 || to <= from || to > 8640000000000000) throw fail('需要有效的起止时间')
+    return queryUsageCalls(from, to, query.get('model') || undefined)
+  }),
   R('GET', '/api/usage/user/:id', ({ params }) => ({
     id: params[0],
     name: nameOf('user', params[0]),
@@ -585,6 +591,11 @@ export const routes: Route[] = [
   R('GET', '/api/commands', () => ({ info: catalogInfo(), entries: catalogEntries() })),
 
   R('GET', '/api/computer', () => [...computerQueue.jobs].reverse()),
+  R('GET', '/api/rollouts/:id/images/:image', ({ params }) => {
+    const image = readRolloutImage(params[0], params[1])
+    if (!image) throw fail('图片不存在或已清理', 404)
+    return image
+  }),
   R('GET', '/api/computer/:id/history', ({ params }) => {
     if (!computerQueue.jobs.some(job => job.id === params[0])) throw fail('任务不存在', 404)
     return computerHistory(params[0])

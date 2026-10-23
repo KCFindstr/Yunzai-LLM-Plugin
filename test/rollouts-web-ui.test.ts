@@ -6,7 +6,10 @@ import path from 'node:path'
 import { it } from 'node:test'
 import { config } from '../src/core/config.ts'
 import { startWeb, stopWeb } from '../src/web/server.ts'
-import { recordRolloutContext, recordRolloutEvent, startRollout, updateRollout } from '../src/chat/rollouts.ts'
+import { recordRolloutContext, recordRolloutEvent, recordRolloutImages, startRollout, updateRollout } from '../src/chat/rollouts.ts'
+import { record } from '../src/billing/ledger.ts'
+import { computeCost, resolvePrice } from '../src/billing/pricing.ts'
+import { emptyUsage } from '../src/llm/types.ts'
 import { log } from '../src/core/log.ts'
 import { recordTurn } from '../src/chat/turnLog.ts'
 import { appendTurn } from '../src/chat/session.ts'
@@ -24,7 +27,12 @@ it('serves authenticated rollout history and renders live timelines, links and s
   const completed = startRollout({ conv: 'bot:p20001', input: '查找这张图片的原始出处', source: 'chat', inputImageCount: 1 })
   recordRolloutEvent(completed, { kind: 'response', text: '正在核对图片来源\n' + '核对公开页面、发布日期与原始图片。'.repeat(35), step: 1, inputTokens: 4200, outputTokens: 200, ms: 1200 })
   recordRolloutEvent(completed, { kind: 'tool', tool: 'search_web', callId: 'call-1', phase: 'running', step: 1, text: '正在执行', args: '<script>window.__rollout_xss=true</script> alice@example.com password=secret-password' })
-  recordRolloutEvent(completed, { kind: 'tool', tool: 'search_web', callId: 'call-1', phase: 'completed', step: 1, text: '匹配到公开图片页面', ms: 500 })
+  const images = recordRolloutImages(completed, [{ type: 'image', data: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aL1sAAAAASUVORK5CYII=' }])
+  recordRolloutEvent(completed, { kind: 'tool', tool: 'search_web', callId: 'call-1', phase: 'completed', step: 1, text: '匹配到公开图片页面', ms: 500, images })
+  const pricedModel = { id: 'usage-model', provider: 'fixture', model: 'fixture', pricing: { input: 2, output: 8, cacheRead: 0.2 } }
+  const usage = { ...emptyUsage(), input: 1000, output: 200, cacheRead: 300 }
+  record(pricedModel, {}, computeCost(usage, resolvePrice(pricedModel)), usage)
+  record({ ...pricedModel, id: 'second-model' }, {}, 0.5, { ...usage, cost: 0.5 })
   recordRolloutEvent(completed, { kind: 'reply', text: '我找到了这张图的来源。' })
   updateRollout(completed, { status: 'completed', model: 'main-model', thinking: 'medium', thinkingDecision: {
     setting: 'auto', level: 'medium', source: 'systemone', kind: 'question', ms: 85,
@@ -61,8 +69,16 @@ it('serves authenticated rollout history and renders live timelines, links and s
     startWeb()
     assert.equal((await fetch(base + '/api/rollouts')).status, 401)
     assert.equal((await fetch(base + `/api/rollouts/${completed}/history`)).status, 401)
+    const imageUrl = `/api/rollouts/${completed}/images/${images[0].id}`
+    assert.equal((await fetch(base + imageUrl)).status, 401)
+    assert.equal((await fetch(base + '/api/usage/history?from=0&to=1')).status, 401)
     const login = await fetch(base + '/api/login', { method: 'POST', headers: { 'content-type': 'application/json', 'x-requested-with': 'yzllm' }, body: JSON.stringify({ password: 'rollout-ui-test-password' }) })
     const cookie = login.headers.get('set-cookie')!.split(';')[0]
+    const imageResponse = await fetch(base + imageUrl, { headers: { cookie } })
+    assert.equal(imageResponse.status, 200)
+    assert.equal(imageResponse.headers.get('content-type'), 'image/png')
+    assert.equal((await fetch(base + `/api/rollouts/${running}/images/${images[0].id}`, { headers: { cookie } })).status, 404)
+    assert.equal((await fetch(base + '/api/usage/history?from=NaN&to=1', { headers: { cookie } })).status, 400)
     assert.equal((await fetch(base + '/api/rollouts/does-not-exist/history', { headers: { cookie } })).status, 404)
     const history = await (await fetch(base + `/api/rollouts/${completed}/history`, { headers: { cookie } })).text()
     assert.ok(!history.includes('alice@example.com')); assert.ok(!history.includes('secret-password'))
@@ -86,6 +102,10 @@ it('serves authenticated rollout history and renders live timelines, links and s
     await page.waitForFunction(() => document.querySelector('.computer-task-text')?.textContent === '查找这张图片的原始出处')
     assert.equal(await page.$$eval('.rollout-detail .card > h2', (elements: Element[]) => elements.filter(el => el.textContent?.includes('思考强度')).length), 0)
     assert.equal(await page.$$eval('.rollout-event[data-kind=thinking]', (elements: Element[]) => elements.length), 1)
+    assert.ok(await page.$eval('[role=note]', (el: Element) => el.textContent!.includes('30 天')))
+    await page.$eval('.tool-disclosure', (el: HTMLDetailsElement) => { el.open = true })
+    await page.waitForFunction(() => { const image = document.querySelector('.rollout-images img') as HTMLImageElement; return image?.complete && image.naturalWidth === 1 })
+    await page.$eval('.tool-disclosure', (el: HTMLDetailsElement) => { el.open = false })
     assert.deepEqual(await page.$$eval('.judge-probability [role=meter]', (elements: Element[]) => elements.map(el => Number(el.getAttribute('aria-valuenow')))), [5, 92, 3])
     assert.equal(await page.$eval('.rollout-judge', (el: HTMLDetailsElement) => el.open), false)
     assert.equal(await page.$$eval('.rollout-event[data-kind=tool]', (elements: Element[]) => elements.length), 1)
@@ -180,6 +200,33 @@ it('serves authenticated rollout history and renders live timelines, links and s
     assert.equal(await page.$('.modal-bg'), null)
     await page.goto(base + '/#/rollouts/does-not-exist')
     await page.waitForFunction(() => document.querySelector('.rollout-detail')?.textContent?.includes('执行记录不存在或已清理'))
+    await page.goto(base + '/#/usage')
+    await page.waitForFunction(() => document.querySelector('.usage-filters')?.parentElement?.textContent?.includes('usage-model'))
+    const usageCard = '.usage-filters'
+    await page.select(`${usageCard} select[aria-label="筛选模型"]`, 'usage-model')
+    await page.click(`${usageCard} button[type=submit]`)
+    await page.waitForFunction(() => {
+      const text = document.querySelector('.usage-filters')?.parentElement?.querySelector('tbody')?.textContent
+      return text?.includes('usage-model') && !text.includes('second-model')
+    })
+    await page.select(`${usageCard} select[aria-label="用量类型"]`, 'cached')
+    await page.select(`${usageCard} select[aria-label="统计指标"]`, 'tokens')
+    assert.ok(await page.$eval('.usage-filters', (el: Element) => {
+      const table = el.parentElement!.querySelector('table')!
+      return table.textContent!.includes('300') && table.querySelectorAll('thead th').length === 3 && !table.textContent!.includes('总费用')
+    }))
+    await page.select(`${usageCard} select[aria-label="用量类型"]`, 'all')
+    await page.select(`${usageCard} select[aria-label="统计指标"]`, 'both')
+    await screenshot(page, 'usage-dark.png')
+    await page.click('.side-foot button[aria-label="切换深色/浅色主题"]')
+    await screenshot(page, 'usage-light.png')
+    await page.setViewport({ width: 390, height: 844 })
+    await screenshot(page, 'usage-mobile.png')
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false)
+    await page.$eval(`${usageCard} input[aria-label="开始时间"]`, (el: HTMLInputElement) => { el.value = '2000-01-01T00:00' })
+    await page.$eval(`${usageCard} input[aria-label="结束时间"]`, (el: HTMLInputElement) => { el.value = '2000-01-02T00:00' })
+    await page.click(`${usageCard} button[type=submit]`)
+    await page.waitForFunction(() => document.querySelector('.usage-filters')?.parentElement?.textContent?.includes('该时间范围内没有详细用量记录'))
     assert.deepEqual(errors, [])
   } finally { await browser?.close(); stopWeb() }
 })

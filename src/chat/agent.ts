@@ -19,7 +19,7 @@ import { memoryHash } from '../memory/store.ts'
 import { appendTurn, getSession, peekSession, indexArchive, pendingArchive, recallSession, setEpisode, setServerState, setSummary, truncateIfNeeded } from './session.ts'
 import { pickModel, utilityCandidates, utilityChat, type Picked } from './utility.ts'
 import { recordTurn } from './turnLog.ts'
-import { recordRolloutContext, recordRolloutEvent, startRollout, updateRollout } from './rollouts.ts'
+import { recordRolloutContext, recordRolloutEvent, recordRolloutImages, startRollout, updateRollout } from './rollouts.ts'
 import { agyHistoryText } from '../agy/history.ts'
 import { localDay, parseDateHints } from './dates.ts'
 import { maintainArchive } from './archiveJobs.ts'
@@ -285,8 +285,10 @@ async function runTurnInner(req: TurnRequest, ref: { turn?: TurnState; rolloutId
         step, tool: call.name, callId: call.id, args: agyHistoryText(call.args), phase: round >= maxRounds - 1 ? 'skipped' : 'running' })
       if (round >= maxRounds - 1) break
       const { results, terminal } = await registry.execute(res.toolCalls, ctx, offered, (result, ms) => {
+        const images = recordRolloutImages(ref.rolloutId, result.images)
         recordRolloutEvent(ref.rolloutId, { kind: 'tool', text: result.content, step, tool: result.name,
-          callId: result.id, phase: 'completed', ms, isError: result.isError })
+          callId: result.id, phase: 'completed', ms, isError: result.isError, images,
+          omittedImages: (result.images?.length ?? 0) - images.length })
       })
       if (round === maxRounds - 2)
         for (const r of results) r.content += '\n（工具调用次数已用完，请直接给出最终回复）'

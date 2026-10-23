@@ -1,6 +1,7 @@
 import { enc, get, post } from '../api.js'
 import { menuButton } from '../main.js'
 import { act, bars, card, confirmDanger, empty, fmt, h, meter, mount, promptFields } from '../ui.js'
+import { usageBreakdown } from '../usage-breakdown.js'
 
 const WINDOWS = [['window5h', 'used5h', '5小时'], ['weekly', 'usedWeek', '每周']]
 
@@ -30,6 +31,7 @@ export async function render(root) {
       } }, '重置全部额度（不含统计）'),
     ),
     incomplete.size ? card('用量报告不完整', h('p', { class: 'small muted' }, `${[...incomplete].join('、')}：${usageNote}`)) : null,
+    usageBreakdown([...Object.keys(u.totals), ...u.models.map(model => model.id)]),
     card('最近 14 天花费', bars(days, fmt.usd)),
     h('div', { class: 'grid cols-2', style: { marginTop: '16px' } },
       card('全局额度（按模型）',

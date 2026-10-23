@@ -1,9 +1,14 @@
 import { randomBytes } from 'node:crypto'
+import fs from 'node:fs'
+import path from 'node:path'
+import { DATA_DIR } from '../core/paths.ts'
+import { detectImageMime, sha1 } from '../core/util.ts'
+import { log } from '../core/log.ts'
 import { JsonStore } from '../core/store.ts'
 import { agyHistoryText } from '../agy/history.ts'
 import type { ThinkingLevel } from '../core/configTypes.ts'
 import type { JudgeResponse, ThinkingDecision } from './thinking.ts'
-import type { Msg, ToolSpec } from '../llm/types.ts'
+import type { ImagePart, Msg, ToolSpec } from '../llm/types.ts'
 import { parseRolloutJson } from '../../web/js/rollout-data.js'
 
 export interface RolloutContext {
@@ -17,6 +22,8 @@ export interface RolloutContext {
 }
 
 export interface RolloutEvent {
+  images?: { id: string; mime: string; bytes: number }[]
+  omittedImages?: number
   seq: number
   at: number
   kind: 'request' | 'progress' | 'thinking' | 'response' | 'tool' | 'reply' | 'error'
@@ -57,10 +64,60 @@ export interface Rollout {
 }
 const store = new JsonStore<{ v: 1; rollouts: Rollout[] }>('rollouts.json', { v: 1, rollouts: [] })
 const active = (rollout: Pick<Rollout, 'status'>) => ['queued', 'running'].includes(rollout.status)
+export const ROLLOUT_RETENTION_MS = 30 * 86400_000
+const IMAGE_ROOT = path.join(DATA_DIR, 'rollout-images')
+const imageDirectory = (id: string) => /^[a-f0-9]{16}$/.test(id) ? path.join(IMAGE_ROOT, id) : undefined
+
+function pruneExpired() {
+  const cutoff = Date.now() - ROLLOUT_RETENTION_MS
+  const expired = store.data.rollouts.filter(r => !active(r) && r.updatedAt < cutoff)
+  if (!expired.length) return
+  const ids = new Set(expired.map(r => r.id))
+  store.data.rollouts = store.data.rollouts.filter(r => !ids.has(r.id))
+  for (const id of ids) {
+    const directory = imageDirectory(id)
+    if (directory) try { fs.rmSync(directory, { recursive: true, force: true }) } catch (error: any) { log.warn(`清理执行图片失败：${error.message}`) }
+  }
+  store.save()
+}
 
 // A process restart cannot resume an in-flight main-model request.
 for (const rollout of store.data.rollouts) {
   if (active(rollout)) { rollout.status = 'interrupted'; store.save() }
+}
+pruneExpired()
+setInterval(pruneExpired, 3600_000).unref()
+
+/** Keep local raster bytes only; never fetch arbitrary image URLs during history recording. */
+export function recordRolloutImages(id: string, images: ImagePart[] = []) {
+  const rollout = store.data.rollouts.find(r => r.id === id), directory = imageDirectory(id)
+  const saved: NonNullable<RolloutEvent['images']> = []
+  if (!rollout || !directory) return saved
+  const existing = new Map(rollout.events.flatMap(e => e.images ?? []).map(image => [image.id, image.bytes]))
+  for (const image of images) {
+    if (!image.data || image.data.length > 14 * 1024 * 1024) continue
+    const buffer = Buffer.from(image.data, 'base64'), mime = detectImageMime(buffer), hash = sha1(buffer)
+    if (!mime || !['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(mime) || buffer.length > 10 * 1024 * 1024) continue
+    if (!existing.has(hash) && (existing.size >= 64 || [...existing.values()].reduce((a, b) => a + b, 0) + buffer.length > 64 * 1024 * 1024)) continue
+    try {
+      fs.mkdirSync(directory, { recursive: true })
+      fs.writeFileSync(path.join(directory, `${hash}.image`), buffer)
+      saved.push({ id: hash, mime, bytes: buffer.length }); existing.set(hash, buffer.length)
+    } catch (error: any) { log.warn(`保存执行图片失败：${error.message}`) }
+  }
+  return saved
+}
+
+export function readRolloutImage(id: string, imageId: string) {
+  pruneExpired()
+  const directory = imageDirectory(id)
+  if (!directory || !/^[a-f0-9]{40}$/.test(imageId)) return
+  const image = store.data.rollouts.find(r => r.id === id)?.events.flatMap(e => e.images ?? []).find(i => i.id === imageId)
+  if (!image) return
+  try {
+    const raw = fs.readFileSync(path.join(directory, `${imageId}.image`))
+    if (raw.length === image.bytes && sha1(raw) === image.id && detectImageMime(raw) === image.mime) return { raw, type: image.mime }
+  } catch {}
 }
 
 function cleanEvent(event: RolloutEvent): RolloutEvent {
@@ -70,6 +127,7 @@ function cleanEvent(event: RolloutEvent): RolloutEvent {
     callId: event.callId && agyHistoryText(event.callId, undefined, 100),
     args: event.args && agyHistoryText(event.args), phase: event.phase, ms: event.ms,
     inputTokens: event.inputTokens, outputTokens: event.outputTokens, isError: event.isError, thinking: event.thinking,
+    images: event.images, omittedImages: event.omittedImages,
   }
 }
 function cleanJudgeResponse(judge: JudgeResponse): string {
@@ -149,12 +207,7 @@ export function recordRolloutContext(id: string, request: { system: string; tool
   save()
 }
 function save() {
-  // Keep running turns even when a burst pushes completed history over its retention limit.
-  while (store.data.rollouts.length > 300 || Buffer.byteLength(JSON.stringify(store.data)) > 8 * 1024 * 1024) {
-    const index = store.data.rollouts.findIndex(rollout => !active(rollout))
-    if (index < 0) break
-    store.data.rollouts.splice(index, 1)
-  }
+  pruneExpired()
   store.save()
 }
 export function startRollout(input: Pick<Rollout, 'conv' | 'input' | 'inputImageCount' | 'source' | 'jobId'>): string {
@@ -194,9 +247,11 @@ function summary({ events, seq, dropped, context, ...rollout }: Rollout) {
 }
 /** Summaries only: polling the list never transfers every tool result. */
 export function recentRollouts(conv?: string) {
+  pruneExpired()
   return store.data.rollouts.filter(rollout => !conv || rollout.conv === conv).slice().reverse().map(summary)
 }
 export function rolloutHistory(id: string) {
+  pruneExpired()
   const rollout = store.data.rollouts.find(entry => entry.id === id)
   return rollout ? { ...summary(rollout), context: rollout.context && cleanContext(rollout.context), events: rollout.events.map(cleanEvent) } : undefined
 }

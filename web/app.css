@@ -516,3 +516,10 @@ details[open] > summary .when-open { display: inline; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
 }
+/* Tool image previews and compact usage filters follow the active theme. */
+.rollout-images { display:flex; flex-wrap:wrap; gap:10px; margin:12px 0; }
+.rollout-images a { display:block; max-width:100%; }
+.rollout-images img { display:block; max-width:100%; width:auto; height:auto; max-height:260px; border:1px solid var(--line); border-radius:8px; }
+.usage-filters { display:flex; flex-wrap:wrap; align-items:end; gap:10px; }
+.usage-filters label { display:flex; flex-direction:column; gap:5px; font-size:12px; color:var(--muted); min-width:0; max-width:100%; }
+.usage-filters input, .usage-filters select { max-width:100%; }

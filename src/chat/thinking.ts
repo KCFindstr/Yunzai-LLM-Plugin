@@ -1,4 +1,5 @@
 import type { QuotaCtx } from '../billing/ledger.ts'
+import { recordUsageCall } from '../billing/history.ts'
 import { computeCost, DEFAULT_JEV_PRICE, resolveModelPrice, resolvePrice } from '../billing/pricing.ts'
 import type { ChatSection, ThinkingJudgeConfig, ThinkingLevel, ThinkingSetting } from '../core/configTypes.ts'
 import { brief, log } from '../core/log.ts'
@@ -169,6 +170,8 @@ async function judgeWithSystemOne(input: JudgeInput, cfg: ThinkingJudgeConfig): 
     cost: typeof j?.cost === 'number' ? j.cost : typeof j?.usage?.cost === 'number' ? j.usage.cost : undefined,
   }
   const cost = computeCost(usage, price)
+  recordUsageCall({ id: `systemone:${modelName}`, provider: 'systemone', model: String(modelName) }, cost,
+    { ...usage, ...(inputTokens == null ? { inputIncomplete: true } : {}) }, price)
   const probs = formatProbabilities(kindAns?.probabilities)
   const confStr = kindAns?.confidence != null ? ` conf=${typeof kindAns.confidence === 'number' ? kindAns.confidence.toFixed(2) : kindAns.confidence}` : ''
   const priceStr = price ? `$${price.input}/M` : 'unknown'
