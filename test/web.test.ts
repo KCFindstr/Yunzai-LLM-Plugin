@@ -195,6 +195,21 @@ describe('web panel', () => {
     assert.equal((await call('POST', '/api/agy/0000000000/cancel')).status, 404)
   })
 
+  it('clears cumulative statistics per model or for all, leaving quota windows alone', async () => {
+    const { record, totals, daily, usedIn } = await import('../src/billing/ledger.ts')
+    const usage = { input: 100, output: 10, cacheRead: 50, cacheWrite: 0, cacheWrite1h: 0, reasoning: 0, webSearches: 0 }
+    for (const id of ['gem-a', 'gem-b']) record({ id, provider: 'p', model: id } as any, { userId: 5 }, 0.01, usage as any)
+    assert.equal((await call('POST', '/api/usage/reset-stats', {})).status, 400)
+    assert.deepEqual((await (await call('POST', '/api/usage/reset-stats', { models: ['gem-a'] })).json()).reset, ['gem-a'])
+    assert.equal(totals()['gem-a'], undefined)
+    assert.equal(totals()['gem-b'].cacheRead, 50)
+    assert.ok(daily(1).every(([, per]) => per['gem-a'] === undefined && per['gem-b'] > 0))
+    // the quota window still counts the spend
+    assert.ok(usedIn('user:5|gem-a', 3600_000) > 0)
+    await call('POST', '/api/usage/reset-stats', { all: true })
+    assert.deepEqual(Object.keys(totals()), [])
+  })
+
   it('logs out', async () => {
     assert.equal((await call('POST', '/api/logout')).status, 200)
     assert.equal((await call('GET', '/api/overview')).status, 401)

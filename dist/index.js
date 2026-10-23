@@ -962,6 +962,14 @@ function resetUsage(target) {
   }
   store.save();
 }
+function resetStats(models) {
+  const d = store.data;
+  const ids = models?.length ? models : Object.keys(d.totals);
+  for (const id of ids) delete d.totals[id];
+  for (const day of Object.values(d.daily)) for (const id of ids) delete day[id];
+  store.save();
+  return ids;
+}
 var WINDOW_5H, WINDOW_WEEK, KEEP, store, SCOPES, lastPrune;
 var init_ledger = __esm({
   "src/billing/ledger.ts"() {
@@ -9470,6 +9478,12 @@ var routes = [
   R("POST", "/api/usage/reset", ({ body }) => {
     if (!body.all && !body.userId) throw fail("\u9700\u8981 userId \u6216 all");
     resetUsage(body.all ? { all: true } : { userId: String(body.userId) });
+  }),
+  // cumulative statistics (calls, tokens, cost); models: list of model ids, omitted = every model
+  R("POST", "/api/usage/reset-stats", ({ body }) => {
+    const models = Array.isArray(body.models) ? body.models.map(String).filter(Boolean) : void 0;
+    if (!models && body.all !== true) throw fail("\u9700\u8981 models \u6216 all");
+    return { reset: resetStats(models) };
   }),
   R("GET", "/api/config", () => {
     const cfg = config.get();

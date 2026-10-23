@@ -25,7 +25,7 @@ export async function render(root) {
       h('button', { class: 'btn', onclick: lookup }, '查询用户'),
       h('button', { class: 'btn danger', onclick: async () => {
         if (await confirmDanger('清空所有用户、群和全局的额度计数？（不影响累计统计）')) act(() => post('/api/usage/reset', { all: true }), '已重置全部额度').then(() => render(root))
-      } }, '重置全部额度'),
+      } }, '重置全部额度（不含统计）'),
     ),
     card('最近 14 天花费', bars(days, fmt.usd)),
     h('div', { class: 'grid cols-2', style: { marginTop: '16px' } },
@@ -47,10 +47,24 @@ export async function render(root) {
           } }, '重置')))))) : empty('本周还没有用量'),
       ),
     ),
-    card('累计统计（按模型）',
+    card(h('span', { class: 'row', style: { width: '100%' } }, '累计统计（按模型）',
+      models.length ? h('button', { class: 'btn sm danger right', onclick: async () => {
+        if (await confirmDanger('清零所有模型的累计统计（调用次数、token、花费和每日花费）？不影响额度计数。', '清零')) act(() => post('/api/usage/reset-stats', { all: true }), '累计统计已清零').then(() => render(root))
+      } }, '清零全部统计') : null),
       models.length ? h('div', { class: 'table-wrap' }, h('table',
-        h('thead', h('tr', h('th', '模型'), h('th', { class: 'num' }, '调用'), h('th', { class: 'num' }, '输入'), h('th', { class: 'num' }, '缓存读'), h('th', { class: 'num' }, '缓存写'), h('th', { class: 'num' }, '输出'), h('th', { class: 'num' }, '花费'))),
-        h('tbody', models.map(([id, t]) => h('tr', h('td', id), [t.calls, t.input, t.cacheRead, t.cacheWrite, t.output].map(v => h('td', { class: 'num' }, fmt.num(v))), h('td', { class: 'num' }, fmt.usd(t.cost))))),
+        h('thead', h('tr', h('th', '模型'), h('th', { class: 'num' }, '调用'), h('th', { class: 'num', title: '没有命中缓存的输入 token' }, '未缓存输入'), h('th', { class: 'num' }, '缓存读'),
+          h('th', { class: 'num', title: '缓存读 ÷（未缓存输入 + 缓存读）' }, '缓存命中率'), h('th', { class: 'num' }, '缓存写'), h('th', { class: 'num' }, '输出'), h('th', { class: 'num' }, '花费'), h('th', ''))),
+        h('tbody', models.map(([id, t]) => {
+          const total = t.input + t.cacheRead
+          return h('tr', h('td', id),
+            [t.calls, t.input, t.cacheRead].map(v => h('td', { class: 'num' }, fmt.num(v))),
+            h('td', { class: 'num' }, total ? `${((t.cacheRead / total) * 100).toFixed(1)}%` : '-'),
+            [t.cacheWrite, t.output].map(v => h('td', { class: 'num' }, fmt.num(v))),
+            h('td', { class: 'num' }, fmt.usd(t.cost)),
+            h('td', { class: 'num' }, h('button', { class: 'btn sm ghost danger', title: '清零这个模型的累计统计', onclick: async () => {
+              if (await confirmDanger(`清零「${id}」的累计统计？不影响额度计数。`, '清零')) act(() => post('/api/usage/reset-stats', { models: [id] }), `「${id}」的统计已清零`).then(() => render(root))
+            } }, '清零')))
+        })),
       )) : empty('还没有调用记录'),
     ),
   )

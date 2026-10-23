@@ -201,3 +201,16 @@ export function resetUsage(target: { userId?: string; all?: boolean }) {
   }
   store.save()
 }
+
+/**
+ * Clear cumulative statistics (calls, tokens, cost and per-day spend) for the given model ids, or for every model.
+ * Quota windows are separate (resetUsage); this is for starting fresh measurements, e.g. after a config change.
+ */
+export function resetStats(models?: string[]): string[] {
+  const d = store.data
+  const ids = models?.length ? models : Object.keys(d.totals)
+  for (const id of ids) delete d.totals[id]
+  for (const day of Object.values(d.daily)) for (const id of ids) delete day[id]
+  store.save()
+  return ids
+}

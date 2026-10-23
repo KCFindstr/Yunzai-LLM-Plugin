@@ -4,7 +4,7 @@ import YAML from 'yaml'
 // shared with the terminal config editor, so both validate writes the same way
 import { PRICING_FIELDS, SCHEMA, schemaAt, validate, validatePath, valuesOf } from '../../cli/schema.mjs'
 import { queryBalance } from '../billing/balance.ts'
-import { daily, limitsFor, resetUsage, summarize, topUsers, totals, WINDOW_5H, WINDOW_WEEK } from '../billing/ledger.ts'
+import { daily, limitsFor, resetStats, resetUsage, summarize, topUsers, totals, WINDOW_5H, WINDOW_WEEK } from '../billing/ledger.ts'
 import { priceCacheInfo, refreshPrices, resolvePrice } from '../billing/pricing.ts'
 import { catalogEntries, catalogInfo, scanCatalog } from '../commands/catalog.ts'
 import { config, normalize, personaText, resolveKeys } from '../core/config.ts'
@@ -320,6 +320,12 @@ export const routes: Route[] = [
   R('POST', '/api/usage/reset', ({ body }) => {
     if (!body.all && !body.userId) throw fail('需要 userId 或 all')
     resetUsage(body.all ? { all: true } : { userId: String(body.userId) })
+  }),
+  // cumulative statistics (calls, tokens, cost); models: list of model ids, omitted = every model
+  R('POST', '/api/usage/reset-stats', ({ body }) => {
+    const models = Array.isArray(body.models) ? body.models.map(String).filter(Boolean) : undefined
+    if (!models && body.all !== true) throw fail('需要 models 或 all')
+    return { reset: resetStats(models) }
   }),
 
   R('GET', '/api/config', () => {
