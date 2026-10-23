@@ -2308,7 +2308,7 @@ async function recallSession(key, query, count = 3, opts = {}) {
   const sources = [{ key, label: "" }, ...extra.filter((x) => x.key !== key)];
   const entries2 = sources.flatMap((src) => searchable(src.key).map((entry) => ({ ...entry, key: src.key, label: src.label }))).filter((entry) => !range || entry.day >= range.from && entry.day <= range.to);
   if (!entries2.length) return [];
-  const terms = query.toLowerCase().match(/[a-z0-9_-]{3,}|[\p{Script=Han}]{2,}/gu) ?? [];
+  const terms2 = query.toLowerCase().match(/[a-z0-9_-]{3,}|[\p{Script=Han}]{2,}/gu) ?? [];
   const cosine = /* @__PURE__ */ new Map();
   if (query.trim().length >= 2 && embeddingReady()) {
     try {
@@ -2324,7 +2324,7 @@ async function recallSession(key, query, count = 3, opts = {}) {
   }
   const minScore = config.get().memory.embedding.minScore;
   return entries2.map((entry) => {
-    const lexical = similarity(query, entry.text) + terms.reduce((score, term) => score + (entry.text.toLowerCase().includes(term) ? 0.2 : 0), 0);
+    const lexical = similarity(query, entry.text) + terms2.reduce((score, term) => score + (entry.text.toLowerCase().includes(term) ? 0.2 : 0), 0);
     return { entry, lexical, cos: cosine.get(entry), score: lexical + (cosine.get(entry) ?? 0) + (range && entry.kind === "day" ? 1 : 0) };
   }).filter((hit) => range || !query.trim() || hit.lexical >= 0.06 || (hit.cos ?? -1) >= minScore).sort((a, b) => b.score - a.score || b.entry.at - a.entry.at).slice(0, Math.min(config.get().memory.recallLimit, Math.max(1, count))).map(({ entry }) => {
     const where = entry.label ? `\xB7${entry.label}` : "";
@@ -9610,6 +9610,224 @@ init_rollouts();
 init_roster();
 init_utility();
 init_types();
+
+// src/memory/cluster.ts
+var MAX_K = 12;
+var SELECT_SAMPLE = 300;
+function rng(seed) {
+  return () => (seed = seed * 1664525 + 1013904223 >>> 0) / 4294967296;
+}
+function dot2(a, b) {
+  let s = 0;
+  for (let j = 0; j < a.length; j++) s += a[j] * b[j];
+  return s;
+}
+function normalize3(v) {
+  const n = Math.sqrt(dot2(v, v)) || 1;
+  for (let j = 0; j < v.length; j++) v[j] /= n;
+  return v;
+}
+function maxK(n) {
+  return Math.max(1, Math.min(MAX_K, Math.floor(n / 3)));
+}
+function kmeans(vecs, k, seed = 42) {
+  const n = vecs.length;
+  const d = vecs[0].length;
+  k = Math.max(1, Math.min(k, n));
+  let best;
+  const restarts = n * d > 5e5 ? 1 : 3;
+  for (let restart = 0; restart < restarts; restart++) {
+    const rand = rng(seed + restart * 7919);
+    const centroids = [Float32Array.from(vecs[Math.floor(rand() * n)])];
+    const dist = vecs.map((v) => Math.max(0, 1 - dot2(v, centroids[0])));
+    while (centroids.length < k) {
+      const total = dist.reduce((a, x) => a + x * x, 0);
+      let r = rand() * total;
+      let pick2 = 0;
+      if (total > 0) while (pick2 < n - 1 && (r -= dist[pick2] ** 2) > 0) pick2++;
+      else pick2 = Math.floor(rand() * n);
+      const c = Float32Array.from(vecs[pick2]);
+      centroids.push(c);
+      vecs.forEach((v, i) => {
+        dist[i] = Math.min(dist[i], Math.max(0, 1 - dot2(v, c)));
+      });
+    }
+    const assign = new Array(n).fill(-1);
+    let cost = 0;
+    for (let it = 0; it < 50; it++) {
+      let changed2 = false;
+      cost = 0;
+      vecs.forEach((v, i) => {
+        let bi = 0, bs = -Infinity;
+        centroids.forEach((c, ci) => {
+          const s = dot2(v, c);
+          if (s > bs) {
+            bs = s;
+            bi = ci;
+          }
+        });
+        cost += 1 - bs;
+        if (assign[i] !== bi) {
+          assign[i] = bi;
+          changed2 = true;
+        }
+      });
+      if (!changed2 && it) break;
+      const sums = centroids.map(() => new Float32Array(d));
+      const counts = new Array(k).fill(0);
+      vecs.forEach((v, i) => {
+        const s = sums[assign[i]];
+        counts[assign[i]]++;
+        for (let j = 0; j < d; j++) s[j] += v[j];
+      });
+      sums.forEach((s, ci) => {
+        if (counts[ci]) {
+          centroids[ci] = normalize3(s);
+          return;
+        }
+        let far = 0, fs18 = Infinity;
+        vecs.forEach((v, i) => {
+          const x = dot2(v, centroids[assign[i]]);
+          if (x < fs18) {
+            fs18 = x;
+            far = i;
+          }
+        });
+        centroids[ci] = Float32Array.from(vecs[far]);
+      });
+    }
+    if (!best || cost < best.cost) best = { assign, centroids, cost };
+  }
+  return { assign: best.assign, centroids: best.centroids };
+}
+function silhouette(sims, assign, k) {
+  const n = assign.length;
+  const sizes = new Array(k).fill(0);
+  for (const a of assign) sizes[a]++;
+  let total = 0;
+  for (let i = 0; i < n; i++) {
+    if (sizes[assign[i]] < 2) continue;
+    const sum = new Array(k).fill(0);
+    for (let j = 0; j < n; j++) if (j !== i) sum[assign[j]] += 1 - sims[i][j];
+    const a = sum[assign[i]] / (sizes[assign[i]] - 1);
+    let b = Infinity;
+    for (let c = 0; c < k; c++) if (c !== assign[i] && sizes[c]) b = Math.min(b, sum[c] / sizes[c]);
+    if (b === Infinity) continue;
+    total += (b - a) / (Math.max(a, b) || 1);
+  }
+  return total / n;
+}
+function chooseK(vecs, seed = 42) {
+  const top = maxK(vecs.length);
+  if (top < 2) return { k: 1, scores: [] };
+  let sample = vecs;
+  if (vecs.length > SELECT_SAMPLE) {
+    const rand = rng(seed);
+    const idx = vecs.map((_, i) => i);
+    for (let i = idx.length - 1; i > 0; i--) {
+      const j = Math.floor(rand() * (i + 1));
+      [idx[i], idx[j]] = [idx[j], idx[i]];
+    }
+    sample = idx.slice(0, SELECT_SAMPLE).map((i) => vecs[i]);
+  }
+  const sims = sample.map((a) => Float32Array.from(sample, (b) => dot2(a, b)));
+  const scores = [];
+  for (let k = 2; k <= top; k++) scores.push({ k, silhouette: silhouette(sims, kmeans(sample, k, seed).assign, k) });
+  const best = scores.reduce((a, b) => b.silhouette > a.silhouette ? b : a, scores[0]);
+  return { k: best.k, scores };
+}
+var STOPWORDS = new Set("\u7684 \u4E86 \u548C \u4E0E \u53CA \u6216 \u662F \u5728 \u6709 \u4E5F \u90FD \u5C31 \u8FD8 \u800C \u4F46 \u5E76 \u88AB \u628A \u8BA9 \u7ED9 \u5BF9 \u5411 \u4ECE \u5230 \u4E3A \u4EE5 \u4E8E \u4E4B \u5176 \u8FD9 \u90A3 \u8FD9\u4E2A \u90A3\u4E2A \u8FD9\u4E9B \u90A3\u4E9B \u4E00\u4E2A \u4E00\u4E9B \u6211 \u4F60 \u4ED6 \u5979 \u5B83 \u6211\u4EEC \u4F60\u4EEC \u4ED6\u4EEC \u5979\u4EEC \u81EA\u5DF1 \u5BF9\u65B9 \u5927\u5BB6 \u4EC0\u4E48 \u600E\u4E48 \u4E3A\u4EC0\u4E48 \u5982\u4F55 \u54EA \u54EA\u91CC \u6CA1\u6709 \u4E0D\u662F \u5C31\u662F \u8FD8\u662F \u53EF\u4EE5 \u9700\u8981 \u5DF2\u7ECF \u56E0\u4E3A \u6240\u4EE5 \u5982\u679C \u7136\u540E \u4E4B\u540E \u4E4B\u524D \u968F\u540E \u540E\u6765 \u5148 \u518D \u53C8 \u518D\u6B21 \u9996\u6B21 \u7EE7\u7EED \u8868\u793A \u79F0 \u8BF4 \u95EE \u56DE\u7B54 \u56DE\u5E94 \u8BE2\u95EE \u63D0\u5230 \u8C08\u53CA \u8981\u6C42 \u544A\u8BC9 \u8BA4\u4E3A \u89C9\u5F97 \u5E0C\u671B \u4ECA\u5929 \u6628\u5929 \u660E\u5929 \u4E0A\u5348 \u4E0B\u5348 \u665A\u4E0A \u51CC\u6668 \u4E2D\u5348 \u5F53\u65E5 \u6982\u8981 \u4E8B\u5B9E \u7ED3\u8BBA \u7EA6\u5B9A \u6682\u65E0 \u79C1\u804A \u7FA4\u804A \u7528\u6237 \u6210\u5458 \u6D88\u606F \u5185\u5BB9 \u65F6\u5019 \u4E00\u4E0B \u4E00\u8D77 the a an and or of to in on for with is are was were be been it this that at by from as but not you we they he she i".split(/\s+/));
+var LONG_STOPWORDS = [...STOPWORDS].filter((w) => w.length >= 2 && new RegExp("^\\p{Script=Han}+$", "u").test(w));
+var EDGE_CHARS = new Set("\u7684\u4E86\u7740\u8FC7\u548C\u4E0E\u53CA\u6216\u662F\u5728\u6709\u4E5F\u90FD\u5C31\u8FD8\u800C\u4F46\u5E76\u88AB\u628A\u8BA9\u7ED9\u5BF9\u5411\u4ECE\u5230\u4E3A\u4EE5\u4E8E\u4E4B\u5176\u8FD9\u90A3\u6211\u4F60\u4ED6\u5979\u5B83\u4EEC\u4E48\u5417\u5462\u5427\u554A\u5440\u54E6\u561B\u53C8\u518D\u5F88\u8BF4\u95EE\u79F0");
+var segmenter = new Intl.Segmenter("en", { granularity: "word" });
+function terms(text2) {
+  const clean2 = text2.toLowerCase().replace(/【[^】]*[｜|][^】]*】/g, " ").replace(/\[[a-z_]+:[^\]]*\]/gi, " ");
+  const out = /* @__PURE__ */ new Set();
+  for (const run of clean2.match(new RegExp("\\p{Script=Han}+", "gu")) ?? []) {
+    const stopEnd = new Array(run.length).fill(Infinity);
+    for (const w of LONG_STOPWORDS) for (let p = run.indexOf(w); p >= 0; p = run.indexOf(w, p + 1)) stopEnd[p] = Math.min(stopEnd[p], p + w.length);
+    for (let n = 2; n <= 4; n++)
+      for (let i = 0; i + n <= run.length; i++) {
+        if (EDGE_CHARS.has(run[i]) || EDGE_CHARS.has(run[i + n - 1])) continue;
+        let stop = false;
+        for (let p = i; p < i + n - 1 && !stop; p++) stop = stopEnd[p] <= i + n;
+        if (!stop) out.add(run.slice(i, i + n));
+      }
+  }
+  const words = [...segmenter.segment(clean2.replace(new RegExp("\\p{Script=Han}+", "gu"), " | "))].filter((s) => s.isWordLike && /^[a-z][a-z0-9_'-]*$/.test(s.segment)).map((s) => s.segment);
+  words.forEach((w, i) => {
+    if (w.length >= 3 && !STOPWORDS.has(w)) out.add(w);
+    const next = words[i + 1];
+    if (next && w.length >= 2 && next.length >= 2 && !STOPWORDS.has(w) && !STOPWORDS.has(next)) out.add(`${w} ${next}`);
+  });
+  return out;
+}
+function clusterKeywords(texts, assign, k, top = 5, skip = /* @__PURE__ */ new Set()) {
+  const docTerms = texts.map((t, i) => skip.has(i) ? /* @__PURE__ */ new Set() : terms(t));
+  const df = /* @__PURE__ */ new Map();
+  for (const ts of docTerms) for (const t of ts) df.set(t, (df.get(t) ?? 0) + 1);
+  const n = texts.length;
+  return Array.from({ length: k }, (_, c) => {
+    const members = docTerms.filter((_2, i) => assign[i] === c && !skip.has(i));
+    const counts = /* @__PURE__ */ new Map();
+    for (const ts of members) for (const t of ts) counts.set(t, (counts.get(t) ?? 0) + 1);
+    const minCount = members.length >= 3 ? 2 : 1;
+    const absorbed = /* @__PURE__ */ new Set();
+    for (const [t, cnt] of counts) {
+      if (cnt < minCount || t.length < 3 || t.includes(" ")) continue;
+      for (const sub of [t.slice(1), t.slice(0, -1)]) if ((counts.get(sub) ?? 0) <= cnt / 0.8) absorbed.add(sub);
+    }
+    const ranked = [...counts].filter(([t, cnt]) => cnt >= minCount && !absorbed.has(t)).map(([t, cnt]) => [t, cnt / members.length * Math.log(1 + n / df.get(t))]).sort((a, b) => b[1] - a[1] || b[0].length - a[0].length);
+    const picked = [];
+    for (const [t] of ranked) {
+      if (picked.length >= top) break;
+      if (picked.some((p) => p.includes(t) || t.includes(p) || overlaps(p, t))) continue;
+      picked.push(t);
+    }
+    return picked;
+  });
+}
+function overlaps(a, b) {
+  for (let len = Math.min(a.length, b.length) - 1; len >= 2; len--)
+    if (a.endsWith(b.slice(0, len)) || b.endsWith(a.slice(0, len))) return true;
+  return false;
+}
+var DUPLICATE = 0.9;
+function nearDuplicates(vecs, assign) {
+  const kept = /* @__PURE__ */ new Map();
+  const out = /* @__PURE__ */ new Set();
+  vecs.forEach((v, i) => {
+    const list2 = kept.get(assign[i]) ?? [];
+    if (list2.slice(-64).some((j) => dot2(v, vecs[j]) >= DUPLICATE)) out.add(i);
+    else kept.set(assign[i], [...list2, i].slice(-64));
+  });
+  return out;
+}
+function clusterVectors(vecs, texts, k) {
+  if (!vecs.length) return { k: 0, auto: !k, scores: [], assign: [], clusters: [] };
+  const auto = !k || k < 1;
+  const chosen = auto ? chooseK(vecs) : { k: Math.min(k, vecs.length), scores: [] };
+  const { assign, centroids } = kmeans(vecs, chosen.k);
+  const sizes = centroids.map((_, c) => assign.filter((a) => a === c).length);
+  const order = sizes.map((s, c) => [s, c]).filter(([s]) => s > 0).sort((a, b) => b[0] - a[0]).map(([, c]) => c);
+  const remap = new Map(order.map((c, i) => [c, i]));
+  const finalAssign = assign.map((a) => remap.get(a));
+  const keywords = clusterKeywords(texts, finalAssign, order.length, 5, nearDuplicates(vecs, finalAssign));
+  const clusters = order.map((c, id) => {
+    const members = finalAssign.map((a, i) => [a, i]).filter(([a]) => a === id).map(([, i]) => i);
+    const sims = members.map((i) => [dot2(vecs[i], centroids[c]), i]).sort((a, b) => b[0] - a[0]);
+    return {
+      id,
+      size: members.length,
+      cohesion: sims.reduce((a, [s]) => a + s, 0) / members.length,
+      keywords: keywords[id],
+      exemplars: sims.slice(0, 3).map(([, i]) => i)
+    };
+  });
+  return { k: clusters.length, auto, scores: chosen.scores, assign: finalAssign, clusters };
+}
+
+// src/web/api.ts
 init_embed();
 init_store2();
 init_store3();
@@ -9745,7 +9963,7 @@ function setConfig(p, value) {
   if (err) throw fail(`${p}: ${err}`);
   config.set(p, value);
 }
-function rng(seed) {
+function rng2(seed) {
   return () => (seed = seed * 1664525 + 1013904223 >>> 0) / 4294967296 - 0.5;
 }
 function pca3(rows) {
@@ -9758,7 +9976,7 @@ function pca3(rows) {
   for (const r of X) for (const x of r) total += x * x;
   const comps = [];
   const variance = [];
-  const rand = rng(42);
+  const rand = rng2(42);
   for (let c = 0; c < Math.min(3, n); c++) {
     let v = Float64Array.from({ length: d }, rand);
     let lambda = 0;
@@ -9787,15 +10005,33 @@ function pca3(rows) {
   });
   return { project, variance };
 }
+var clusterCache;
+function clustersFor(points, k) {
+  const sig = [embeddingTag(), k ?? "auto", points.length, ...points.map((p) => p.id)].join("|");
+  if (clusterCache?.sig !== sig) clusterCache = { sig, result: clusterVectors(points.map((p) => p.vec), points.map((p) => p.text), k) };
+  return clusterCache.result;
+}
 async function vectorSpace(q) {
   const key = q.get("key") || void 0;
   const text2 = (q.get("q") ?? "").trim();
+  const kArg = Number(q.get("k")) || void 0;
   const points = allVectors(key);
   const base = { ready: embeddingReady(), tag: embeddingTag(), sessions: listSessions().filter((s) => s.vectors).map((s) => ({ key: s.key, ...sessionLabel(s.key), vectors: s.vectors })) };
   if (points.length < 2) return { ...base, points: [], variance: [] };
   const { project, variance } = pca3(points.map((p) => p.vec));
   const coords = points.map((p) => project(p.vec));
   const scale = Math.max(1e-9, ...coords.flat().map(Math.abs));
+  const cl = clustersFor(points, kArg && Math.min(kArg, maxK(points.length)));
+  const clusters = {
+    k: cl.k,
+    auto: cl.auto,
+    maxK: maxK(points.length),
+    scores: cl.scores,
+    list: cl.clusters.map((c) => {
+      const members = cl.assign.map((a, i) => [a, i]).filter(([a]) => a === c.id).map(([, i]) => coords[i]);
+      return { ...c, xyz: [0, 1, 2].map((j) => members.reduce((s, m) => s + m[j], 0) / members.length / scale) };
+    })
+  };
   let query;
   if (text2) {
     if (!embeddingReady()) throw fail("\u6CA1\u6709\u914D\u7F6E\u5411\u91CF\u6A21\u578B\u7684 API Key");
@@ -9807,7 +10043,8 @@ async function vectorSpace(q) {
   return {
     ...base,
     variance,
-    points: points.map((p, i) => ({ key: p.key, id: p.id, at: p.at, day: p.day, kind: p.kind, text: p.text, xyz: coords[i].map((x) => x / scale) })),
+    points: points.map((p, i) => ({ key: p.key, id: p.id, at: p.at, day: p.day, kind: p.kind, text: p.text, cluster: cl.assign[i], xyz: coords[i].map((x) => x / scale) })),
+    clusters,
     query
   };
 }

@@ -17,6 +17,7 @@ import { recentRollouts, rolloutHistory } from '../chat/rollouts.ts'
 import { configuredName, recentMessages, rosterSnapshot } from '../chat/roster.ts'
 import { utilityChat } from '../chat/utility.ts'
 import { partsToText } from '../llm/types.ts'
+import { clusterVectors, maxK, type Clustering } from '../memory/cluster.ts'
 import { dot, embed, embeddingReady, embeddingTag } from '../memory/embed.ts'
 import { addMemory, clearMemory, deleteMemory, listMemory, memoryOwners, memoryStats, updateMemory, usage as memUsage, type MemScope } from '../memory/store.ts'
 import { indexSticker, stickerIncomplete } from '../stickers/indexer.ts'
@@ -229,15 +230,36 @@ function pca3(rows: Float32Array[]) {
   return { project, variance }
 }
 
+// k selection fits k-means once per candidate k: reuse the result until the archive or the request changes
+let clusterCache: { sig: string; result: Clustering } | undefined
+
+function clustersFor(points: ReturnType<typeof allVectors>, k: number | undefined): Clustering {
+  const sig = [embeddingTag(), k ?? 'auto', points.length, ...points.map(p => p.id)].join('|')
+  if (clusterCache?.sig !== sig) clusterCache = { sig, result: clusterVectors(points.map(p => p.vec), points.map(p => p.text), k) }
+  return clusterCache.result
+}
+
 async function vectorSpace(q: URLSearchParams) {
   const key = q.get('key') || undefined
   const text = (q.get('q') ?? '').trim()
+  const kArg = Number(q.get('k')) || undefined
   const points = allVectors(key)
   const base = { ready: embeddingReady(), tag: embeddingTag(), sessions: listSessions().filter(s => s.vectors).map(s => ({ key: s.key, ...sessionLabel(s.key), vectors: s.vectors })) }
   if (points.length < 2) return { ...base, points: [], variance: [] }
   const { project, variance } = pca3(points.map(p => p.vec))
   const coords = points.map(p => project(p.vec))
   const scale = Math.max(1e-9, ...coords.flat().map(Math.abs))
+  const cl = clustersFor(points, kArg && Math.min(kArg, maxK(points.length)))
+  const clusters = {
+    k: cl.k,
+    auto: cl.auto,
+    maxK: maxK(points.length),
+    scores: cl.scores,
+    list: cl.clusters.map(c => {
+      const members = cl.assign.map((a, i) => [a, i]).filter(([a]) => a === c.id).map(([, i]) => coords[i])
+      return { ...c, xyz: [0, 1, 2].map(j => members.reduce((s, m) => s + m[j], 0) / members.length / scale) }
+    }),
+  }
   let query: any
   if (text) {
     if (!embeddingReady()) throw fail('没有配置向量模型的 API Key')
@@ -249,7 +271,8 @@ async function vectorSpace(q: URLSearchParams) {
   return {
     ...base,
     variance,
-    points: points.map((p, i) => ({ key: p.key, id: p.id, at: p.at, day: p.day, kind: p.kind, text: p.text, xyz: coords[i].map(x => x / scale) })),
+    points: points.map((p, i) => ({ key: p.key, id: p.id, at: p.at, day: p.day, kind: p.kind, text: p.text, cluster: cl.assign[i], xyz: coords[i].map(x => x / scale) })),
+    clusters,
     query,
   }
 }

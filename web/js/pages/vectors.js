@@ -5,6 +5,7 @@ import { badge, card, empty, fmt, h, mount, toast } from '../ui.js'
 /**
  * 3D view of the recall archive: the server projects every stored vector onto its top three principal
  * components; this page renders them on a canvas with a hand-rolled perspective camera (no WebGL / libs).
+ * Topic clusters come from k-means on the full vectors server-side, labelled by keywords (no LLM).
  */
 
 const PALETTE = ['#8b7dff', '#4cc9f0', '#f72585', '#7ae582', '#ffb703', '#ff7b54', '#b5179e', '#2ec4b6', '#e9c46a', '#a0c4ff', '#ff99c8', '#90e0ef']
@@ -16,10 +17,12 @@ export async function render(root, [keyArg]) {
   mount(root, head, space)
 
   let data
+  let kChoice = '' // '' = pick k automatically
   const load = async (q = '') => {
     const params = new URLSearchParams()
     if (keyArg) params.set('key', keyArg)
     if (q) params.set('q', q)
+    if (kChoice) params.set('k', kChoice)
     data = await get(`/api/vectors?${params}`)
     return data
   }
@@ -42,15 +45,19 @@ export async function render(root, [keyArg]) {
   // ---------- scene state ----------
   const sessionKeys = [...new Set(data.points.map(p => p.key))]
   const colorOf = Object.fromEntries(sessionKeys.map((k, i) => [k, PALETTE[i % PALETTE.length]]))
-  // colour by session, or by date (oldest blue → newest pink)
-  let colorMode = 'session'
+  // colour by topic cluster, session, or date (oldest blue → newest pink)
+  let colorMode = data.clusters?.k > 1 ? 'cluster' : 'session'
   const days = data.points.map(p => p.day).sort()
   const dayRank = Object.fromEntries([...new Set(days)].map((d, i, all) => [d, all.length > 1 ? i / (all.length - 1) : 1]))
   const lerpHex = (a, b, t) => '#' + [0, 2, 4].map(i => Math.round(parseInt(a.slice(1 + i, 3 + i), 16) * (1 - t) + parseInt(b.slice(1 + i, 3 + i), 16) * t).toString(16).padStart(2, '0')).join('')
-  const colorFor = p => (colorMode === 'date' ? lerpHex('#4cc9f0', '#f72585', dayRank[p.day] ?? 1) : colorOf[p.key])
+  const clusterColor = id => PALETTE[id % PALETTE.length]
+  const colorFor = p => (colorMode === 'date' ? lerpHex('#4cc9f0', '#f72585', dayRank[p.day] ?? 1) : colorMode === 'cluster' ? clusterColor(p.cluster) : colorOf[p.key])
+  const clusterName = c => (c.keywords.length ? c.keywords.slice(0, 3).join(' · ') : `主题 ${c.id + 1}`)
   const kindLabel = p => (p.kind === 'day' ? `${p.day} 当日概要` : fmt.time(p.at))
   const labelOf = Object.fromEntries(data.sessions.map(s => [s.key, s.label]))
   const hidden = new Set()
+  const hiddenClusters = new Set()
+  const isHidden = p => hidden.has(p.key) || hiddenClusters.has(p.cluster)
   const cam = { yaw: 0.7, pitch: 0.35, dist: 2.6, target: [0, 0, 0], goal: null }
   let auto = true
   let hover = -1
@@ -66,13 +73,60 @@ export async function render(root, [keyArg]) {
   const sessionSel = h('select', { onchange: () => { location.hash = sessionSel.value ? `#/vectors/${enc(sessionSel.value)}` : '#/vectors' } },
     h('option', { value: '' }, `全部会话（${data.points.length} 点）`),
     data.sessions.map(s => h('option', { value: s.key, selected: s.key === keyArg }, `${s.label}（${s.vectors}）`)))
+  const kSel = h('select', { title: 'k-means 的主题数；自动时按轮廓系数选择', onchange: async () => {
+    kChoice = kSel.value
+    try {
+      const d = await load(query?.text ?? '')
+      query = d.query
+      hiddenClusters.clear()
+      selected = -1
+      detail.style.display = 'none'
+      if (colorMode !== 'cluster') { colorMode = 'cluster'; colorSel.value = 'cluster' }
+      renderKOptions()
+      renderLegend()
+    } catch (err) { toast(err.message, 'bad') }
+  } })
+  // silhouettes only come with an automatic pick: keep the last ones to annotate the manual choices
+  let autoScores = []
+  const renderKOptions = () => {
+    const c = data.clusters
+    if (c.auto) autoScores = c.scores ?? []
+    const sil = Object.fromEntries(autoScores.map(s => [s.k, s.silhouette]))
+    mount(kSel,
+      h('option', { value: '', selected: !kChoice }, c.auto ? `主题：自动（k=${c.k}）` : '主题：自动'),
+      Array.from({ length: Math.max(0, c.maxK - 1) }, (_, i) => i + 2).map(k =>
+        h('option', { value: String(k), selected: kChoice === String(k) }, `主题：k=${k}${sil[k] != null ? `（轮廓 ${sil[k].toFixed(2)}）` : ''}`)))
+    kSel.disabled = c.maxK < 2
+  }
+  renderKOptions()
   const autoBtn = h('button', { class: 'btn sm', onclick: () => { auto = !auto; autoBtn.textContent = auto ? '❚❚ 自转' : '▶ 自转' } }, '❚❚ 自转')
-  const legend = h('div', { class: 'legend' },
-    h('div', { style: { marginBottom: '4px', color: '#8b91a8' } }, `解释方差 ${data.variance.map(v => `${(v * 100).toFixed(1)}%`).join(' / ')}`),
-    sessionKeys.map(k => {
-      const cb = h('input', { type: 'checkbox', checked: true, onchange: () => { cb.checked ? hidden.delete(k) : hidden.add(k) } })
-      return h('label', cb, h('span', { class: 'sw', style: { background: colorOf[k] } }), h('span', { class: 'clip' }, labelOf[k] ?? k), h('span', { style: { color: '#8b91a8' } }, data.points.filter(p => p.key === k).length))
-    }))
+  const legend = h('div', { class: 'legend' })
+  const renderLegend = () => {
+    legend.style.opacity = colorMode === 'date' ? '.5' : '1'
+    if (colorMode === 'cluster') {
+      const c = data.clusters
+      mount(legend,
+        h('div', { style: { marginBottom: '4px', color: '#8b91a8' } }, `${c.k} 个主题${c.auto ? '（自动）' : ''} · 点击名称查看`),
+        c.list.map(cl => {
+          const cb = h('input', { type: 'checkbox', checked: !hiddenClusters.has(cl.id), onchange: () => { cb.checked ? hiddenClusters.delete(cl.id) : hiddenClusters.add(cl.id) } })
+          return h('label', cb, h('span', { class: 'sw', style: { background: clusterColor(cl.id) } }),
+            h('span', { class: 'clip', onclick: e => { e.preventDefault(); showCluster(cl.id) } }, clusterName(cl)),
+            h('span', { style: { color: '#8b91a8' } }, cl.size))
+        }))
+      return
+    }
+    mount(legend,
+      h('div', { style: { marginBottom: '4px', color: '#8b91a8' } }, `解释方差 ${data.variance.map(v => `${(v * 100).toFixed(1)}%`).join(' / ')}`),
+      sessionKeys.map(k => {
+        const cb = h('input', { type: 'checkbox', checked: !hidden.has(k), onchange: () => { cb.checked ? hidden.delete(k) : hidden.add(k) } })
+        return h('label', cb, h('span', { class: 'sw', style: { background: colorOf[k] } }), h('span', { class: 'clip' }, labelOf[k] ?? k), h('span', { style: { color: '#8b91a8' } }, data.points.filter(p => p.key === k).length))
+      }))
+  }
+  const colorSel = h('select', { onchange: e => { colorMode = e.target.value; renderLegend() } },
+    h('option', { value: 'cluster', selected: colorMode === 'cluster' }, '按主题着色'),
+    h('option', { value: 'session', selected: colorMode === 'session' }, '按会话着色'),
+    h('option', { value: 'date' }, `按日期着色（${days[0] ?? ''} → ${days.at(-1) ?? ''}）`))
+  renderLegend()
   const hud = h('div', { class: 'hud' },
     h('form', { class: 'row', onsubmit: async e => {
       e.preventDefault()
@@ -85,7 +139,8 @@ export async function render(root, [keyArg]) {
       } catch (err) { toast(err.message, 'bad') }
     } }, qInput, h('button', { class: 'btn sm', type: 'submit' }, '定位')),
     sessionSel,
-    h('select', { onchange: e => { colorMode = e.target.value; legend.style.opacity = colorMode === 'date' ? '.5' : '1' } }, h('option', { value: 'session' }, '按会话着色'), h('option', { value: 'date' }, `按日期着色（${days[0] ?? ''} → ${days.at(-1) ?? ''}）`)),
+    colorSel,
+    kSel,
     autoBtn,
     h('button', { class: 'btn sm', onclick: () => { Object.assign(cam, { yaw: 0.7, pitch: 0.35, dist: 2.6, goal: [0, 0, 0] }); selected = -1; detail.style.display = 'none' } }, '⟲ 复位'),
   )
@@ -166,7 +221,7 @@ export async function render(root, [keyArg]) {
 
     const near = nearestSet()
     screen = data.points.map((p, i) => {
-      const s = hidden.has(p.key) ? null : project(p.xyz)
+      const s = isHidden(p) ? null : project(p.xyz)
       return s ? { i, x: s[0], y: s[1], depth: s[2], f: s[3] } : null
     }).filter(Boolean).sort((a, b) => b.depth - a.depth)
 
@@ -174,7 +229,7 @@ export async function render(root, [keyArg]) {
     const qs = query && project(query.xyz)
     if (qs) for (const n of query.nearest) {
       const p = data.points[n.index]
-      const s = !hidden.has(p.key) && project(p.xyz)
+      const s = !isHidden(p) && project(p.xyz)
       if (!s) continue
       const strong = n.score >= query.minScore
       ctx.strokeStyle = strong ? `rgba(255,255,255,${0.25 + n.score * 0.6})` : 'rgba(255,255,255,0.12)'
@@ -206,6 +261,25 @@ export async function render(root, [keyArg]) {
         ctx.beginPath(); ctx.arc(s.x, s.y, r + 4, 0, Math.PI * 2); ctx.stroke()
       }
       ctx.globalAlpha = 1
+    }
+
+    // topic labels at each cluster's centroid in the projection
+    if (colorMode === 'cluster') {
+      ctx.font = '12px system-ui'
+      for (const cl of data.clusters.list) {
+        if (hiddenClusters.has(cl.id)) continue
+        const c = project(cl.xyz)
+        if (!c) continue
+        const label = cl.keywords.slice(0, 2).join(' · ') || `主题 ${cl.id + 1}`
+        const w = ctx.measureText(label).width
+        ctx.fillStyle = '#0d1922cc'
+        ctx.fillRect(c[0] - w / 2 - 6, c[1] - 9, w + 12, 18)
+        ctx.strokeStyle = clusterColor(cl.id)
+        ctx.lineWidth = 1
+        ctx.strokeRect(c[0] - w / 2 - 6, c[1] - 9, w + 12, 18)
+        ctx.fillStyle = '#e6eef0'
+        ctx.fillText(label, c[0] - w / 2, c[1] + 4)
+      }
     }
 
     if (qs) {
@@ -316,12 +390,15 @@ export async function render(root, [keyArg]) {
     if (fly) { cam.goal = [...p.xyz]; cam.dist = Math.min(cam.dist, 1.6); auto = false; autoBtn.textContent = '▶ 自转' }
     const neighbors = data.points.map((q, j) => [j, Math.hypot(...q.xyz.map((v, k) => v - p.xyz[k]))]).filter(([j]) => j !== i).sort((a, b) => a[1] - b[1]).slice(0, 5)
     const pos = order.indexOf(i)
+    const cl = data.clusters?.list[p.cluster]
     mount(detail, 
       h('div', { class: 'row' },
         h('span', { class: 'sw', style: { background: colorOf[p.key], width: '10px', height: '10px', borderRadius: '50%', display: 'inline-block' } }),
         h('b', labelOf[p.key] ?? p.key),
         h('button', { class: 'btn sm ghost right', style: { color: '#e6e8f0' }, onclick: () => { selected = -1; detail.style.display = 'none' } }, '✕')),
       h('div', { class: 'muted small', style: { margin: '4px 0 8px' } }, `${kindLabel(p)} · 第 ${pos + 1}/${order.length} 个`),
+      cl && h('div', { class: 'small', style: { cursor: 'pointer', marginBottom: '8px' }, onclick: () => showCluster(cl.id) },
+        h('span', { style: { color: clusterColor(cl.id) } }, '◆ '), `主题：${clusterName(cl)} →`),
       h('pre', { style: { fontFamily: 'inherit', fontSize: '13px' } }, p.text),
       h('div', { class: 'row', style: { margin: '10px 0' } },
         h('button', { class: 'btn sm', onclick: () => select(order[(pos - 1 + order.length) % order.length], true) }, '← 上一段'),
@@ -334,6 +411,28 @@ export async function render(root, [keyArg]) {
         h('span', { style: { color: colorOf[data.points[j].key] } }, '● '),
         h('span', { class: 'muted small' }, `距离 ${d.toFixed(2)} `),
         data.points[j].text.slice(0, 60))),
+    )
+    detail.style.display = 'block'
+  }
+
+  function showCluster(id) {
+    const cl = data.clusters.list[id]
+    selected = -1
+    mount(detail,
+      h('div', { class: 'row' },
+        h('span', { style: { background: clusterColor(id), width: '10px', height: '10px', borderRadius: '50%', display: 'inline-block' } }),
+        h('b', `主题 ${id + 1}`),
+        h('button', { class: 'btn sm ghost right', style: { color: '#e6e8f0' }, onclick: () => { detail.style.display = 'none' } }, '✕')),
+      h('div', { class: 'muted small', style: { margin: '4px 0 8px' } }, `${cl.size} 段 · 紧密度 ${cl.cohesion.toFixed(3)}（成员与中心的平均余弦）`),
+      h('div', { class: 'row', style: { flexWrap: 'wrap', gap: '4px', marginBottom: '10px' } }, cl.keywords.length ? cl.keywords.map(k => badge(k, 'accent')) : h('span', { class: 'muted small' }, '没有足够的共同关键词')),
+      h('div', { class: 'row', style: { margin: '0 0 10px' } },
+        h('button', { class: 'btn sm', onclick: () => { cam.goal = [...cl.xyz]; cam.dist = Math.min(cam.dist, 1.6) } }, '飞到中心'),
+        h('button', { class: 'btn sm', onclick: () => { hiddenClusters.clear(); data.clusters.list.forEach(c => c.id !== id && hiddenClusters.add(c.id)); renderLegend() } }, '只看这个主题'),
+        h('button', { class: 'btn sm', onclick: () => { hiddenClusters.clear(); renderLegend() } }, '显示全部')),
+      h('div', { class: 'muted small', style: { marginBottom: '6px' } }, '最接近中心的档案'),
+      cl.exemplars.map(j => h('div', { style: { cursor: 'pointer', padding: '6px 0', borderTop: '1px solid #ffffff14' }, onclick: () => select(j, true) },
+        h('div', { class: 'muted small clip' }, `${labelOf[data.points[j].key] ?? data.points[j].key} · ${kindLabel(data.points[j])}`),
+        h('div', { class: 'small', style: { marginTop: '2px' } }, data.points[j].text.slice(0, 140)))),
     )
     detail.style.display = 'block'
   }
