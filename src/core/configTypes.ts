@@ -276,6 +276,8 @@ export interface MemorySection {
   crossChatRecall: boolean
   /** Keep and summarize group messages that don't involve the bot, so recall and daily digests cover them. */
   groupChatArchive: boolean
+  /** Most results one recall search returns (recall tool, per-turn recall, web vector query), 1-100. */
+  recallLimit: number
   embedding: EmbeddingSection
 }
 

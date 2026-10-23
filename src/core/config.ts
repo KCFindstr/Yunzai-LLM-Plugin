@@ -401,6 +401,7 @@ export function normalize(raw: any): PluginConfig {
     dailyDays: Math.min(3650, Math.floor(n(m.dailyDays, 365))),
     crossChatRecall: m.crossChatRecall === true,
     groupChatArchive: m.groupChatArchive !== false,
+    recallLimit: Math.min(100, Math.max(1, Math.floor(Number(m.recallLimit) || 5))),
     embedding: (() => {
       const em = isPlainObject(m.embedding) ? m.embedding : {}
       const type = em.type === 'openai' ? 'openai' : 'voyage'

@@ -397,7 +397,7 @@ export async function recallSession(key: string, query: string, count = 3, opts:
   })
     .filter(hit => range || !query.trim() || hit.lexical >= 0.06 || (hit.cos ?? -1) >= minScore)
     .sort((a, b) => b.score - a.score || b.entry.at - a.entry.at)
-    .slice(0, Math.min(5, Math.max(1, count)))
+    .slice(0, Math.min(config.get().memory.recallLimit, Math.max(1, count)))
     .map(({ entry }) => {
       const where = entry.label ? `·${entry.label}` : ''
       return entry.kind === 'day'

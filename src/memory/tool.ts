@@ -40,9 +40,11 @@ function groupWritable(ctx: { e: any; isAdmin: boolean }) {
 export function registerMemoryTool() {
   registry.register({
     name: 'recall', source: 'builtin',
-    description:
-      '检索当前会话更早的聊天：每段聊天摘要（保留30天）和每天一条的「当日概要」（保留更久），按语义和关键词综合匹配。' +
-      '需要之前的约定、称呼、话题细节，或被问到某天/某段时间聊过什么时，先查再答；可按日期筛选。仅当前会话，最多返回5条。',
+    // a getter: the registry reads it every turn, so it follows memory.recallLimit
+    get description() {
+      return '检索当前会话更早的聊天：每段聊天摘要（保留30天）和每天一条的「当日概要」（保留更久），按语义和关键词综合匹配。' +
+        `需要之前的约定、称呼、话题细节，或被问到某天/某段时间聊过什么时，先查再答；可按日期筛选。仅当前会话，最多返回${config.get().memory.recallLimit}条。`
+    },
     parameters: {
       type: 'object',
       properties: {
@@ -50,7 +52,7 @@ export function registerMemoryTool() {
         date: { type: 'string', description: '只看某一天：YYYY-MM-DD，或「昨天」「上周六」「10月20日」这类说法' },
         from: { type: 'string', description: '日期范围起点 YYYY-MM-DD（含）' },
         to: { type: 'string', description: '日期范围终点 YYYY-MM-DD（含）' },
-        count: { type: 'integer', description: '返回条数，1-5，默认3' },
+        count: { type: 'integer', description: '返回条数，默认3（不超过上面说的上限）' },
       },
     },
     async run(args, ctx) {

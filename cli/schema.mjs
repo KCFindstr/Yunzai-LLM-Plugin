@@ -309,6 +309,7 @@ const memory = obj(
     dailyDays: int('每日概要保留天数', { min: 1, max: 3650 }),
     crossChatRecall: bool('私聊可检索对方所在群的旧聊天'),
     groupChatArchive: bool('整理群里没有@机器人的聊天'),
+    recallLimit: int('每次检索旧聊天最多返回几条', { min: 1, max: 100 }),
     embedding: obj(
       {
         enable: bool('旧聊天向量检索（需 API Key）'),

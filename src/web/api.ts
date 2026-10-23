@@ -242,7 +242,7 @@ async function vectorSpace(q: URLSearchParams) {
     if (!embeddingReady()) throw fail('没有配置向量模型的 API Key')
     const [qv] = await embed([text], 'query')
     const sims = points.map(p => dot(qv, p.vec))
-    const nearest = sims.map((s, i) => [s, i]).sort((a, b) => b[0] - a[0]).slice(0, 8).map(([score, i]) => ({ index: i, score }))
+    const nearest = sims.map((s, i) => [s, i]).sort((a, b) => b[0] - a[0]).slice(0, config.get().memory.recallLimit).map(([score, i]) => ({ index: i, score }))
     query = { text, xyz: project(qv).map(x => x / scale), nearest, minScore: config.get().memory.embedding.minScore }
   }
   return {
