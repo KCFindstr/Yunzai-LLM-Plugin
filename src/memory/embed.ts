@@ -26,9 +26,10 @@ export function embeddingContextual(): boolean {
   return c.type === 'voyage' && /^voyage-context/i.test(c.model)
 }
 
-// stay well under Voyage's per-request limits (1000 inputs, 16K chunks, 120K tokens; ~1 token per CJK character)
+// stay well under Voyage's per-request limits: 1000 inputs, 16K chunks, and for voyage-context-4 without
+// auto-chunking 32K tokens per request (~1 token per CJK character)
 const MAX_GROUPS = 500
-const MAX_CHARS = 60_000
+const MAX_CHARS = 20_000
 
 /** Split groups into request-sized batches, never splitting a group. */
 function batches(groups: string[][]): string[][][] {
@@ -69,18 +70,36 @@ export async function embedGroups(groups: string[][], kind: 'query' | 'document'
     let i = 0
     return groups.map(g => g.map(() => flat[i++]))
   }
-  const out: Float32Array[][] = []
-  for (const batch of batches(groups)) {
+  // a document over the per-request budget (a very busy day) is embedded as consecutive parts, then stitched back
+  const parts: { group: number; texts: string[] }[] = []
+  groups.forEach((g, group) => {
+    let cur: string[] = []
+    let chars = 0
+    for (const t of g) {
+      if (cur.length && chars + t.length > MAX_CHARS) {
+        parts.push({ group, texts: cur })
+        cur = []
+        chars = 0
+      }
+      cur.push(t.slice(0, MAX_CHARS))
+      chars += Math.min(t.length, MAX_CHARS)
+    }
+    parts.push({ group, texts: cur })
+  })
+  const flat: Float32Array[][] = []
+  for (const batch of batches(parts.map(p => p.texts))) {
     const json = await request('/contextualizedembeddings', { inputs: batch, model: c.model, input_type: kind, output_dimension: c.dimensions }, signal)
     const docs: any[] = Array.isArray(json?.data) ? [...json.data].sort((a, b) => a.index - b.index) : []
     if (docs.length !== batch.length) throw new Error(`embedding 返回 ${docs.length} 组，应为 ${batch.length} 组`)
     docs.forEach((doc, i) => {
       const chunks: any[] = Array.isArray(doc?.data) ? [...doc.data].sort((a, b) => a.index - b.index) : []
       if (chunks.length !== batch[i].length) throw new Error(`embedding 第 ${i + 1} 组返回 ${chunks.length} 段，应为 ${batch[i].length} 段`)
-      out.push(chunks.map(d => normalize(Float32Array.from(d.embedding))))
+      flat.push(chunks.map(d => normalize(Float32Array.from(d.embedding))))
     })
     log.debug(`embedding ${c.model} ${kind} ${batch.length}组/${batch.flat().length}段 tokens=${json?.usage?.total_tokens ?? '?'}`)
   }
+  const out: Float32Array[][] = groups.map(() => [])
+  parts.forEach((p, i) => out[p.group].push(...flat[i]))
   return out
 }
 

@@ -89,3 +89,19 @@ describe('contextualized embeddings (voyage-context-*)', () => {
     assert.match((await recallSession(key, '猫猫')).join('\n'), /猫/)
   })
 })
+
+describe('contextualized request size', () => {
+  it('splits a document over the per-request budget into parts and keeps one vector per chunk in order', async () => {
+    useModel('voyage-context-4')
+    const big = Array.from({ length: 6 }, (_, i) => `${i % 2 ? '猫' : '显卡'}${'字'.repeat(6000)}`)
+    const [vecs, small] = await embedGroups([big, ['周末']], 'document')
+    assert.equal(vecs.length, 6)
+    assert.equal(small.length, 1)
+    // chunk order survives the split: odd chunks mention 猫, even ones 显卡
+    assert.ok(vecs.every((v, i) => (i % 2 ? v[0] > 0 : v[2] > 0)))
+    for (const call of calls('/contextualizedembeddings')) {
+      const chars = (call.body.inputs as string[][]).flat().join('').length
+      assert.ok(chars <= 20_000, `request of ${chars} chars`)
+    }
+  })
+})
