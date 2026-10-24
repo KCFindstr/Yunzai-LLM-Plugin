@@ -182,6 +182,8 @@ chat:
   historyMaxTokens: 8192
   # 丢弃的历史用便宜模型压缩成摘要保留
   summarize: true
+  # 滚动摘要、群聊档案和每日概要的输出预算（包含模型思考 token）
+  summaryMaxTokens: 8192
   # 附带的最近群聊条数，0–100（帮助理解语境；不会写入长期记忆）
   groupContext: 16
   # 每条最近群聊最多附带多少字符

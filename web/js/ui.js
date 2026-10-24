@@ -33,6 +33,13 @@ export function responseText(text, className = '', key) {
   return responseBlock(text, { key, wrapperClass: className, className: 'response-body', limit: Infinity })
 }
 
+/** Shared response heading/body layout for rollout, AGY, and computer-task steps. */
+export function responseSection(text, { heading, ...options } = {}) {
+  const controls = text && options.markdown ? h('span', { class: 'response-inline-controls' }) : null
+  if (controls) heading.insertBefore(controls, [...heading.children].find(child => child.tagName === 'TIME') ?? null)
+  return { heading, body: text ? textBlock(text, { ...options, controlsTarget: controls }) : null }
+}
+
 const ICONS = {
   overview: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
   usage: '<path d="M12 3v18m4-14H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 0 0-7M8 17h6.5"/>',

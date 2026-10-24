@@ -146,6 +146,7 @@ const chat = obj(
     rosterSize: int('最近群友资料条数', { min: 0, max: 30 }),
     historyMaxTokens: int('最多保留 token', { min: 100 }),
     summarize: bool('压缩旧对话为摘要'),
+    summaryMaxTokens: int('摘要输出 token 上限（含思考；滚动摘要、群聊档案和每日概要）', { min: 64, max: 131072 }),
     groupContext: int('附带最近群聊条数', { min: 0, max: 100 }),
     groupContextMaxChars: int('群聊每条最多字数', { min: 10 }),
     maxToolRounds: int('工具轮数上限（含只调用辅助工具的轮次；0关闭工具）', { min: 0, max: 100 }),

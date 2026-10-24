@@ -18,19 +18,23 @@ export interface ArchiveEntry {
   /** local day the chat happened (UTC+8) */
   day?: string
   text: string
+  /** Original retained text for regenerating a summarized fragment. Older entries may not have it. */
+  sourceText?: string
   raw?: boolean
   /** group chatter that didn't involve the bot (summarized by the background job, not into the rolling summary) */
   chat?: boolean
 }
 
 /** One digest per conversation per past day; `sources` are the archive entry ids folded into it. */
-export interface DayEntry { id: string; day: string; text: string; at: number; sources: string[] }
+export interface DayEntry { id: string; day: string; text: string; at: number; sources: string[]; stale?: boolean }
 
 export interface StoredSession {
   /** Separate AGY thread/workspace for this chat session; discarded with a session reset/timeout. */
   agy?: { workspaceId: string; conversationId?: string; runtime?: 'host-v1' }
   messages: Msg[]
   summary?: string
+  /** Changed by edits to context that a provider-side conversation may still contain. */
+  contextRevision?: number
   /** Older context: one entry per trimmed chunk; `raw` until compactSession replaces it with a summary. */
   archive?: ArchiveEntry[]
   /** Daily digests, kept `memory.dailyDays` (longer than the 30-day archive). */
@@ -108,6 +112,49 @@ export function getSession(key: string, timeoutMin: number): StoredSession {
 
 export function peekSession(key: string): StoredSession | undefined {
   return store.data[key]
+}
+
+/** Compare around an async generation so a web edit, new turn, or reset cannot be overwritten. */
+export function historySnapshot(key: string): string {
+  const s = store.data[key]
+  return JSON.stringify(s ? [s.summary, s.messages, s.archive, s.days] : null)
+}
+
+/** Edit the stored context and discard provider state that still contains the old text. */
+export function updateHistoryMessage(key: string, index: number, text: string): boolean {
+  const s = store.data[key], message = s?.messages[index]
+  if (!s || !message || !['user', 'assistant'].includes(message.role)) return false
+  s.messages[index] = message.role === 'user'
+    ? { role: 'user', content: [{ type: 'text', text }] }
+    : { role: 'assistant', content: text }
+  s.state = undefined
+  s.contextRevision = (s.contextRevision ?? 0) + 1
+  store.save()
+  return true
+}
+
+/** Save a finalized archive/digest edit; invalidate embeddings and dependent daily source coverage. */
+export function updateArchiveEntry(key: string, id: string, text: string): boolean {
+  const s = store.data[key]
+  if (!s) return false
+  const entry = s.archive?.find(a => a.id === id)
+  const day = s.days?.find(d => d.id === id)
+  if (!entry && !day) return false
+  s.state = undefined
+  s.contextRevision = (s.contextRevision ?? 0) + 1
+  const invalid = new Set([id])
+  if (entry) {
+    s.archive = s.archive!.map(a => a === entry ? { ...a, text, raw: undefined } : a)
+    // Contextual embeddings of neighbouring chunks depend on this text too.
+    if (embeddingContextual()) for (const a of s.archive) if (dayOf(a) === dayOf(entry) && a.id) invalid.add(a.id)
+    s.days = s.days?.map(d => d.day === dayOf(entry) ? { ...d, stale: true } : d)
+  } else {
+    s.days = s.days!.map(d => d === day ? { ...d, text, at: Date.now(), stale: undefined } : d)
+  }
+  for (const vectorId of invalid) if (vectors.data[key]?.v[vectorId]) delete vectors.data[key].v[vectorId]
+  vectors.save()
+  store.save()
+  return true
 }
 
 export function getAgySession(key: string, timeoutMin: number) {
@@ -261,7 +308,8 @@ export function setEpisode(key: string, pending: ArchiveEntry[], text?: string) 
   if (text) {
     const index = s.archive.indexOf(pending[0])
     s.archive = s.archive.filter(entry => !pending.includes(entry))
-    s.archive.splice(index, 0, { id: newId(), at: Math.max(...pending.map(entry => entry.at)), day: dayOf(pending[0]), text, ...(pending[0].chat ? { chat: true } : {}) })
+    s.archive.splice(index, 0, { id: newId(), at: Math.max(...pending.map(entry => entry.at)), day: dayOf(pending[0]), text,
+      sourceText: pending.map(entry => entry.sourceText ?? entry.text).join('\n').slice(0, 12000), ...(pending[0].chat ? { chat: true } : {}) })
   } else for (const entry of pending) delete entry.raw
   store.save()
 }
@@ -280,7 +328,7 @@ export function staleDay(key: string): { day: string; entries: ArchiveEntry[]; p
     const entries = byDay.get(day)!
     if (entries.some(entry => entry.raw)) continue
     const prev = s.days?.find(d => d.day === day)
-    if (!prev || entries.some(entry => entry.id && !prev.sources.includes(entry.id))) return { day, entries, prev }
+    if (!prev || prev.stale || entries.some(entry => entry.id && !prev.sources.includes(entry.id))) return { day, entries, prev }
   }
   return undefined
 }
@@ -289,6 +337,8 @@ export function staleDay(key: string): { day: string; entries: ArchiveEntry[]; p
 export function setDayDigest(key: string, day: string, text: string, sources: string[]) {
   const s = store.data[key]
   if (!s) return
+  s.state = undefined
+  s.contextRevision = (s.contextRevision ?? 0) + 1
   const old = s.days?.find(d => d.day === day)
   const entry: DayEntry = { id: `d${day.replaceAll('-', '')}${Date.now().toString(36)}`, day, text, at: Date.now(), sources }
   s.days = keepDays([...(s.days ?? []).filter(d => d.day !== day), entry]).sort((a, b) => a.day.localeCompare(b.day))
@@ -320,6 +370,7 @@ export async function indexArchive(key: string, signal?: AbortSignal) {
   for (const entry of s.archive ?? []) if (!entry.id) { entry.id = newId(); store.save() }
   const items = [...(s.archive ?? []).map(entry => ({ id: entry.id!, text: entry.text })), ...(s.days ?? []).map(d => ({ id: d.id, text: `${d.day} 当日概要：${d.text}` }))]
   if (!items.length) return
+  const snapshot = JSON.stringify(items)
   const tag = embeddingTag()
   const current = () => (vectors.data[key]?.tag === tag ? vectors.data[key].v : {})
   const isMissing = (item: { id: string }) => !current()[item.id]
@@ -339,7 +390,9 @@ export async function indexArchive(key: string, signal?: AbortSignal) {
   const embedded = vecs.flat()
   // the session may have changed (or been cleared) while waiting; keep only vectors of entries still there
   const now = store.data[key]
-  if (!now) return
+  if (now !== s || embeddingTag() !== tag) return
+  const latest = [...(now.archive ?? []).map(entry => ({ id: entry.id!, text: entry.text })), ...(now.days ?? []).map(d => ({ id: d.id, text: `${d.day} 当日概要：${d.text}` }))]
+  if (JSON.stringify(latest) !== snapshot) return
   const live = new Set([...(now.archive ?? []).map(entry => entry.id), ...(now.days ?? []).map(d => d.id)])
   const v: Record<string, string> = {}
   for (const [id, vec] of Object.entries(current())) if (live.has(id)) v[id] = vec
@@ -425,6 +478,7 @@ export function setSummary(key: string, summary: string) {
   if (!s) return
   s.summary = summary
   s.state = undefined
+  s.contextRevision = (s.contextRevision ?? 0) + 1
   store.save()
 }
 

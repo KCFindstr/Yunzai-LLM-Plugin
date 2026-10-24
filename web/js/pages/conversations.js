@@ -1,6 +1,6 @@
-import { del, enc, get } from '../api.js'
+import { del, enc, get, post, put } from '../api.js'
 import { menuButton } from '../main.js'
-import { act, badge, card, confirmDanger, empty, fmt, h, icon, modal, mount, paged, pager, tabs, mentionText, responseText } from '../ui.js'
+import { act, badge, card, confirmDanger, empty, fmt, h, icon, modal, mount, paged, pager, promptFields, tabs, mentionText, responseText } from '../ui.js'
 
 /** Recent turns table, shared with the overview page. */
 export function turnList(turns, { showConv = true } = {}) {
@@ -91,6 +91,51 @@ export async function render(root, [sub]) {
 
 async function drawDetail(el, key, refresh) {
   const s = await get(`/api/sessions/${enc(key)}`)
+  const base = `/api/sessions/${enc(key)}`
+  const savedMessage = result => result.vectorStatus === 'ready' ? '已保存并更新向量'
+    : result.vectorStatus === 'pending' ? '已保存；向量更新将在后台重试'
+      : result.vectorStatus === 'disabled' ? '已保存；配置向量模型后会自动向量化' : '已保存'
+
+  function historyButtons(title, url, text, { regenerate = true, allowEmpty = false, note = '档案和每日概要保存后自动更新向量。' } = {}) {
+    return [
+      h('button', { class: 'btn sm ghost', onclick: async e => {
+        const button = e.currentTarget
+        const input = h('textarea', { rows: 10, 'aria-label': `编辑${title}` }, text)
+        let saving = false
+        const saved = await modal(`编辑${title}`, h('label', { class: 'col' }, h('span', { class: 'small muted' }, note), input), [
+          { label: '取消', value: false },
+          { label: '保存', kind: 'primary', value: true, run: async () => {
+            if (saving) return false
+            saving = true
+            button.disabled = true
+            try {
+              const result = await act(() => {
+                if (!allowEmpty && !input.value.trim()) throw new Error('内容不能为空')
+                return put(url, { text: input.value, previousText: text })
+              }, savedMessage)
+              return Boolean(result)
+            } finally { saving = false; button.disabled = false }
+          } },
+        ])
+        if (saved && el.isConnected) await refresh()
+      } }, '编辑'),
+      regenerate ? h('button', { class: 'btn sm ghost', onclick: async e => {
+        const button = e.currentTarget
+        button.disabled = true
+        try {
+          const data = await act(() => get('/api/models'))
+          if (!data) return
+          const options = data.models.filter(m => m.hasKey).map(m => ({ value: m.id, label: `${m.id} · ${m.model}` }))
+          const fields = await promptFields(`重新生成${title}`, [{ name: 'model', label: `使用仍保留的原文或档案生成；预算 ${s.summaryMaxTokens} tokens（含思考）。保存后自动更新档案向量。`,
+            value: s.summaryModel, options: [{ value: '', label: '自动选择辅助模型' }, ...options] }], '重新生成')
+          if (!fields) return
+          button.textContent = '生成中…'
+          const result = await act(() => post(`${url}/regenerate`, fields.model ? { model: fields.model } : {}), savedMessage)
+          if (result && el.isConnected) await refresh()
+        } finally { button.disabled = false; button.textContent = '重新生成' }
+      } }, '重新生成') : null,
+    ]
+  }
   mount(el,
     card(h('span', { class: 'card-title' }, icon('chat'), s.label, ' ', badge(kindLabel[s.kind] ?? s.kind)),
       h('div', { class: 'row small muted' },
@@ -100,8 +145,11 @@ async function drawDetail(el, key, refresh) {
         h('button', { class: 'btn sm danger', onclick: async () => {
           if (await confirmDanger('清除这个会话的全部历史、摘要、档案和向量？')) act(() => del(`/api/sessions/${enc(key)}`), '已清除').then(() => { location.hash = '#/conversations' })
         } }, '清除会话')),
+      h('div', { class: 'small muted', style: { marginTop: '8px' } }, `摘要输出预算：${s.summaryMaxTokens} tokens（含思考） · `,
+        h('a', { href: '#/config/chat' }, '修改预算')),
     ),
-    card(h('span', { class: 'card-title' }, icon('memory'), '滚动摘要'),
+    card(h('span', { class: 'card-title' }, icon('memory'), '滚动摘要',
+      h('span', { class: 'right row' }, historyButtons('滚动摘要', `${base}/summary`, s.summary ?? '', { allowEmpty: true, note: '滚动摘要直接用于后续对话；留空可清除。' }))),
       s.summary ? h('pre', { class: 'small' }, s.summary) : empty('还没有摘要（历史未超出上限时不生成）')),
     card(h('span', { class: 'card-title' }, icon('clock'), `每日概要（${s.days.length} 天）`),
       s.days.length ? paged([...s.days].reverse(), page => page.map(d => h('div', { class: 'list-item' },
@@ -109,9 +157,11 @@ async function drawDetail(el, key, refresh) {
           h('b', d.day),
           h('span', { class: 'muted' }, `由 ${d.sources.length} 段整理 · ${fmt.ago(d.at)}更新`),
           d.vector ? badge('已向量化', 'accent') : badge('无向量'),
-          h('button', { class: 'btn sm ghost danger right', onclick: async () => {
+          d.stale ? badge('源档案已修改·待刷新', 'warn') : null,
+          h('span', { class: 'right row' }, historyButtons(`${d.day} 每日概要`, `${base}/archive/${enc(d.id)}`, d.text),
+          h('button', { class: 'btn sm ghost danger', onclick: async () => {
             if (await confirmDanger(`删除 ${d.day} 的当日概要？（下次整理时会根据仍保留的档案重新生成）`)) act(() => del(`/api/sessions/${enc(key)}/archive/${enc(d.id)}`), '已删除').then(refresh)
-          } }, '删除'),
+          } }, '删除')),
         ),
         h('pre', { class: 'small', style: { marginTop: '6px' } }, d.text),
       )), { size: 10 }) : empty('还没有每日概要：每天结束后，当天的档案会在后台整理成一条概要')),
@@ -122,15 +172,20 @@ async function drawDetail(el, key, refresh) {
           a.chat ? badge('群聊', 'accent') : null,
           a.raw ? badge('原文·待整理', 'warn') : badge('摘要', 'ok'),
           a.vector ? badge('已向量化', 'accent') : badge('无向量'),
-          h('button', { class: 'btn sm ghost danger right', onclick: async () => {
+          h('span', { class: 'right row' }, historyButtons('旧聊天档案', `${base}/archive/${enc(a.id)}`, a.text, { note: '保存为已整理的档案，并自动更新向量；由它生成的每日概要将在后台刷新。' }),
+          h('button', { class: 'btn sm ghost danger', onclick: async () => {
             if (await confirmDanger('删除这段档案？')) act(() => del(`/api/sessions/${enc(key)}/archive/${enc(a.id)}`), '已删除').then(refresh)
-          } }, '删除'),
+          } }, '删除')),
         ),
         h('pre', { class: 'small', style: { marginTop: '6px' } }, a.text),
       )), { size: 10 }) : empty('还没有档案'),
     ),
     card(h('span', { class: 'card-title' }, icon('chat'), `当前上下文（${s.messages.length / 2} 轮）`),
-      s.messages.length ? h('div', { class: 'chat' }, s.messages.map((m, i) => m.role === 'assistant' ? responseText(m.text, 'bubble assistant', `message:${i}`) : h('div', { class: `bubble ${m.role}` }, mentionText(m.text)))) : empty('当前没有上下文（空闲超时后会重新开始）'),
+      s.messages.length ? h('div', { class: 'chat' }, s.messages.map((m, i) => h('div', { class: 'context-message' },
+        h('div', { class: 'row small muted' }, h('span', m.role === 'assistant' ? '机器人' : '用户'),
+          h('span', { class: 'right row' }, historyButtons('上下文消息', `${base}/messages/${i}`, m.text, { regenerate: false, allowEmpty: true, note: '修改机器人后续看到的上下文；已发送的消息不受影响。' }))),
+        m.role === 'assistant' ? responseText(m.text, 'bubble assistant', `message:${i}`) : h('div', { class: `bubble ${m.role}` }, mentionText(m.text)),
+      ))) : empty('当前没有上下文（空闲超时后会重新开始）'),
     ),
     card(h('span', { class: 'card-title' }, icon('logs'), '最近对话'), turnList(s.turns, { showConv: false })),
   )

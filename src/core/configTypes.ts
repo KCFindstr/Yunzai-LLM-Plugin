@@ -105,6 +105,8 @@ export interface ChatSection {
   historyMaxTurns: number
   historyMaxTokens: number
   summarize: boolean
+  /** Output budget, including reasoning, for history summaries and daily digests. */
+  summaryMaxTokens: number
   groupContext: number
   groupContextMaxChars: number
   maxToolRounds: number

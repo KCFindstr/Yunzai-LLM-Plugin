@@ -18,7 +18,7 @@ import { markdownEnabled } from './format.ts'
 import { buildHeader, buildMemoryBlock, buildSystemPrompt, SUMMARY_PROMPT } from './prompt.ts'
 import { maybeCompact } from '../memory/compact.ts'
 import { memoryHash } from '../memory/store.ts'
-import { appendTurn, getSession, peekSession, indexArchive, pendingArchive, recallSession, setEpisode, setServerState, setSummary, truncateIfNeeded } from './session.ts'
+import { appendTurn, getSession, historySnapshot, peekSession, indexArchive, pendingArchive, recallSession, setEpisode, setServerState, setSummary, truncateIfNeeded } from './session.ts'
 import { pickModel, utilityCandidates, utilityChat, type Picked } from './utility.ts'
 import { recordTurn } from './turnLog.ts'
 import { recordRolloutContext, recordRolloutEvent, recordRolloutImages, startRollout, updateRollout } from './rollouts.ts'
@@ -186,6 +186,7 @@ async function runTurnInner(req: TurnRequest, ref: { turn?: TurnState; rolloutId
   const session = getSession(convKey, eff.chat.sessionTimeout)
   // Apply lowered limits and recover from skipped post-reply housekeeping before building a request.
   truncateIfNeeded(convKey, eff.chat)
+  const contextRevision = session.contextRevision
   const text = input.text || (input.images.length ? '（发了图片）' : '（只@了你，没说话）')
 
   // Long-term memory: a stable prefix message (cache-friendly; only changes when memory changes). In a shared
@@ -371,7 +372,8 @@ async function runTurnInner(req: TurnRequest, ref: { turn?: TurnState; rolloutId
   // A chain that ended with unanswered tool calls can't be continued with a new user turn.
   setServerState(
     convKey,
-    serverState && cleanEnd && lastResponseId && after ? { key: stateKey, previousId: lastResponseId, len: after.messages.length } : undefined,
+    serverState && cleanEnd && lastResponseId && after === session && after.contextRevision === contextRevision
+      ? { key: stateKey, previousId: lastResponseId, len: after.messages.length } : undefined,
   )
   return { kind: 'reply', text: finalText, modelId: model.id, cost, dispatched: turn.dispatched, images: turn.images, thinking }
 }
@@ -393,21 +395,23 @@ export async function compactSession(convKey: string, eff: EffectiveConfig, ctx:
   }
   // includes chunks archived at idle expiry, which had no chance to be summarized then
   const pending = pendingArchive(convKey).slice(-3)
-  if (pending.length) await summarizePending(convKey, session, prev, pending, ctx)
+  if (pending.length) await summarizePending(convKey, session, prev, pending, ctx, eff.chat.summaryMaxTokens)
   // chatter summaries and daily digests for this conversation (also done every few minutes in the background)
   await maintainArchive(convKey, ctx)
 }
 
-async function summarizePending(convKey: string, session: ReturnType<typeof peekSession>, prev: string | undefined, pending: ReturnType<typeof pendingArchive>, ctx: QuotaCtx) {
+async function summarizePending(convKey: string, session: ReturnType<typeof peekSession>, prev: string | undefined, pending: ReturnType<typeof pendingArchive>, ctx: QuotaCtx, maxTokens: number) {
   try {
+    const snapshot = historySnapshot(convKey)
     const { text } = await utilityChat({
       candidates: utilityCandidates(),
       system: SUMMARY_PROMPT,
       user: [{ type: 'text', text: `${prev ? `已有摘要：${prev}\n\n` : ''}新的聊天记录：\n${pending.map(entry => entry.text).join('\n')}` }],
-      maxTokens: 700,
+      maxTokens,
+      requireComplete: true,
       quotaCtx: ctx,
     })
-    if (peekSession(convKey) !== session) return
+    if (peekSession(convKey) !== session || historySnapshot(convKey) !== snapshot) return
     const parsed = parseSummary(text)
     if (parsed.summary) setSummary(convKey, parsed.summary.slice(0, 800))
     // an unparseable reply still settles the chunks (kept raw) so they aren't re-merged into the summary every turn

@@ -3,7 +3,7 @@ import { config } from '../core/config.ts'
 import { log } from '../core/log.ts'
 import { flushChatter } from './chatter.ts'
 import { CHATTER_PROMPT, DAY_PROMPT } from './prompt.ts'
-import { indexArchive, pendingChatter, peekSession, sessionsMissingVectors, sessionsWithWork, setDayDigest, setEpisode, staleDay } from './session.ts'
+import { historySnapshot, indexArchive, pendingChatter, peekSession, sessionsMissingVectors, sessionsWithWork, setDayDigest, setEpisode, staleDay } from './session.ts'
 import { utilityCandidates, utilityChat } from './utility.ts'
 
 /**
@@ -18,20 +18,23 @@ const failedUntil = new Map<string, number>()
 let timer: NodeJS.Timeout | undefined
 
 const hhmm = (ts: number) => new Date(ts + 8 * 3600_000).toISOString().slice(11, 16)
+const summaryBudget = (key: string) => config.effective(key.split(':')[1]?.match(/^g(.+)/)?.[1]).chat.summaryMaxTokens
 
 /** Summarize one day's worth of pending chatter chunks (up to 3) into a single archive entry. */
 async function summarizeChatter(key: string, ctx: QuotaCtx): Promise<boolean> {
   const pending = pendingChatter(key).slice(0, 3)
   if (!pending.length) return false
   const session = peekSession(key)
+  const snapshot = historySnapshot(key)
   const { text } = await utilityChat({
     candidates: utilityCandidates(),
     system: CHATTER_PROMPT,
     user: [{ type: 'text', text: `${pending[0].day ?? ''} 的群聊记录：\n${pending.map(entry => entry.text).join('\n')}` }],
-    maxTokens: 500,
+    maxTokens: summaryBudget(key),
+    requireComplete: true,
     quotaCtx: ctx,
   })
-  if (peekSession(key) !== session) return false
+  if (peekSession(key) !== session || historySnapshot(key) !== snapshot) return false
   setEpisode(key, pending, `【群聊】${text.trim().slice(0, 400)}`)
   return true
 }
@@ -41,15 +44,17 @@ export async function digestDay(key: string, ctx: QuotaCtx): Promise<boolean> {
   const stale = staleDay(key)
   if (!stale) return false
   const session = peekSession(key)
+  const snapshot = historySnapshot(key)
   const lines = stale.entries.map(entry => `- ${hhmm(entry.at)} ${entry.text}`).join('\n')
   const { text } = await utilityChat({
     candidates: utilityCandidates(),
     system: DAY_PROMPT,
     user: [{ type: 'text', text: `日期：${stale.day}\n${stale.prev ? `之前写过的当日概要：${stale.prev.text}\n` : ''}当天的聊天片段：\n${lines}` }],
-    maxTokens: 700,
+    maxTokens: summaryBudget(key),
+    requireComplete: true,
     quotaCtx: ctx,
   })
-  if (peekSession(key) !== session || !text.trim()) return false
+  if (peekSession(key) !== session || historySnapshot(key) !== snapshot || !text.trim()) return false
   setDayDigest(key, stale.day, text.trim().slice(0, 600), stale.entries.map(entry => entry.id!).filter(Boolean))
   log.info(`已整理 ${key} 的 ${stale.day} 当日概要`)
   return true

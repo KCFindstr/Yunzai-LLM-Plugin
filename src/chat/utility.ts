@@ -3,7 +3,7 @@ import { checkQuota, record, type QuotaCtx } from '../billing/ledger.ts'
 import { config } from '../core/config.ts'
 import type { ModelConfig, ProviderConfig, ThinkingLevel } from '../core/configTypes.ts'
 import { log } from '../core/log.ts'
-import { chat, type Part, type Usage } from '../llm/index.ts'
+import { chat, type ChatResult, type Part, type Usage } from '../llm/index.ts'
 
 export interface Picked {
   model: ModelConfig
@@ -43,6 +43,8 @@ export async function utilityChat(opts: {
   thinking?: ThinkingLevel
   temperature?: number
   signal?: AbortSignal
+  /** Summaries must not settle their source records when the model runs out of output budget. */
+  requireComplete?: boolean
 }): Promise<{ text: string; model: ModelConfig; usage: Usage; cost: number }> {
   const picked = pickModel(opts.candidates, opts.vision)
   if (!picked) throw new Error(opts.vision ? '没有可用的视觉模型（需配置 vision 模型及 API Key）' : '没有可用的模型')
@@ -63,7 +65,7 @@ export async function utilityChat(opts: {
       signal: opts.signal,
       store: false,
     })
-  let res: any
+  let res: ChatResult
   try {
     res = await call(thinking)
   } catch (err: any) {
@@ -73,6 +75,14 @@ export async function utilityChat(opts: {
   const cost = computeCost(res.usage, resolvePrice(picked.model))
   record(picked.model, opts.quotaCtx, cost, res.usage)
   log.debug(`utility call ${picked.model.id} in=${res.usage?.input ?? 0} out=${res.usage?.output ?? 0} cost=${cost.toFixed(5)}`)
+  if (opts.requireComplete) {
+    // Gemini can report a completed interaction even when reasoning consumed almost the entire cap.
+    const nearGeminiCap = picked.provider.type === 'gemini' && res.usage.output >= (opts.maxTokens ?? 600) - 16
+    if (/length|max_tokens|max_output_tokens|incomplete/i.test(res.stopReason) || nearGeminiCap)
+      throw new Error('摘要生成达到输出上限，未保存不完整结果；请增大 chat.summaryMaxTokens 后重试')
+    if (!res.text.trim() || /(?:^|\n)\s*(?:\d+[.)、]|[-*])\s*$/.test(res.text))
+      throw new Error('摘要生成未返回完整正文，保留原文以便重试')
+  }
   return { text: res.text, model: picked.model, usage: res.usage, cost }
 }
 

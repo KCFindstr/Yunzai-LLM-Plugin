@@ -12,7 +12,8 @@ import { config, normalize, personaText, resolveKeys } from '../core/config.ts'
 import { recentLogs } from '../core/log.ts'
 import { CONFIG_DIR, DATA_DIR, DEFAULT_CONFIG_FILE } from '../core/paths.ts'
 import { deepMerge, detectImageMime, formatDuration, isPlainObject, maskSecret, truncate } from '../core/util.ts'
-import { allVectors, archiveInfo, clearSession, dayInfo, deleteArchiveEntry, listSessions, peekSession } from '../chat/session.ts'
+import { allVectors, archiveInfo, clearSession, dayInfo, deleteArchiveEntry, listSessions, peekSession, setSummary, updateArchiveEntry, updateHistoryMessage } from '../chat/session.ts'
+import { historyError, historyText, regenerateHistory, vectorizeHistory } from '../chat/history.ts'
 import { recentTurns } from '../chat/turnLog.ts'
 import { readRolloutImage, recentRollouts, rolloutHistory } from '../chat/rollouts.ts'
 import { configuredName, recentMessages, rosterSnapshot } from '../chat/roster.ts'
@@ -492,6 +493,8 @@ export const routes: Route[] = [
       ...sessionLabel(params[0]),
       updatedAt: s.updatedAt,
       summary: s.summary,
+      summaryMaxTokens: config.effective(params[0].split(':')[1]?.match(/^g(.+)/)?.[1]).chat.summaryMaxTokens,
+      summaryModel: config.get().utilityModel || config.defaultModelId(),
       messages: s.messages.map(m => ({ role: m.role, text: m.role === 'user' ? partsToText(m.content) : m.role === 'assistant' ? m.content : '' })),
       archive: archiveInfo(params[0]),
       days: dayInfo(params[0]),
@@ -499,6 +502,33 @@ export const routes: Route[] = [
     }
   }),
   R('DELETE', '/api/sessions/:key', ({ params }) => { clearSession(params[0]) }),
+  R('PUT', '/api/sessions/:key/summary', ({ params, body }) => {
+    const s = peekSession(params[0])
+    if (!s) throw fail('没有这个会话', 404)
+    if (body.previousText !== undefined && body.previousText !== (s.summary ?? '')) throw historyError('摘要已变更，请刷新后重试', 409)
+    setSummary(params[0], historyText(body.text, 20000, true))
+  }),
+  R('POST', '/api/sessions/:key/summary/regenerate', ({ params, body }) => regenerateHistory(params[0], { kind: 'summary' }, body.model)),
+  R('PUT', '/api/sessions/:key/messages/:index', ({ params, body }) => {
+    const s = peekSession(params[0])
+    if (!s) throw fail('没有这个会话', 404)
+    const index = Number(params[1]), m = /^\d+$/.test(params[1]) && Number.isSafeInteger(index) ? s.messages[index] : undefined
+    if (!m) throw fail('没有这条上下文消息', 404)
+    const current = m.role === 'user' ? partsToText(m.content) : m.role === 'assistant' ? m.content : undefined
+    if (current === undefined) throw fail('只能编辑用户或机器人消息')
+    if (body.previousText !== undefined && body.previousText !== current) throw historyError('上下文已变更，请刷新后重试', 409)
+    updateHistoryMessage(params[0], index, historyText(body.text, 50000, true))
+  }),
+  R('PUT', '/api/sessions/:key/archive/:id', async ({ params, body }) => {
+    const s = peekSession(params[0])
+    if (!s) throw fail('没有这个会话', 404)
+    const entry = [...(s.archive ?? []), ...(s.days ?? [])].find(a => a.id === params[1])
+    if (!entry) throw fail('没有这条档案', 404)
+    if (body.previousText !== undefined && body.previousText !== entry.text) throw historyError('档案已变更，请刷新后重试', 409)
+    updateArchiveEntry(params[0], params[1], historyText(body.text, 20000))
+    return vectorizeHistory(params[0])
+  }),
+  R('POST', '/api/sessions/:key/archive/:id/regenerate', ({ params, body }) => regenerateHistory(params[0], { kind: 'archive', id: params[1] }, body.model)),
   R('DELETE', '/api/sessions/:key/archive/:id', ({ params }) => {
     if (!deleteArchiveEntry(params[0], params[1])) throw fail('没有这条档案', 404)
   }),

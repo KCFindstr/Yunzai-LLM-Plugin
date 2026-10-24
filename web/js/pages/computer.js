@@ -1,6 +1,6 @@
 import { enc, get, post } from '../api.js'
 import { menuButton } from '../main.js'
-import { act, badge, card, confirmDanger, empty, fmt, h, icon, modal, mount, pager, spinner, textBlock, mentionText } from '../ui.js'
+import { act, badge, card, confirmDanger, empty, fmt, h, icon, modal, mount, pager, spinner, textBlock, responseSection, mentionText } from '../ui.js'
 
 const STATUS = {
   queued: ['排队中', 'accent'], running: ['执行中', 'accent'], waiting: ['等待回复', 'warn'],
@@ -45,8 +45,9 @@ function timelineEvent(job, event, open, expanded) {
     event.ms != null ? h('span', { class: 'small muted' }, fmt.dur(event.ms)) : null,
     h('time', { class: 'small muted', dateTime: new Date(event.at).toISOString() }, fmt.time(event.at)),
   )
+  const response = responseSection(event.text, { heading: title, key: `computer-text:${event.seq}`, open: expanded.get(`computer-text:${event.seq}`), markdown: ['response', 'reply'].includes(event.kind) ? 'auto' : false, className: event.isError ? 'small bad' : 'small' })
   const contents = [
-    event.text ? textBlock(event.text, { key: `computer-text:${event.seq}`, open: expanded.get(`computer-text:${event.seq}`), markdown: ['response', 'reply'].includes(event.kind) ? 'auto' : false, className: event.isError ? 'small bad' : 'small' }) : null,
+    response.body,
     event.tools?.length ? h('div', { class: 'chips' }, event.tools.map(tool => badge(tool.name, 'accent'))) : null,
     (event.inputTokens != null || event.cost != null) ? h('div', { class: 'small muted' },
       [event.inputTokens != null ? `输入 ${fmt.num(event.inputTokens)} / 输出 ${fmt.num(event.outputTokens)}` : null, event.cost != null ? fmt.usd(event.cost) : null].filter(Boolean).join(' · ')) : null,
@@ -119,6 +120,8 @@ export async function render(root, [id]) {
     const missing = replies.reduce((count, event) => count + Math.max(0, (event.imageCount ?? event.images?.length ?? 0) - (event.images?.length ?? 0)), 0)
     const duration = (job.updatedAt && job.createdAt) ? Math.max(0, job.updatedAt - job.createdAt) : null
 
+    const report = responseSection(job.report, { heading: h('summary', job.status === 'waiting' ? '等待用户回复的问题' : '最新代理报告'), key: 'report-text', open: true, markdown: 'auto' })
+
     mount(detail,
       card(h('span', { class: 'card-title' }, icon('computer'), '任务详情', badge(label, kind)),
         textBlock(job.task, { key: 'computer-request', open: expanded.get('computer-request'), className: 'computer-task-text', limit: 220 }),
@@ -138,7 +141,7 @@ export async function render(root, [id]) {
           job.outputTokens != null ? h('span', `输出 ${fmt.num(job.outputTokens)}`) : null,
           job.costUsd != null ? h('span', `费用 ${fmt.usd(job.costUsd)}`) : null) : null,
         job.report ? h('details', { class: 'quiet-details', 'data-disclosure': 'report-details', open: job.status === 'waiting' || expanded.get('report-details') },
-          h('summary', job.status === 'waiting' ? '等待用户回复的问题' : '最新代理报告'), textBlock(job.report, { key: 'report-text', open: true, markdown: 'auto' })) : null,
+          report.heading, report.body) : null,
         job.deliveryError ? h('p', { class: 'small bad' }, '结果未能完整送达聊天，请查看下方发送记录。') : null,
         ['running', 'queued', 'waiting'].includes(job.status) ? h('div', { class: 'computer-progress small', role: 'status' }, spinner(),
           job.status === 'queued' ? '等待处理' : job.progress || '正在处理') : (job.progress ? h('div', { class: 'computer-progress small', role: 'status' }, icon('clock', 16), job.progress) : null),
