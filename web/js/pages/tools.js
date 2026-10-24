@@ -15,7 +15,7 @@ export async function render(root, [sub]) {
       const visible = tools.filter(x => !filter || `${x.name} ${x.description} ${x.source}`.toLowerCase().includes(filter))
       mount(tbody, visible.length ? visible.map(x => h('tr',
         h('td', x.runtimeReady === false ? h('a', { href: '#/config/setup', class: 'badge warn' }, '尚未就绪') : switchEl(x.enabled, on => act(() => put(`/api/tools/${enc(x.name)}`, { enabled: on }), `${x.name} 已${on ? '启用' : '禁用'}`))),
-        h('td', h('b', { class: 'mono' }, x.name), h('div', badge(x.source), x.budgetExempt ? badge(`不占全局次数（计入轮数） · 每次回复≤${x.maxPerReply ?? 32}次`, 'accent') : null)),
+        h('td', h('b', { class: 'mono' }, x.name), h('div', { class: 'chips', style: { marginTop: '4px' } }, badge(x.source), x.budgetExempt ? badge('不占用全局次数', 'accent') : null)),
         h('td', { class: 'small' }, x.description),
         h('td', h('button', { class: 'btn sm ghost', onclick: () => modal(x.name, h('pre', JSON.stringify(x.parameters, null, 2))) }, '参数')),
       )) : h('tr', h('td', { colspan: 4, class: 'muted text-center', style: { padding: '16px' } }, '没有找到匹配的工具')))

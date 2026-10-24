@@ -172,6 +172,8 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent);
 .badge.ok { background: #17a96b13; color: var(--ok); border-color: transparent; }
 .badge.bad { background: #e0445a13; color: var(--bad); border-color: transparent; }
 .badge.warn { background: #d98b0b13; color: var(--warn); border-color: transparent; }
+.badge + .badge { margin-left: 6px; }
+.chips > .badge + .badge, .row > .badge + .badge { margin-left: 0; }
 .dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; background: var(--muted); flex: none; }
 .dot.ok { background: var(--ok); box-shadow: 0 0 0 3px #17a96b14; } .dot.bad { background: var(--bad); }
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
