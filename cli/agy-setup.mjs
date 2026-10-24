@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const distro = process.argv[2] || 'yunzai-sandbox'
+const distro = process.argv[2] || 'yunzai-llm-sandbox'
 if (!/^[\w.-]+$/.test(distro)) throw Error('Invalid distro')
 const executable = path.join(root, 'data/agy-setup/agy.exe')
 if (!fs.existsSync(executable)) {

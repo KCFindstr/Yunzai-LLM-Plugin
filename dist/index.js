@@ -370,7 +370,7 @@ function normalize(raw) {
   const langs = asArray(ex.languages).filter((l) => ["python", "node", "bash"].includes(l));
   c.tools.exec = {
     enable: ex.enable === true,
-    distro: typeof ex.distro === "string" && /^[\w.-]+$/.test(ex.distro) ? ex.distro : "yunzai-sandbox",
+    distro: typeof ex.distro === "string" && /^[\w.-]+$/.test(ex.distro) ? ex.distro : "yunzai-llm-sandbox",
     access: ex.access === "all" ? "all" : "admin",
     languages: langs.length ? langs : ["python", "node", "bash"],
     timeout: Math.min(50, Math.max(1, Number(ex.timeout) || 20)),
@@ -384,7 +384,7 @@ function normalize(raw) {
   const bounded = (value, fallback, min, max) => Math.floor(Math.min(max, Math.max(min, Number.isFinite(Number(value)) ? Number(value) : fallback)));
   c.tools.computer = {
     enable: pc.enable === true,
-    distro: typeof pc.distro === "string" && /^[\w.-]+$/.test(pc.distro) ? pc.distro : "yunzai-sandbox",
+    distro: typeof pc.distro === "string" && /^[\w.-]+$/.test(pc.distro) ? pc.distro : "yunzai-llm-sandbox",
     access: pc.access === "all" ? "all" : "admin",
     model: typeof pc.model === "string" ? pc.model : "",
     maxSteps: bounded(pc.maxSteps, 100, 1, 500),
@@ -402,13 +402,13 @@ function normalize(raw) {
   c.tools.googleLens = {
     enable: lens.enable === true,
     access: lens.access === "all" ? "all" : "admin",
-    distro: typeof lens.distro === "string" && /^[\w.-]+$/.test(lens.distro) ? lens.distro : "yunzai-sandbox"
+    distro: typeof lens.distro === "string" && /^[\w.-]+$/.test(lens.distro) ? lens.distro : "yunzai-llm-sandbox"
   };
   const agy = isPlainObject(c.tools.agy) ? c.tools.agy : {};
   c.tools.agy = {
     enable: agy.enable === true,
     access: agy.access === "all" ? "all" : "admin",
-    distro: typeof agy.distro === "string" && /^[\w.-]+$/.test(agy.distro) ? agy.distro : "yunzai-sandbox",
+    distro: typeof agy.distro === "string" && /^[\w.-]+$/.test(agy.distro) ? agy.distro : "yunzai-llm-sandbox",
     executable: typeof agy.executable === "string" ? agy.executable : "",
     maxMinutes: bounded(agy.maxMinutes, 10, 1, 30),
     maxQueue: bounded(agy.maxQueue, 8, 1, 50)

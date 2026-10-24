@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const index = process.argv.indexOf('--distro')
-const distro = index < 0 ? 'yunzai-sandbox' : process.argv[index + 1]
+const distro = index < 0 ? 'yunzai-llm-sandbox' : process.argv[index + 1]
 if (process.platform !== 'win32' || !/^[\w.-]+$/.test(distro ?? '')) throw new Error('Requires Windows and the existing dedicated WSL desktop distro')
 const launcher = readFileSync(join(root, 'desktop/rustdesk-launch.py'), 'utf8').replace(/\r\n/g, '\n')
 let script = readFileSync(join(root, 'desktop/rustdesk-setup.sh'), 'utf8').replace(/\r\n/g, '\n')

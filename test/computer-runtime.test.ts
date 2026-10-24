@@ -8,7 +8,7 @@ import { ComputerQueue } from '../src/computer/queue.ts'
 import { sha1 } from '../src/core/util.ts'
 import type { ComputerConfig } from '../src/core/configTypes.ts'
 
-const distro = 'yunzai-sandbox'
+const distro = 'yunzai-llm-sandbox'
 const provisioned = process.platform === 'win32' && process.env.YZ_LLM_COMPUTER_LIVE === '1' && spawnSync('wsl.exe', ['-d', distro, '-u', 'root', '-e', 'test', '-f', '/opt/llm-desktop/client.py'], { timeout: 30000 }).status === 0
 const cfg = { distro } as ComputerConfig
 

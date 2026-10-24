@@ -32,7 +32,7 @@ describe('AGY isolation and async handoff', () => {
   it('defaults off and bounds configuration', () => {
     assert.equal(normalize({}).tools.agy.enable, false)
     const cfg = normalize({ tools: { agy: { enable: true, maxMinutes: 9999, maxQueue: -5, distro: '../escape' } } }).tools.agy
-    assert.equal(cfg.maxMinutes, 30); assert.equal(cfg.maxQueue, 1); assert.equal(cfg.distro, 'yunzai-sandbox')
+    assert.equal(cfg.maxMinutes, 30); assert.equal(cfg.maxQueue, 1); assert.equal(cfg.distro, 'yunzai-llm-sandbox')
   })
   it('defers execution until after the acknowledgement, prevents duplicates and hides other owners', async () => {
     const ctx = context(), tool = registry.get('agy')!

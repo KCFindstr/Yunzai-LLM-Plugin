@@ -452,7 +452,7 @@ tools:
     # 安装完成并通过检查后再启用代码工具
     enable: false
     # 专用 WSL 发行版名称
-    distro: yunzai-sandbox
+    distro: yunzai-llm-sandbox
     # admin=仅管理员可触发；all=所有人
     access: admin
     # 允许执行的语言；空列表禁用执行
@@ -472,7 +472,7 @@ tools:
     # 是否启用异步电脑操作工具
     enable: false
     # 安装了持久桌面的 WSL 发行版
-    distro: yunzai-sandbox
+    distro: yunzai-llm-sandbox
     # admin=仅管理员；all=所有人共享同一桌面
     access: admin
     # 独立视觉/工具模型 id；留空使用默认模型
@@ -503,7 +503,7 @@ tools:
     # admin=仅管理员；all=所有人
     access: admin
     # 安装了桌面及 Lens 浏览器依赖的 WSL 发行版
-    distro: yunzai-sandbox
+    distro: yunzai-llm-sandbox
   # AGY 异步代理：需要 agy-setup 和本机已登录的 Antigravity 账号
   agy:
     # 是否启用 AGY 任务委托工具
@@ -511,7 +511,7 @@ tools:
     # admin=仅管理员；all=所有人
     access: admin
     # 安装了 AGY 桥接和隔离环境的 WSL 发行版
-    distro: yunzai-sandbox
+    distro: yunzai-llm-sandbox
     # 留空使用 data/agy-setup/agy.exe
     executable: ''
     # 每个 AGY 任务最长运行时间，单位分钟

@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 // Provision (or update) the WSL distro used by the run_code tool.
-//   npm run exec-setup                       # distro "yunzai-sandbox", must already exist
+//   npm run exec-setup                       # distro "yunzai-llm-sandbox", must already exist
 //   npm run exec-setup -- --distro <name>
-//   npm run exec-setup -- --install          # also create the distro (Ubuntu 26.04) under D:\WSL\<name>
+//   npm run exec-setup -- --install          # also create the distro (Ubuntu 26.04) under ~/WSL/<name>
+//   npm run exec-setup -- --install --location <dir>
 import { spawnSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -12,7 +14,7 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const args = process.argv.slice(2)
 const flag = n => args.includes(n)
 const opt = (n, d) => (args.includes(n) ? args[args.indexOf(n) + 1] : d)
-const distro = opt('--distro', 'yunzai-sandbox')
+const distro = opt('--distro', 'yunzai-llm-sandbox')
 
 if (process.platform !== 'win32') {
   console.error('仅支持 Windows（WSL2）')
@@ -31,7 +33,8 @@ if (!exists) {
     console.error(`WSL 发行版 ${distro} 不存在。加 --install 自动创建（Ubuntu 26.04），或用 --distro 指定已有的专用发行版。`)
     process.exit(1)
   }
-  const loc = opt('--location', `D:\\WSL\\${distro}`)
+  // Only creation needs the location; everything else reaches the distro by name (wsl -d <name>)
+  const loc = opt('--location', join(homedir(), 'WSL', distro))
   if (wsl(['--install', 'Ubuntu-26.04', '--name', distro, '--location', loc, '--no-launch', '--web-download'])) process.exit(1)
 }
 

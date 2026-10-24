@@ -22,7 +22,13 @@ function lastUserText(messages) {
     const m = messages[i]
     if (m.role !== 'user') continue
     const t = typeof m.content === 'string' ? m.content : (m.content ?? []).map(c => c.text ?? '').join('')
-    return t.split('【消息】').pop().replace(/^【[^】]*】\n?/, '').trim()
+    // the user's text follows the current-turn heading line 【消息｜time｜…】
+    return t
+      .split(/^【消息[^\n]*\n?/m)
+      .pop()
+      .replace(/^【[^】]*】\n?/, '')
+      .replace(/^(\[at:[^\]]+\]\s*)+/, '')
+      .trim()
   }
   return ''
 }
@@ -104,11 +110,15 @@ export function decide(body) {
     return reply(name ? `哈哈哈\n[表情:${name}]` : '我还没有表情包呢')
   }
   if (/你记得我什么/.test(text)) {
-    const mem = messages
-      .filter(m => m.role === 'user')
-      .map(m => (typeof m.content === 'string' ? m.content : ''))
-      .find(c => c.startsWith('【长期记忆'))
-    return reply(mem ? `我记得：${mem.split('\n').slice(1).join('；')}` : '我还不了解你呢')
+    // the memory block rides in a prefix or the current turn's header; an empty one only carries the （还没有…） nudge
+    const content = messages
+      .map(m => (typeof m.content === 'string' ? m.content : (m.content ?? []).map(c => c.text ?? '').join('')))
+      .filter(c => c.includes('【长期记忆·关于'))
+      .at(-1) ?? ''
+    const facts = (/^【长期记忆·关于[^\n]*\n((?:(?!【)[^\n]*\n?)*)/m.exec(content)?.[1] ?? '')
+      .split('\n')
+      .filter(l => l.trim() && !l.startsWith('（还没有'))
+    return reply(facts.length ? `我记得：${facts.join('；')}` : '我还不了解你呢')
   }
   if (/两条/.test(text)) return reply('第一条消息\n\n第二条消息')
   if (/长文/.test(text)) return reply('很长的内容。'.repeat(120))

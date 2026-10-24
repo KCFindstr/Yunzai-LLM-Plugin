@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const index = process.argv.indexOf('--distro')
-const distro = index < 0 ? 'yunzai-sandbox' : process.argv[index + 1]
+const distro = index < 0 ? 'yunzai-llm-sandbox' : process.argv[index + 1]
 if (process.platform !== 'win32' || !/^[\w.-]+$/.test(distro ?? '')) throw Error('Requires Windows and a dedicated WSL desktop distro')
 function wsl(args, input) {
   const result = spawnSync('wsl.exe', ['-d', distro, '-u', 'root', '-e', ...args], { input, encoding: 'utf8', windowsHide: true, timeout: 180000 })

@@ -23,7 +23,7 @@ describe('run_code output', () => {
 })
 
 // Live checks against the real WSL sandbox; skipped where it hasn't been provisioned (npm run exec-setup).
-const DISTRO = 'yunzai-sandbox'
+const DISTRO = 'yunzai-llm-sandbox'
 const provisioned =
   process.platform === 'win32' &&
   spawnSync('wsl.exe', ['-d', DISTRO, '-u', 'root', '-e', 'test', '-f', '/opt/llm-sandbox/runner.py'], { timeout: 30000 }).status === 0

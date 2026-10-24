@@ -65,7 +65,7 @@ it('enforces access, valid context images and reply limits before crossing the V
   assert.equal((await tool.run({}, worker) as any).isError, true)
   assert.equal(calls, 0)
   assert.equal(normalize({}).tools.googleLens.enable, false)
-  assert.equal(normalize({ tools: { googleLens: { distro: '../bad' } } }).tools.googleLens.distro, 'yunzai-sandbox')
+  assert.equal(normalize({ tools: { googleLens: { distro: '../bad' } } }).tools.googleLens.distro, 'yunzai-llm-sandbox')
 })
 
 it('reports Google verification blocks without claiming a successful image search', async () => {

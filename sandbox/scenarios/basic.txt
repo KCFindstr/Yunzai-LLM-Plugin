@@ -34,8 +34,9 @@ ga 帮我重启一下机器人
 expect 帮不了
 
 // 管理：私聊
+// #llm 命令预览（含帮助）合并渲染成一张图片
 p #llm帮助
-expect 使用说明
+expect \[图片 \d+KB
 p #llm状态
 expect 模型：mock
 p #llm模型列表
@@ -59,8 +60,8 @@ expect 表情包
 
 // 导入机器人收藏表情（NapCat fetch_custom_face）
 p #llm导入收藏表情 4
-expect 获取到
-expect 新增
+// 结果合并为一条消息
+expect 获取到[\s\S]*新增
 
 // 只有明确的指令才添加：不带图片 -> 提示；之后单独发的图片只会被当作聊天，不会被添加
 p #llm添加表情

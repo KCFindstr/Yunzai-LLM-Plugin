@@ -6,7 +6,7 @@ import fs from 'node:fs'
 import http from 'node:http'
 import path from 'node:path'
 import zlib from 'node:zlib'
-import { WebSocketServer } from 'ws'
+import WebSocket, { WebSocketServer } from 'ws'
 
 export const BOT_ID = 10000
 export const MASTER_ID = 10001
@@ -67,10 +67,12 @@ export const TEST_IMAGES = {
 }
 
 /**
- * @param {{ wsPort: number, httpPort: number, outDir: string, print: (line: string) => void }} opts
+ * Forward WS (Yunzai's OneBotClient adapter dials us on wsPort) unless reverseUrl is set, in which case we dial
+ * Yunzai's stock OneBotv11 reverse endpoint ourselves, like a NapCat configured with a reverse WebSocket.
+ * @param {{ wsPort: number, httpPort: number, outDir: string, print: (line: string) => void, reverseUrl?: string }} opts
  */
 export function startFakeNapCat(opts) {
-  const { wsPort, httpPort, outDir, print } = opts
+  const { wsPort, httpPort, outDir, print, reverseUrl } = opts
   fs.mkdirSync(outDir, { recursive: true })
   const messages = new Map() // message_id -> stored message
   let nextId = 1000
@@ -199,8 +201,7 @@ export function startFakeNapCat(opts) {
     }
   }
 
-  const wss = new WebSocketServer({ port: wsPort, host: '127.0.0.1' })
-  wss.on('connection', ws => {
+  const attach = ws => {
     socket = ws
     print('\x1b[32m[FakeNapCat] Yunzai 已连接\x1b[0m')
     ws.send(JSON.stringify({ time: Math.floor(Date.now() / 1000), self_id: BOT_ID, post_type: 'meta_event', meta_event_type: 'lifecycle', sub_type: 'connect' }))
@@ -221,7 +222,27 @@ export function startFakeNapCat(opts) {
       ws.send(JSON.stringify(resp))
     })
     ws.on('close', () => print('\x1b[33m[FakeNapCat] 连接断开\x1b[0m'))
-  })
+  }
+
+  let wss
+  let closed = false
+  if (reverseUrl) {
+    // Yunzai is still starting when we begin, so keep retrying (and reconnect after a drop) until closed
+    const dial = () => {
+      if (closed) return
+      const ws = new WebSocket(reverseUrl, { headers: { 'X-Self-ID': String(BOT_ID), 'X-Client-Role': 'Universal' } })
+      ws.on('open', () => attach(ws))
+      ws.on('error', () => {})
+      ws.on('close', () => {
+        if (socket === ws) socket = undefined
+        setTimeout(dial, 1000)
+      })
+    }
+    dial()
+  } else {
+    wss = new WebSocketServer({ port: wsPort, host: '127.0.0.1' })
+    wss.on('connection', attach)
+  }
 
   /**
    * Inject a message.
@@ -288,7 +309,9 @@ export function startFakeNapCat(opts) {
     lastUserMessageId,
     connected: () => Boolean(socket),
     close: () => {
-      wss.close()
+      closed = true
+      wss?.close()
+      socket?.close()
       httpServer.close()
     },
   }

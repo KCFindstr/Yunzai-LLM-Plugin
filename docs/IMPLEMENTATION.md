@@ -107,7 +107,7 @@ Only erasable TS syntax (no enums/parameter properties/namespaces) — `erasable
     shared-session memory block moved above 【消息】.
   - Code execution: first deferred (no WSL); added the same day once the user installed WSL — see below.
 - `run_code` tool (2026-10-21, `src/tools/exec.ts`, `exec/runner.py`, `exec/setup.sh`, `cli/exec-setup.mjs`):
-  - Dedicated WSL2 distro `yunzai-sandbox` (Ubuntu 26.04, at `D:\WSL\yunzai-sandbox`), provisioned by
+  - Dedicated WSL2 distro `yunzai-llm-sandbox` (Ubuntu 26.04, created at `~/WSL/yunzai-llm-sandbox` unless `--location` is given; all other code addresses it by name only), provisioned by
     `npm run exec-setup [-- --install] [--distro X]` (idempotent; pipes setup.sh + runner.py into the distro as root).
     wsl.conf disables automount (no C:/D:) and interop (no .exe), so even the distro's root can't reach Windows files.
   - Per run (runner.py, invoked as `wsl -d <distro> -u root -e python3 /opt/llm-sandbox/runner.py`, JSON on

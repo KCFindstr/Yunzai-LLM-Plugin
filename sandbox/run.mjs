@@ -26,6 +26,11 @@ const ROOT = path.resolve(PLUGIN, '..', '..')
 const runtimeArg = process.argv.includes('--runtime') ? process.argv[process.argv.indexOf('--runtime') + 1] : ''
 const RT = path.join(here, runtimeArg ? `.runtime-${runtimeArg.replace(/[^\w-]/g, '')}` : '.runtime')
 const PORTS = { yunzai: 2599, napcatWs: 3299, napcatHttp: 3298, mockLLM: 3297, redis: 6390 }
+// OneBotClient (forward WS) is a local, optional adapter; without it the fake NapCat dials stock OneBotv11 instead
+const ONEBOT_CLIENT = path.join(ROOT, 'plugins', 'adapter', 'OneBotClient.js')
+const forwardWs = fs.existsSync(ONEBOT_CLIENT)
+// Yunzai doesn't ship redis: use the Windows build vendored in sandbox/redis, elsewhere redis-server on PATH
+const REDIS = process.platform === 'win32' ? path.join(here, 'redis', 'redis-server.exe') : 'redis-server'
 
 const argv = process.argv.slice(2)
 const flag = f => argv.includes(f)
@@ -109,7 +114,7 @@ function prepare() {
 
   // --- Yunzai config: local-only endpoints ---
   writeYaml('config/config/server.yaml', `url: http://localhost:${PORTS.yunzai}\nport: ${PORTS.yunzai}\nredirect: https://git.trss.me/Yunzai\nauth:\n`)
-  writeYaml('config/config/redis.yaml', `path: ${JSON.stringify(path.join(ROOT, 'redis', 'redis-server.exe'))}\nhost: 127.0.0.1\nport: ${PORTS.redis}\nusername:\npassword:\ndb: 0\n`)
+  writeYaml('config/config/redis.yaml', `path: ${JSON.stringify(REDIS)}\nhost: 127.0.0.1\nport: ${PORTS.redis}\nusername:\npassword:\ndb: 0\n`)
   writeYaml(
     'config/config/other.yaml',
     `autoFriend: 0\nautoGroup: 0\nautoQuit: 0\nmasterQQ:\n  - ${MASTER_ID}\nmaster:\n  - "${BOT_ID}:${MASTER_ID}"\ndisablePrivate: false\nwhiteGroup:\nwhiteUser:\nblackGroup:\nblackUser:\n`,
@@ -117,7 +122,8 @@ function prepare() {
   // cooldowns off so scripted back-to-back messages aren't dropped by Yunzai's own throttling
   writeYaml('config/config/group.yaml', `default:\n  groupCD: 0\n  singleCD: 0\n  onlyReplyAt: 0\n  botAlias:\n    - 沙盒\n`)
   writeYaml('config/config/bot.yaml', `log_level: ${verbose ? 'debug' : 'info'}\nfile_watch: false\nonline_msg_exp: 99999999\nplugin_load_timeout: 120\nupdate_time: 0\n`)
-  writeYaml('config/config/onebot_client.yaml', `servers:\n  - name: sandbox\n    url: ws://127.0.0.1:${PORTS.napcatWs}\n`)
+  if (forwardWs) writeYaml('config/config/onebot_client.yaml', `servers:\n  - name: sandbox\n    url: ws://127.0.0.1:${PORTS.napcatWs}\n`)
+  else fs.rmSync(path.join(RT, 'config', 'config', 'onebot_client.yaml'), { force: true })
   for (const f of ['onebot11.yaml', 'milky.yaml', 'satori.yaml']) writeYaml(`config/config/${f}`, '# sandbox: disabled\n')
 
   // hard safety check: no config may point anywhere but localhost
@@ -136,7 +142,8 @@ function prepare() {
   const adapterDst = path.join(RT, 'plugins', 'adapter')
   fs.rmSync(adapterDst, { recursive: true, force: true })
   fs.mkdirSync(adapterDst)
-  for (const f of ['OneBotv11.js', 'OneBotClient.js']) fs.copyFileSync(path.join(ROOT, 'plugins', 'adapter', f), path.join(adapterDst, f))
+  fs.copyFileSync(path.join(ROOT, 'plugins', 'adapter', 'OneBotv11.js'), path.join(adapterDst, 'OneBotv11.js'))
+  if (forwardWs) fs.copyFileSync(ONEBOT_CLIENT, path.join(adapterDst, 'OneBotClient.js'))
   for (const d of ['system', 'other']) if (fs.existsSync(path.join(ROOT, 'plugins', d))) copyDir(path.join(ROOT, 'plugins', d), path.join(RT, 'plugins', d))
 
   const dst = path.join(RT, 'plugins', 'Yunzai-LLM-Plugin')
@@ -281,7 +288,13 @@ prepare()
 print(`\x1b[35m[Sandbox]\x1b[0m runtime: ${RT}`)
 print(`\x1b[35m[Sandbox]\x1b[0m LLM: ${useMock ? `模拟 LLM (127.0.0.1:${PORTS.mockLLM})` : `sandbox/config.yaml（真实 API）`}`)
 if (useMock) mock = startMockLLM(PORTS.mockLLM, verbose ? print : () => {})
-napcat = startFakeNapCat({ wsPort: PORTS.napcatWs, httpPort: PORTS.napcatHttp, outDir: path.join(RT, 'out'), print })
+napcat = startFakeNapCat({
+  wsPort: PORTS.napcatWs,
+  httpPort: PORTS.napcatHttp,
+  outDir: path.join(RT, 'out'),
+  print,
+  reverseUrl: forwardWs ? undefined : `ws://127.0.0.1:${PORTS.yunzai}/OneBotv11`,
+})
 startYunzai()
 
 // wait for the adapter to connect and the LLM plugin's command catalog to be scanned

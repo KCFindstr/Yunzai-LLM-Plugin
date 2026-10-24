@@ -4,13 +4,13 @@ The optional computer agent owns a shared character desktop, not the host's Wind
 
 ## Setup
 
-First provision the dedicated WSL distro with `npm run exec-setup` (see README). Then run `npm run computer-setup -- --distro yunzai-sandbox`. The setup requires a dedicated distro with Windows automount and executable interop disabled. Do not use a personal development distro. Restart the bot after enabling `tools.computer`.
+First provision the dedicated WSL distro with `npm run exec-setup` (see README). Then run `npm run computer-setup -- --distro yunzai-llm-sandbox`. The setup requires a dedicated distro with Windows automount and executable interop disabled. Do not use a personal development distro. Restart the bot after enabling `tools.computer`.
 
 ```yaml
 tools:
   computer:
     enable: true
-    distro: yunzai-sandbox
+    distro: yunzai-llm-sandbox
     access: admin
     model: ''
     maxSteps: 100
@@ -55,11 +55,11 @@ The `llm-desktop` systemd service runs Openbox, Xvfb, Chrome, xterm and tint2 in
 
 ## Optional RustDesk access
 
-`npm run rustdesk-setup -- --distro yunzai-sandbox` installs the pinned official RustDesk 1.5.0 client (SHA-256 checked against its release asset) plus Linux dependencies. It extracts the application without running its package post-install hooks or installing the root RustDesk service. A small launcher runs as `pc` inside the existing desktop namespace on `DISPLAY=:99`, sharing the same Chrome and files as the computer-use agent. Setup starts the launcher through the existing control socket; it does not restart the desktop. The opt-in startup hook also restores it when the desktop service next starts, and a file lock prevents duplicate launchers.
+`npm run rustdesk-setup -- --distro yunzai-llm-sandbox` installs the pinned official RustDesk 1.5.0 client (SHA-256 checked against its release asset) plus Linux dependencies. It extracts the application without running its package post-install hooks or installing the root RustDesk service. A small launcher runs as `pc` inside the existing desktop namespace on `DISPLAY=:99`, sharing the same Chrome and files as the computer-use agent. Setup starts the launcher through the existing control socket; it does not restart the desktop. The opt-in startup hook also restores it when the desktop service next starts, and a file lock prevents duplicate launchers.
 
 The initial configuration deliberately sets `stop-service = 'Y'` and a `pending.invalid` custom rendezvous/relay address. It is a staged installation, not yet remotely reachable. Complete configuration with the owner's ID/rendezvous address, relay address, server public key and connection authentication before enabling registration. Do not use the server private key. The default desktop firewall already allows outbound connections to public relay servers; a private/LAN relay requires an explicit narrow exception. No host Windows desktop or bot credentials are exposed by this installation.
 
-RustDesk setup does not keep WSL awake or add a Windows logon task. WSL can idle out when Yunzai is stopped, even with Linux services running. To wake the existing distro and keep it available for a remote session, run `wsl -d yunzai-sandbox -u pc -e sleep infinity` in Windows Command Prompt or PowerShell and leave that terminal open. Ctrl+C ends that temporary keeper and lets WSL idle again (provided Yunzai or another process is not holding it awake). The optional `powershell -File cli/rustdesk-keepalive.ps1` helper starts a hidden keeper only when explicitly invoked.
+RustDesk setup does not keep WSL awake or add a Windows logon task. WSL can idle out when Yunzai is stopped, even with Linux services running. To wake the existing distro and keep it available for a remote session, run `wsl -d yunzai-llm-sandbox -u pc -e sleep infinity` in Windows Command Prompt or PowerShell and leave that terminal open. Ctrl+C ends that temporary keeper and lets WSL idle again (provided Yunzai or another process is not holding it awake). The optional `powershell -File cli/rustdesk-keepalive.ps1` helper starts a hidden keeper only when explicitly invoked.
 
 Desktop-side configuration and diagnostics are in `/home/pc/.config/rustdesk/` and `/home/pc/.config/llm-desktop/rustdesk-launch.log` (backed by `/var/lib/llm-desktop/disk/home/` in the distro). The launcher opt-in is `/home/pc/.config/llm-desktop/rustdesk-enabled`. Disable registration in RustDesk before removing that marker; the marker prevents future launcher starts but does not immediately terminate an already-running server. End-to-end connectivity and remote input still need verification after configuring the owner's relay.
 
@@ -85,4 +85,4 @@ History lives in `data/computer-history/<job-id>/`: up to 1,000 events / 2 MiB o
 
 Info logs show the selected computer model, resolved input/output/cache prices per million tokens and their source, plus final usage and USD cost. Each agent turn has debug records for request size, model/tool response, usage, cache tokens, elapsed time and cost. Tool observations are bounded; image payloads and credential-labelled fields are redacted. Typed text arguments are logged only as character counts. Debug logging can still contain public page excerpts or task details: restrict log access. Set `YZ_LLM_DEBUG=1` before starting the bot to promote these debug records to the normal info log; otherwise they use Yunzai's debug level. Unknown prices are labelled unknown, not a verified free request. `#llm电脑任务 <id>` includes model and cost too.
 
-`wsl -d yunzai-sandbox -u root -e systemctl status llm-desktop` and `journalctl -u llm-desktop` inspect the service. Internal runtime operations are `health`, `screenshot`, `actions`, `browse`, `exec` via `/opt/llm-desktop/client.py` JSON stdin. Do not expose the socket or Chrome debug port externally. Setup updates theme files and restarts the desktop, so run it between tasks.
+`wsl -d yunzai-llm-sandbox -u root -e systemctl status llm-desktop` and `journalctl -u llm-desktop` inspect the service. Internal runtime operations are `health`, `screenshot`, `actions`, `browse`, `exec` via `/opt/llm-desktop/client.py` JSON stdin. Do not expose the socket or Chrome debug port externally. Setup updates theme files and restarts the desktop, so run it between tasks.

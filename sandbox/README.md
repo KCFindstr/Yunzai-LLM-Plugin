@@ -8,6 +8,8 @@
 - 独立运行目录 `sandbox/.runtime/`（git 忽略），独立配置：Yunzai HTTP 端口 **2599**（生产是 2536，绝不复用——端口冲突时 Yunzai 会请求旧进程 `/exit`），
   独立 redis 端口 **6390**，OneBotClient 只连 `ws://127.0.0.1:3299`；启动前会检查所有配置不含非本地地址。
 - 只复制 OneBot 适配器、system、other 和本插件；不复制 ws-plugin、stdin 适配器。
+- 连接方式：存在 `plugins/adapter/OneBotClient.js`（可选的正向 WS 客户端）时由它连接模拟 NapCat；没有时模拟 NapCat 以反向 WS 连接 TRSS 自带的 `ws://127.0.0.1:2599/OneBotv11`。
+- Redis：Yunzai 不附带 redis。Windows 使用 `sandbox/redis/` 内置的 Redis 8 (msys2 构建，许可证见 `sandbox/redis/LICENCES`)；其他系统需要 PATH 中有 `redis-server`。
 - 插件数据（会话、额度、表情）写在 `.runtime/plugins/Yunzai-LLM-Plugin/data`，不影响正式数据。
 
 ## 使用

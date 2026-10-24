@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const index = process.argv.indexOf('--distro')
-const distro = index < 0 ? 'yunzai-sandbox' : process.argv[index + 1]
+const distro = index < 0 ? 'yunzai-llm-sandbox' : process.argv[index + 1]
 if (process.platform !== 'win32' || !/^[\w.-]+$/.test(distro ?? '')) throw new Error('Requires Windows and a dedicated WSL sandbox distro')
 let script = readFileSync(join(root, 'desktop/setup.sh'), 'utf8')
 script += `\ncat > /usr/local/lib/llm-desktop/supervisor.py <<'SUPERVISOR_EOF'\n${readFileSync(join(root, 'desktop/supervisor.py'), 'utf8')}\nSUPERVISOR_EOF\nchmod 644 /usr/local/lib/llm-desktop/supervisor.py\n`
