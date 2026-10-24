@@ -48,6 +48,7 @@ function timelineEvent(event, opened, job) {
   const key = `event:${event.seq}`
   const argsKey = `args:${event.seq}`
   const isExpandable = event.kind === 'tool'
+  const markdownControls = ['response', 'reply'].includes(event.kind) && event.text ? h('span', { class: 'response-inline-controls' }) : null
   const title = h('div', { class: 'computer-event-head' },
     h('strong', event.tool || label),
     isExpandable ? expandIndicator() : null,
@@ -55,10 +56,11 @@ function timelineEvent(event, opened, job) {
     event.phase ? badge(event.phase === 'running' ? '执行中' : event.phase === 'skipped' ? '未执行' : event.isError ? '失败' : '已返回', event.isError ? 'bad' : event.phase === 'running' ? 'accent' : '') : null,
     event.delivery === 'sent' ? badge('已发送', 'ok') : event.delivery === 'failed' ? badge('发送失败，可能部分送达', 'bad') : event.delivery === 'none' ? badge('未发送') : null,
     event.ms != null ? h('span', { class: 'small muted' }, fmt.dur(event.ms)) : null,
+    markdownControls,
     h('time', { class: 'small muted', dateTime: new Date(event.at).toISOString() }, new Date(event.at).toLocaleTimeString('zh-CN', { hour12: false })),
   )
   const contents = [
-    event.text ? textBlock(event.text, { key: `agy-text:${event.seq}`, open: opened.get(`agy-text:${event.seq}`), limit: 280, markdown: ['response', 'reply'].includes(event.kind) ? 'auto' : false, className: event.isError ? 'small bad' : 'small' }) : null,
+    event.text ? textBlock(event.text, { key: `agy-text:${event.seq}`, open: opened.get(`agy-text:${event.seq}`), limit: 280, markdown: ['response', 'reply'].includes(event.kind) ? 'auto' : false, controlsTarget: markdownControls, className: event.isError ? 'small bad' : 'small' }) : null,
     event.model || event.inputTokens != null ? h('div', { class: 'small muted' },
       [event.model, (event.inputTokens != null || event.outputTokens != null) ? `输入 ${fmt.num(event.inputTokens)} / 输出 ${fmt.num(event.outputTokens)}` : null].filter(Boolean).join(' · ')) : null,
     event.args ? h('details', { class: 'computer-arguments', 'data-disclosure': argsKey, 'data-seq': event.seq, open: opened.get(argsKey) },
@@ -132,6 +134,7 @@ export async function render(root, [id]) {
     const execution = timelineEntries(history)
     const duration = (job.updatedAt && job.createdAt) ? Math.max(0, job.updatedAt - job.createdAt) : null
     const totalTokens = (job.inputTokens ?? 0) + (job.outputTokens ?? 0)
+    const reportControls = job.report ? h('span', { class: 'response-inline-controls' }) : null
 
     mount(detail,
       card(h('span', { class: 'card-title' }, icon('models'), '任务详情', badge(label, kind)),
@@ -167,8 +170,8 @@ export async function render(root, [id]) {
             await refresh()
           }
         } }, '取消任务')) : null),
-      card(h('span', { class: 'card-title' }, icon('check'), '执行结果'),
-        job.report ? textBlock(job.report, { key: 'agy-report', open: opened.get('agy-report'), limit: 560, className: 'rollout-reply', markdown: 'auto' }) : empty(['queued', 'running'].includes(job.status) ? '执行结束后会显示结果。' : '此任务没有保存执行结果。')),
+      card(h('span', { class: 'card-title' }, icon('check'), '执行结果', reportControls),
+        job.report ? textBlock(job.report, { key: 'agy-report', open: opened.get('agy-report'), limit: 560, className: 'rollout-reply', markdown: 'auto', controlsTarget: reportControls }) : empty(['queued', 'running'].includes(job.status) ? '执行结束后会显示结果。' : '此任务没有保存执行结果。')),
       card(h('span', { class: 'card-title' }, icon('chat'), '对话回复', replies.length ? badge(`${replies.length} 条`) : null),
         replies.length ? h('div', { class: 'computer-timeline' }, replies.map(event => timelineEvent(event, opened, job))) : empty(job.progress && !['queued', 'running'].includes(job.status) ? '正在整理并发送回复…' : '还没有保存对话回复。')),
       card(h('span', { class: 'card-title' }, icon('logs'), '执行记录', badge(`${execution.length} 条`)),

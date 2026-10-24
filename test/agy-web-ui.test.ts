@@ -62,6 +62,21 @@ it('renders AGY navigation, results, safe tool history, live refresh and cancell
     assert.equal(running.status, 'cancelled')
     await page.click(`a[href="#/agy/${completed.id}"]`)
     await page.waitForFunction(() => document.querySelector('.computer-task-text')?.textContent === '查找这张图片的原始出处')
+    for (const kind of ['response', 'reply']) {
+      const selector = `.rollout-event[data-kind=${kind}] .computer-event-head`
+      assert.ok(await page.$(`${selector} .markdown-chip`))
+      assert.ok(await page.$eval(selector, (el: Element) => {
+        const title = el.querySelector('strong')!.getBoundingClientRect()
+        const control = el.querySelector('.markdown-chip')!.getBoundingClientRect()
+        return Math.abs((title.top + title.bottom - control.top - control.bottom) / 2) < 5
+      }), `${kind} chip shares the title row`)
+    }
+    assert.ok(await page.$('h2 button[data-response-control="agy-report"]'))
+    assert.equal(await page.$('.computer-job-detail .response-controls'), null)
+    const modelChip = '.rollout-event[data-kind=response] .markdown-chip'
+    await page.click(modelChip)
+    assert.equal(await page.$eval(modelChip, (el: Element) => el.getAttribute('aria-pressed')), 'false')
+    assert.equal(await page.$eval('h2 button[data-response-control="agy-report"]', (el: Element) => el.getAttribute('aria-pressed')), 'true')
     const body = await page.evaluate(() => document.body.innerText)
     assert.match(body, /执行结果/); assert.match(body, /我找到了这张图的来源/); assert.match(body, /已发送/)
     assert.ok(!body.includes('private-owner'))
