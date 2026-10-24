@@ -10941,6 +10941,7 @@ init_registry();
 init_skills();
 init_setup();
 var startedAt = Date.now();
+var SETUP_SEEN_FILE = path21.join(DATA_DIR, "web-setup-seen.json");
 var MAX_STICKER_BYTES = 10 * 1024 * 1024;
 function stickerView({ mface, ...s }) {
   const f = stickerFile(s);
@@ -11201,7 +11202,8 @@ var routes = [
       embedding: { ready: embeddingReady(), model: c.memory.embedding.model },
       catalog: ci,
       prices: { count: pc.count, age: pc.fetchedAt ? formatDuration(Date.now() - pc.fetchedAt) : "" },
-      recentErrors: recentLogs(0, "error").slice(-5)
+      recentErrors: recentLogs(0, "error").slice(-5),
+      firstRun: !fs20.existsSync(SETUP_SEEN_FILE)
     };
   }),
   R("GET", "/api/usage", () => {
@@ -11254,7 +11256,13 @@ var routes = [
     };
   }),
   R("PUT", "/api/config", ({ body }) => setConfig(String(body.path ?? ""), body.value)),
-  R("GET", "/api/setup", ({ query }) => setupStatus(query.get("refresh") === "1")),
+  R("GET", "/api/setup", ({ query }) => {
+    if (!fs20.existsSync(SETUP_SEEN_FILE)) {
+      fs20.mkdirSync(DATA_DIR, { recursive: true });
+      fs20.writeFileSync(SETUP_SEEN_FILE, JSON.stringify({ at: Date.now() }));
+    }
+    return setupStatus(query.get("refresh") === "1");
+  }),
   R("PUT", "/api/setup", ({ body }) => {
     if (!Array.isArray(body.changes) || !body.changes.length || body.changes.length > 30) throw fail("\u8BF7\u63D0\u4F9B\u6709\u6548\u7684\u8BBE\u7F6E\u9879");
     const doc = YAML5.parseDocument(config.readRaw());

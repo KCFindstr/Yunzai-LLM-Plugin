@@ -65,7 +65,7 @@ function login(message) {
     err.textContent = ''
     try {
       await post('/api/login', { password: pw.value })
-      shell()
+      await start()
     } catch (x) {
       err.textContent = x.message
       pw.select()
@@ -201,4 +201,11 @@ document.addEventListener('keydown', e => {
 matchMedia('(min-width: 861px)').addEventListener('change', () => setMenu(false))
 setUnauthorizedHandler(() => login('登录已失效，请重新登录'))
 window.addEventListener('hashchange', route)
-get('/api/overview').then(shell, () => login())
+// until the setup wizard has been loaded once (it marks itself seen), opening the panel's front page lands on it;
+// a link to a specific page is still honoured
+async function start() {
+  const overview = await get('/api/overview')
+  if (overview?.firstRun && ['', '#', '#/', '#/overview'].includes(location.hash)) history.replaceState(null, '', '#/config/setup')
+  shell()
+}
+start().catch(() => login())

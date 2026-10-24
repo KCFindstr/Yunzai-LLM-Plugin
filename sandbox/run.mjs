@@ -152,6 +152,8 @@ function prepare() {
   copyDir(path.join(PLUGIN, 'dist'), path.join(dst, 'dist'))
   if (fs.existsSync(path.join(PLUGIN, 'skills'))) copyDir(path.join(PLUGIN, 'skills'), path.join(dst, 'skills'))
   if (fs.existsSync(path.join(PLUGIN, 'tools'))) copyDir(path.join(PLUGIN, 'tools'), path.join(dst, 'tools'))
+  // management panel assets (served on web.port)
+  copyDir(path.join(PLUGIN, 'web'), path.join(dst, 'web'))
   fs.copyFileSync(path.join(PLUGIN, 'config', 'default_config.yaml'), path.join(dst, 'config', 'default_config.yaml'))
   // persona files referenced as `file:xxx.md`
   for (const f of fs.readdirSync(path.join(PLUGIN, 'config'))) if (/\.(md|txt)$/i.test(f)) fs.copyFileSync(path.join(PLUGIN, 'config', f), path.join(dst, 'config', f))

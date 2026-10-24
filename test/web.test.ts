@@ -52,6 +52,12 @@ describe('web panel', () => {
     assert.equal((await call('GET', '/api/overview')).status, 200)
   })
 
+  it('reports a first run until the setup wizard has been loaded once', async () => {
+    assert.equal((await (await call('GET', '/api/overview')).json()).firstRun, true)
+    assert.equal((await call('GET', '/api/setup')).status, 200)
+    assert.equal((await (await call('GET', '/api/overview')).json()).firstRun, false)
+  })
+
   it('refuses state changes without the custom header (cross-site requests)', async () => {
     const res = await fetch(`${base}/api/config`, { method: 'PUT', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ path: 'enable', value: false }) })
     assert.equal(res.status, 403)

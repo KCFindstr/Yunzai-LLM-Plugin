@@ -10,7 +10,7 @@ import { priceCacheInfo, refreshPrices, resolvePrice } from '../billing/pricing.
 import { catalogEntries, catalogInfo, scanCatalog } from '../commands/catalog.ts'
 import { config, normalize, personaText, resolveKeys } from '../core/config.ts'
 import { recentLogs } from '../core/log.ts'
-import { CONFIG_DIR, DEFAULT_CONFIG_FILE } from '../core/paths.ts'
+import { CONFIG_DIR, DATA_DIR, DEFAULT_CONFIG_FILE } from '../core/paths.ts'
 import { deepMerge, detectImageMime, formatDuration, isPlainObject, maskSecret, truncate } from '../core/util.ts'
 import { allVectors, archiveInfo, clearSession, dayInfo, deleteArchiveEntry, listSessions, peekSession } from '../chat/session.ts'
 import { recentTurns } from '../chat/turnLog.ts'
@@ -36,6 +36,8 @@ interface Req { params: string[]; query: URLSearchParams; body: any }
 interface Route { method: string; pattern: RegExp; run: (r: Req) => Promise<Reply> | Reply; maxBody?: number }
 
 const startedAt = Date.now()
+/** Written the first time the setup wizard loads; until then the UI opens on the wizard. */
+const SETUP_SEEN_FILE = path.join(DATA_DIR, 'web-setup-seen.json')
 const MAX_STICKER_BYTES = 10 * 1024 * 1024
 
 /** Sticker as the UI sees it: no mface payload, plus whether a preview file exists. */
@@ -321,6 +323,7 @@ export const routes: Route[] = [
       catalog: ci,
       prices: { count: pc.count, age: pc.fetchedAt ? formatDuration(Date.now() - pc.fetchedAt) : '' },
       recentErrors: recentLogs(0, 'error').slice(-5),
+      firstRun: !fs.existsSync(SETUP_SEEN_FILE),
     }
   }),
 
@@ -366,7 +369,13 @@ export const routes: Route[] = [
       presets: PRESET_PROVIDERS, presetModels: PRESET_PROVIDERS.map(([, type, baseUrl]) => modelSuggestions({ type, baseUrl })), thinking: THINKING, problems: configProblems(cfg) }
   }),
   R('PUT', '/api/config', ({ body }) => setConfig(String(body.path ?? ''), body.value)),
-  R('GET', '/api/setup', ({ query }) => setupStatus(query.get('refresh') === '1')),
+  R('GET', '/api/setup', ({ query }) => {
+    if (!fs.existsSync(SETUP_SEEN_FILE)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true })
+      fs.writeFileSync(SETUP_SEEN_FILE, JSON.stringify({ at: Date.now() }))
+    }
+    return setupStatus(query.get('refresh') === '1')
+  }),
   R('PUT', '/api/setup', ({ body }) => {
     if (!Array.isArray(body.changes) || !body.changes.length || body.changes.length > 30) throw fail('请提供有效的设置项')
     const doc = YAML.parseDocument(config.readRaw())
