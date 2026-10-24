@@ -73,73 +73,6 @@ providers:
 # --------------------------------------------------------------------------
 # 模型名均为各家官方 API 的模型 ID（2026-10 核对）；价格自动从价格表获取。
 models:
-  # Anthropic：claude-sonnet-5-5（$2/$10）、claude-haiku-5-5（$0.1/$0.5），另有 claude-opus-5-5
-  # 本地模型别名，供指令、默认模型和备用列表引用
-  - id: sonnet
-    # 对应 providers 中的提供商名称
-    provider: anthropic
-    # 实际发送给上游 API 的模型 ID
-    model: claude-sonnet-5-5
-    # 本模型的思考强度，覆盖 chat.thinking；支持 auto
-    thinking: low
-    # 本模型的滚动费用限额，单位美元
-    quota:
-      # 每人 5 小时 $1、7 天 $2；0 表示不限
-      user:
-        # 每人滚动 5 小时费用上限，单位美元；0 表示不限
-        window5h: 1
-        # 每人滚动 7 天费用上限，单位美元；0 表示不限
-        weekly: 2
-  # 本地模型别名
-  - id: haiku
-    # 提供商配置名称
-    provider: anthropic
-    # 上游 API 的模型 ID
-    model: claude-haiku-5-5
-    # 本模型的思考强度
-    thinking: low
-  # OpenAI：gpt-6.1-sol（$2/$10）、gpt-6-luna（$0.1/$0.5），另有 gpt-6-astra
-  # 本地模型别名
-  - id: gpt
-    # 提供商配置名称
-    provider: openai
-    # 上游 API 的模型 ID
-    model: gpt-6.1-sol
-    # 本模型的思考强度
-    thinking: low
-    # 本模型的滚动费用限额，单位美元
-    quota:
-      # 每人 5 小时 $1、7 天 $2；0 表示不限
-      user:
-        # 每人滚动 5 小时费用上限，单位美元；0 表示不限
-        window5h: 1
-        # 每人滚动 7 天费用上限，单位美元；0 表示不限
-        weekly: 2
-  # 本地模型别名
-  - id: luna
-    # 提供商配置名称
-    provider: openai
-    # 上游 API 的模型 ID
-    model: gpt-6-luna
-    # 本模型的思考强度
-    thinking: low
-  # Gemini：gemini-4-argon（$2/$10）、gemini-3.8-flash（$0.75/$3.75）、gemini-3.5-flash-lite（$0.3/$2.5）
-  # 本地模型别名
-  - id: flash
-    # 提供商配置名称
-    provider: gemini
-    # 上游 API 的模型 ID
-    model: gemini-3.8-flash
-    # 本模型的思考强度
-    thinking: low
-  # 本地模型别名
-  - id: flash-lite
-    # 提供商配置名称
-    provider: gemini
-    # 上游 API 的模型 ID
-    model: gemini-3.5-flash-lite
-    # 本模型的思考强度
-    thinking: minimal
   # DeepSeek：deepseek-flash（便宜，分峰谷计价，按高峰价统计）、deepseek-v4-pro
   # 本地模型别名
   - id: deepseek
@@ -148,9 +81,12 @@ models:
     # 上游 API 的模型 ID
     model: deepseek-flash
     # 关闭思考；off 必须保留为字符串
-    thinking: 'off'
-    # 不支持直接图片输入，图片可交给 visionModel 识别
-    vision: false
+    thinking: auto
+    pricing: auto
+    # 是否允许使用工具调用
+    toolUse: true
+    # 是否支持直接图片输入
+    vision: true
 
 # 默认模型 id。留空 = 自动选择第一个配置了 Key 的模型
 defaultModel: ''
@@ -359,9 +295,9 @@ sticker:
   # 是否启用表情包选择与发送
   enable: true
   # 模型想发表情时实际发送的概率（模型本身也被要求“偶尔才发”）
-  probability: 0.6
+  probability: 1
   # 同一会话两次表情的最小间隔（秒）
-  cooldown: 180
+  cooldown: 30
   # 提示词里最多列出多少个表情
   maxInPrompt: 60
   # 识别表情用的视觉模型 id（留空 = visionModel / utilityModel / 默认模型）
@@ -399,7 +335,7 @@ tools:
     # 是否允许模型读取网页
     enable: true
     # 返回给模型的最大字符数
-    maxChars: 6000
+    maxChars: 8192
     # 单次网页读取超时，单位秒
     timeout: 15
     # deepseek = DeepSeek Fetch；复用 DeepSeek 搜索或提供商密钥
@@ -410,7 +346,7 @@ tools:
     # 允许访问内网地址（危险，默认禁止）
     allowPrivateNetwork: false
     # 每轮最多打开网页次数
-    maxPerTurn: 3
+    maxPerTurn: 10
   # 把自然语言请求转换为已验证的机器人插件指令
   botCommand:
     # 允许把自然语言转成当前已启用插件的指令执行
@@ -532,15 +468,15 @@ memory:
   # 长期事实记忆总开关
   enable: true
   # 每个人最多几条 / 总字数
-  userMaxEntries: 15
+  userMaxEntries: 20
   # 每个人全部事实记忆合计最多字符数
-  userMaxChars: 800
+  userMaxChars: 1000
   # 每个群最多几条 / 总字数
-  groupMaxEntries: 25
+  groupMaxEntries: 50
   # 每个群全部事实记忆合计最多字符数
-  groupMaxChars: 1500
+  groupMaxChars: 3000
   # 每条最多字数
-  entryMaxChars: 100
+  entryMaxChars: 200
   # 群记忆写入：all = 任何人的对话都可让模型记录 / admin = 仅管理员的对话 / off = 不记群记忆
   groupWrite: all
   # 达到上限 80% 时自动整理合并（使用 utilityModel）
@@ -568,13 +504,13 @@ memory:
     # 可写 env:VOYAGE_API_KEY 从环境变量读取
     apiKey: ''
     # 向量模型 ID，独立于聊天模型
-    model: voyage-4-lite
+    model: voyage-context-4
     # voyage-4 系列支持 256 / 512 / 1024 / 2048；改模型或维度后旧向量会自动重建
     dimensions: 512
     # 单次向量请求超时，单位秒
     timeout: 10
     # 余弦相似度达到此值即视为相关（即使没有共同关键词）
-    minScore: 0.5
+    minScore: 0.3
 
 # 技能：plugins/Yunzai-LLM-Plugin/skills/<名称>/SKILL.md
 skills:
