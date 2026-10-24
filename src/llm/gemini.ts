@@ -3,7 +3,7 @@ import { genCallId, geminiThinking, parseArgs, toolImages } from './common.ts'
 import { joinUrl, requestJson } from './http.ts'
 import { usesServerState } from './state.ts'
 import type { Adapter, ChatParams, ChatResult, Part, ToolCall } from './types.ts'
-import { LLMError } from './types.ts'
+import { joinThinking, LLMError } from './types.ts'
 
 /**
  * Gemini Interactions API (POST /v1beta/interactions).
@@ -57,7 +57,7 @@ export const gemini: Adapter = {
       }
     }
 
-    const generation_config: any = { max_output_tokens: p.maxTokens }
+    const generation_config: any = { max_output_tokens: p.maxTokens, thinking_summaries: 'auto' }
     const thinkingLevel = geminiThinking(p.thinking)
     if (thinkingLevel) generation_config.thinking_level = thinkingLevel
     if (p.temperature != null) generation_config.temperature = p.temperature
@@ -98,6 +98,8 @@ export const gemini: Adapter = {
       : undefined
     return {
       text,
+      reasoning: joinThinking(...steps.filter(step => step?.type === 'thought').flatMap(step =>
+        Array.isArray(step.summary) ? step.summary.filter((part: any) => part?.type === 'text').map((part: any) => part.text) : [])),
       toolCalls,
       usage: {
         input: Math.max(0, (u.total_input_tokens ?? 0) + (u.total_tool_use_tokens ?? 0) - cached),

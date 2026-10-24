@@ -2,7 +2,7 @@ import { deepMerge } from '../core/util.ts'
 import { dataUrl, genCallId, openaiEffort, parseArgs, toolImages } from './common.ts'
 import { joinUrl, requestJson } from './http.ts'
 import type { Adapter, ChatParams, ChatResult, Part, ToolCall } from './types.ts'
-import { stripThink } from './types.ts'
+import { inlineThinking, joinThinking, stripThink } from './types.ts'
 
 function userContent(parts: Part[], vision: boolean): any {
   if (!parts.some(p => p.type === 'image')) return parts.map(p => (p.type === 'text' ? p.text : '')).join('')
@@ -105,6 +105,10 @@ export const openaiChat: Adapter = {
 
     return {
       text: stripThink(contentText(msg.content)),
+      reasoning: joinThinking(msg.reasoning_content ?? msg.reasoning,
+        ...(Array.isArray(msg.reasoning_details) ? msg.reasoning_details.flatMap((part: any) =>
+          part?.type === 'reasoning.text' ? [part.text] : part?.type === 'reasoning.summary' ? [part.summary] : []) : []),
+        inlineThinking(contentText(msg.content))),
       toolCalls,
       usage: {
         input: Math.max(0, prompt - cacheRead - cacheWrite),

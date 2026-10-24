@@ -682,6 +682,17 @@ function addUsage(a, b) {
 function stripThink(text2) {
   return (text2 || "").replace(/<think>[\s\S]*?<\/think>\s*/gi, "").replace(/^[\s\S]*?<\/think>\s*/i, "");
 }
+function inlineThinking(text2) {
+  const blocks2 = [...text2.matchAll(/<think>([\s\S]*?)<\/think>/gi)].map((match) => match[1]);
+  if (!blocks2.length) {
+    const dangling = text2.match(/^([\s\S]*?)<\/think>/i);
+    if (dangling) blocks2.push(dangling[1]);
+  }
+  return joinThinking(...blocks2);
+}
+function joinThinking(...parts) {
+  return parts.filter((part) => typeof part === "string" && !!part.trim()).join("\n\n") || void 0;
+}
 function partsToText(parts) {
   return parts.map((p) => p.type === "text" ? p.text : "[\u56FE\u7247]").join("");
 }
@@ -2936,6 +2947,7 @@ var init_anthropic = __esm({
     init_util();
     init_common();
     init_http();
+    init_types();
     CACHEABLE_TAIL = /* @__PURE__ */ new Set(["text", "image", "tool_result"]);
     anthropic = {
       async chat(p) {
@@ -3003,7 +3015,7 @@ var init_anthropic = __esm({
         if (tools2.length) body.tools = tools2;
         const effort = anthropicEffort(p.thinking);
         if (effort) {
-          body.thinking = { type: "adaptive" };
+          body.thinking = { type: "adaptive", display: "summarized" };
           body.output_config = { effort };
         }
         const noSampling = /(?:haiku|sonnet|opus)[-.]5[-.]5(?:\b|$)/i.test(p.model.model);
@@ -3034,6 +3046,7 @@ var init_anthropic = __esm({
         const created = u.cache_creation_input_tokens ?? (u.cache_creation?.ephemeral_5m_input_tokens ?? 0) + w1h;
         return {
           text: text2,
+          reasoning: joinThinking(...content.filter((block) => block?.type === "thinking").map((block) => block.thinking)),
           toolCalls,
           usage: {
             input: u.input_tokens ?? 0,
@@ -3101,7 +3114,7 @@ var init_gemini = __esm({
             if (images.length) input.push(userInput(images));
           }
         }
-        const generation_config = { max_output_tokens: p.maxTokens };
+        const generation_config = { max_output_tokens: p.maxTokens, thinking_summaries: "auto" };
         const thinkingLevel = geminiThinking(p.thinking);
         if (thinkingLevel) generation_config.thinking_level = thinkingLevel;
         if (p.temperature != null) generation_config.temperature = p.temperature;
@@ -3136,6 +3149,7 @@ var init_gemini = __esm({
         const grounding = Array.isArray(u.grounding_tool_count) ? u.grounding_tool_count.find((g) => g?.type === "google_search")?.count : void 0;
         return {
           text: text2,
+          reasoning: joinThinking(...steps.filter((step) => step?.type === "thought").flatMap((step) => Array.isArray(step.summary) ? step.summary.filter((part) => part?.type === "text").map((part) => part.text) : [])),
           toolCalls,
           usage: {
             input: Math.max(0, (u.total_input_tokens ?? 0) + (u.total_tool_use_tokens ?? 0) - cached),
@@ -3253,6 +3267,11 @@ var init_openaiChat = __esm({
         const cacheWrite = u.prompt_tokens_details?.cache_write_tokens ?? 0;
         return {
           text: stripThink(contentText(msg.content)),
+          reasoning: joinThinking(
+            msg.reasoning_content ?? msg.reasoning,
+            ...Array.isArray(msg.reasoning_details) ? msg.reasoning_details.flatMap((part) => part?.type === "reasoning.text" ? [part.text] : part?.type === "reasoning.summary" ? [part.summary] : []) : [],
+            inlineThinking(contentText(msg.content))
+          ),
           toolCalls,
           usage: {
             input: Math.max(0, prompt - cacheRead - cacheWrite),
@@ -3319,7 +3338,7 @@ var init_openaiResponses = __esm({
         if (tools2.length) body.tools = tools2;
         const effort = openaiEffort(p.thinking);
         if (effort) {
-          body.reasoning = { effort };
+          body.reasoning = { effort, summary: "auto" };
           if (!store11) body.include = ["reasoning.encrypted_content"];
         }
         if (p.temperature != null) body.temperature = p.temperature;
@@ -3348,6 +3367,10 @@ var init_openaiResponses = __esm({
         const cacheRead = u.input_tokens_details?.cached_tokens ?? 0;
         return {
           text: stripThink(text2),
+          reasoning: joinThinking(...output.filter((item) => item?.type === "reasoning").flatMap((item) => [
+            ...Array.isArray(item.summary) ? item.summary.filter((part) => part?.type === "summary_text").map((part) => part.text) : [],
+            ...Array.isArray(item.content) ? item.content.filter((part) => part?.type === "reasoning_text").map((part) => part.text) : []
+          ]), inlineThinking(text2)),
           toolCalls,
           usage: {
             input: Math.max(0, (u.input_tokens ?? 0) - cacheRead),
@@ -5419,6 +5442,8 @@ function cleanEvent2(event) {
     outputTokens: event.outputTokens,
     isError: event.isError,
     thinking: event.thinking,
+    reasoning: event.reasoning ? agyHistoryText(event.reasoning) : void 0,
+    reasoningTokens: event.reasoningTokens,
     images: event.images,
     omittedImages: event.omittedImages
   };
@@ -6083,6 +6108,8 @@ ${session.summary}` }] });
         text: res.text || (res.toolCalls.length ? "\u6A21\u578B\u8BF7\u6C42\u8C03\u7528\u5DE5\u5177" : res.pause ? "\u6A21\u578B\u8BF7\u6C42\u7EE7\u7EED\u5904\u7406" : "\uFF08\u65E0\u53EF\u89C1\u6587\u5B57\uFF09"),
         step,
         thinking,
+        reasoning: res.reasoning,
+        reasoningTokens: res.usage.reasoning,
         ms: Date.now() - callStarted,
         inputTokens: res.usage.input,
         outputTokens: res.usage.output

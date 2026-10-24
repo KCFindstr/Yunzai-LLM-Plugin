@@ -126,6 +126,8 @@ export interface ChatParams {
 
 export interface ChatResult {
   text: string
+  /** Readable thinking or reasoning summaries explicitly returned by the provider. */
+  reasoning?: string
   toolCalls: ToolCall[]
   usage: Usage
   native?: NativeTurn
@@ -157,6 +159,20 @@ export class LLMError extends Error {
 export function stripThink(text: string): string {
   // second pass: a dangling </think> means the server omitted the opening tag
   return (text || '').replace(/<think>[\s\S]*?<\/think>\s*/gi, '').replace(/^[\s\S]*?<\/think>\s*/i, '')
+}
+
+/** Extract readable inline thinking without changing the delivered answer. */
+export function inlineThinking(text: string): string | undefined {
+  const blocks = [...text.matchAll(/<think>([\s\S]*?)<\/think>/gi)].map(match => match[1])
+  if (!blocks.length) {
+    const dangling = text.match(/^([\s\S]*?)<\/think>/i)
+    if (dangling) blocks.push(dangling[1])
+  }
+  return joinThinking(...blocks)
+}
+
+export function joinThinking(...parts: unknown[]): string | undefined {
+  return parts.filter((part): part is string => typeof part === 'string' && !!part.trim()).join('\n\n') || undefined
 }
 
 export function partsToText(parts: Part[]): string {

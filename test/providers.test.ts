@@ -23,6 +23,42 @@ function params(provider: ProviderConfig, model: Partial<ModelConfig>, messages:
 
 const userMsg: Msg = { role: 'user', content: [{ type: 'text', text: '天气如何' }, { type: 'image', data: 'AAAA', mime: 'image/png' }] }
 
+describe('readable provider thinking', () => {
+  const cases = [
+    { type: 'openai', response: { choices: [{ message: { content: 'answer', reasoning_content: 'visible thinking', reasoning_details: [{ type: 'reasoning.encrypted', data: 'opaque-secret' }] } }] } },
+    { type: 'openai-responses', response: { output: [{ type: 'reasoning', summary: [{ type: 'summary_text', text: 'visible thinking' }], encrypted_content: 'opaque-secret' }, { type: 'message', content: [{ type: 'output_text', text: 'answer' }] }] } },
+    { type: 'anthropic', response: { content: [{ type: 'thinking', thinking: 'visible thinking', signature: 'opaque-secret' }, { type: 'redacted_thinking', data: 'opaque-secret' }, { type: 'text', text: 'answer' }] } },
+    { type: 'gemini', response: { steps: [{ type: 'thought', summary: [{ type: 'text', text: 'visible thinking' }, { type: 'image', data: 'opaque-secret' }], signature: 'opaque-secret' }, { type: 'model_output', content: [{ type: 'text', text: 'answer' }] }] } },
+  ] as const
+  for (const fixture of cases) it(`${fixture.type} extracts readable thinking without signatures or encrypted data`, async () => {
+    const server = await mockServer(() => [200, fixture.response])
+    try {
+      const result = await chat(params({ type: fixture.type, baseUrl: server.url, apiKey: 'mock' }, {}, [userMsg]))
+      assert.equal(result.text, 'answer')
+      assert.equal(result.reasoning, 'visible thinking')
+      const body = server.requests[0].body
+      if (fixture.type === 'gemini') assert.equal(body.generation_config.thinking_summaries, 'auto')
+      if (fixture.type === 'openai-responses') assert.equal(body.reasoning.summary, 'auto')
+      if (fixture.type === 'anthropic') assert.equal(body.thinking.display, 'summarized')
+    } finally { await server.close() }
+  })
+  for (const fixture of [
+    { type: 'gemini', extraBody: { generation_config: { thinking_summaries: 'none' } } },
+    { type: 'openai-responses', extraBody: { reasoning: { summary: null } } },
+    { type: 'anthropic', extraBody: { thinking: { display: 'omitted' } } },
+  ] as const) it(`${fixture.type} preserves explicit summary-display overrides`, async () => {
+    const server = await mockServer(() => [200, {}])
+    try {
+      const result = await chat(params({ type: fixture.type, baseUrl: server.url, apiKey: 'mock' }, { extraBody: fixture.extraBody }, [userMsg]))
+      const body = server.requests[0].body
+      if (fixture.type === 'gemini') assert.equal(body.generation_config.thinking_summaries, 'none')
+      if (fixture.type === 'openai-responses') assert.equal(body.reasoning.summary, null)
+      if (fixture.type === 'anthropic') assert.equal(body.thinking.display, 'omitted')
+      assert.equal(result.reasoning, undefined)
+    } finally { await server.close() }
+  })
+})
+
 describe('system prompt literal content', () => {
   for (const type of ['openai', 'anthropic', 'openai-responses', 'gemini'] as const) {
     it(`${type} preserves Markdown and intentional backslashes after JSON decoding`, async () => {
@@ -91,6 +127,7 @@ describe('openai chat completions', () => {
     assert.equal(body.messages[2].reasoning_content, 'r')
     assert.deepEqual(body.messages[3], { role: 'tool', tool_call_id: 'c1', content: '晴' })
     assert.equal(res.text, '晴天')
+    assert.equal(res.reasoning, 'hmm')
   })
 
   it('rotates keys on 401 and retries 429', async () => {
@@ -174,7 +211,7 @@ describe('anthropic messages', () => {
     const lastBlock = req.body.messages.at(-1).content.at(-1)
     assert.deepEqual(lastBlock.cache_control, { type: 'ephemeral' }, 'breakpoint on last user block')
     assert.equal(req.body.messages[0].content[1].source.type, 'base64')
-    assert.deepEqual(req.body.thinking, { type: 'adaptive' })
+    assert.deepEqual(req.body.thinking, { type: 'adaptive', display: 'summarized' })
     assert.deepEqual(req.body.output_config, { effort: 'low' })
     assert.equal(req.body.temperature, undefined)
     assert.equal(req.body.tools.at(-1).type, 'web_search_20260209')
@@ -232,7 +269,7 @@ describe('openai responses', () => {
     assert.equal(b.input[0].content[1].type, 'input_image')
     assert.equal(b.store, false)
     assert.deepEqual(b.include, ['reasoning.encrypted_content'])
-    assert.deepEqual(b.reasoning, { effort: 'low' })
+    assert.deepEqual(b.reasoning, { effort: 'low', summary: 'auto' })
     assert.ok(b.tools.some((t: any) => t.type === 'web_search'))
     assert.equal(b.tools[0].name, 'get_weather')
     assert.equal(res.text, '好的')

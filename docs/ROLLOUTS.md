@@ -4,6 +4,18 @@
 
 新执行还会保存思考强度的选择过程：固定配置、快速判断、关键词规则或自动判断模型（包括 Jev）的响应。Jev 响应保留分类、置信度、分类概率、模型与用量；判断失败会显示回退原因。图片导致分类提高时，原始判断和实际分类分别保留。主模型接口拒绝思考设置时，显示原先选中的强度以及实际使用的强度；每轮模型响应也带有实际强度。旧记录中没有保存的信息不会用当前配置补填。
 
+模型思考内容的返回设置：
+
+| 接口 | 请求与记录方式 |
+| --- | --- |
+| [Gemini Interactions](https://ai.google.dev/gemini-api/docs/thinking#thought-summaries) | 请求 `generation_config.thinking_summaries: auto`，保存 `thought.summary` 中的文字。 |
+| [OpenAI Responses](https://developers.openai.com/api/docs/guides/reasoning) | 开启思考时请求 `reasoning.summary: auto`，保存接口返回的推理摘要。OpenAI Chat Completions 不提供相同的摘要开关。 |
+| [Anthropic Messages](https://platform.claude.com/docs/en/build-with-claude/thinking) | 开启思考时显式设置 `thinking.display: summarized`，避免新模型默认省略文字。 |
+| [OpenRouter](https://openrouter.ai/docs/guides/best-practices/reasoning-tokens) | 默认返回可用的推理内容；读取 `reasoning` / `reasoning_details` 的文字，不保存加密部分。 |
+| [DeepSeek](https://api-docs.deepseek.com/guides/thinking_mode/)、[Kimi](https://github.com/MoonshotAI/Kimi-K2.5)、GLM、[DashScope](https://help.aliyun.com/zh/model-studio/deep-thinking)、[SiliconFlow](https://docs.siliconflow.cn/docs/api/chat-completions-post)、Ollama 的兼容接口 | 读取 `reasoning_content` 或内嵌 `<think>`。是否启用思考取决于具体模型，不能由存在思考 token 推定会返回文字；如 DashScope 部分模型需通过模型的 `extraBody.enable_thinking: true` 开启。 |
+
+模型配置中的 `extraBody` 可显式覆盖以上摘要设置。接口即使启用了摘要也可能只返回思考用量；此时步骤仍显示「思考过程」及 token 数，展开后说明接口没有返回可读内容，不生成或伪造思考文本。
+
 思考强度与 Jev 的三类概率显示在同一个时间线步骤中，原始判断响应默认折叠。工具开始与返回合并显示，长文本可展开。执行详情中的“可用工具”和“聊天上下文”默认折叠，保存本轮初始请求的工具定义、系统提示和消息上下文。接口重试时会更新为本轮重试使用的初始请求；后续工具轮次仍通过时间线查看。上下文快照最多 128 KiB、200 条消息、100 个工具，超过上限时显示截取提示；列表接口不会传输这些快照。
 
 聊天上下文按来源展示：当前消息单独显示；最近群聊、历史对话、对话摘要、长期记忆与检索结果、群友身份参考、系统提示分别折叠。原始消息快照仍可展开检查，新记录另存组装时的结构和来源；旧记录按已有提示标记进行展示拆分，不补写缺失的内容。
@@ -24,4 +36,4 @@ AGY 和电脑任务完成后，主聊天模型整理结果的轮次也会单独�
 
 记录结束后保留 30 天，启动时、访问时和每小时按索引清理过期详情文件与图片；不再按总数量或总大小提前删除。页面显示保留期限。每次执行最多保留 500 条 / 256 KiB 事件，超出时显示截断提示。重启后未结束的执行标记为已中断。
 
-记录复用 AGY 的敏感信息过滤，写入和读取时均过滤密钥、私有路径等文本内容；供应商内部推理和原生会话状态不写入记录。工具返回给模型的本地 PNG/JPEG/WebP/GIF 图片保存到 `data/rollout-images/<执行ID>/`，通过认证接口 `GET /api/rollouts/:id/images/:image` 显示在工具步骤内，可点击查看原图。每张最多 10 MiB、每次执行最多 64 张 / 64 MiB；无法保存时显示遗漏数量，不主动抓取远程图片 URL。输入上下文仍只记录图片数量。图片原始内容不会经过文本脱敏。详细记录及上下文快照从更新后新开始的执行生效，旧对话摘要仍在“对话”中查看。构建后重启机器人以加载后端记录逻辑。
+记录复用 AGY 的敏感信息过滤，写入和读取时均过滤密钥、私有路径等文本内容；模型接口明确返回的可读思考文本或推理摘要会随每轮模型响应保存，在该步骤内以「思考过程」默认折叠展示，并显示接口报告的思考 token 数；不请求或解密隐藏推理，加密推理、签名和原生会话状态不写入记录。思考文本与普通响应使用相同的脱敏及事件保存上限。旧记录未保存的思考内容无法补回。工具返回给模型的本地 PNG/JPEG/WebP/GIF 图片保存到 `data/rollout-images/<执行ID>/`，通过认证接口 `GET /api/rollouts/:id/images/:image` 显示在工具步骤内，可点击查看原图。每张最多 10 MiB、每次执行最多 64 张 / 64 MiB；无法保存时显示遗漏数量，不主动抓取远程图片 URL。输入上下文仍只记录图片数量。图片原始内容不会经过文本脱敏。详细记录及上下文快照从更新后新开始的执行生效，旧对话摘要仍在“对话”中查看。构建后重启机器人以加载后端记录逻辑。

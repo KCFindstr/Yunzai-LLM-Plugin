@@ -98,13 +98,17 @@ function timelineEvent(event, opened, r) {
     markdownControls,
     h('time', { class: 'small muted', dateTime: new Date(event.at).toISOString() }, new Date(event.at).toLocaleTimeString('zh-CN', { hour12: false })))
   const contents = [
+    event.reasoning || event.reasoningTokens > 0 ? h('details', { class: 'quiet-details rollout-reasoning', 'data-disclosure': `reasoning:${event.seq}`, open: opened.get(`reasoning:${event.seq}`) ?? false },
+      h('summary', '思考过程', event.reasoningTokens ? badge(`${fmt.num(event.reasoningTokens)} tokens`) : null),
+      event.reasoning ? h('pre', { class: 'small mono' }, event.reasoning)
+        : h('p', { class: 'small muted' }, '接口报告了思考用量，但未返回可读的思考内容。')) : null,
     event.images?.length ? h('div', { class: 'rollout-images' }, event.images.map((image, index) => {
       const url = `/api/rollouts/${enc(r.id)}/images/${enc(image.id)}`
       return h('a', { href: url, target: '_blank', rel: 'noopener' }, h('img', { src: url, loading: 'lazy', alt: `${event.tool ?? '工具'} 返回的图片 ${index + 1}` }))
     })) : null,
     event.omittedImages ? h('p', { class: 'small warn' }, `${event.omittedImages} 张图片无法保存或超出图片保存上限。`) : null,
     event.text ? textBlock(event.text, { key: `text:${event.seq}`, open: opened.get(`text:${event.seq}`), limit: 280, markdown: event.kind === 'response', controlsTarget: markdownControls, className: event.isError ? 'small bad' : 'small' }) : null,
-    event.inputTokens != null ? h('div', { class: 'small muted' }, `输入 ${fmt.num(event.inputTokens)} / 输出 ${fmt.num(event.outputTokens)}`) : null,
+    event.inputTokens != null ? h('div', { class: 'small muted' }, `输入 ${fmt.num(event.inputTokens)} / 输出 ${fmt.num(event.outputTokens)}${event.reasoningTokens ? ` / 思考 ${fmt.num(event.reasoningTokens)}` : ''}`) : null,
     event.callId ? h('div', { class: 'small muted mono' }, event.callId) : null,
     event.args ? h('details', { class: 'computer-arguments', 'data-disclosure': argsKey, open: opened.get(argsKey) },
       h('summary', '调用参数'), h('pre', { class: 'small mono' }, event.args)) : null,

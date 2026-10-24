@@ -39,6 +39,8 @@ export interface RolloutEvent {
   ms?: number
   inputTokens?: number
   outputTokens?: number
+  reasoning?: string
+  reasoningTokens?: number
   isError?: boolean
   thinking?: ThinkingLevel
 }
@@ -135,6 +137,7 @@ function cleanEvent(event: RolloutEvent): RolloutEvent {
     callId: event.callId && agyHistoryText(event.callId, undefined, 100),
     args: event.args && agyHistoryText(event.args), phase: event.phase, ms: event.ms,
     inputTokens: event.inputTokens, outputTokens: event.outputTokens, isError: event.isError, thinking: event.thinking,
+    reasoning: event.reasoning ? agyHistoryText(event.reasoning) : undefined, reasoningTokens: event.reasoningTokens,
     images: event.images, omittedImages: event.omittedImages,
   }
 }

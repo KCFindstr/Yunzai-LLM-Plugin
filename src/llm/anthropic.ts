@@ -2,6 +2,7 @@ import { deepMerge } from '../core/util.ts'
 import { anthropicEffort } from './common.ts'
 import { joinUrl, requestJson } from './http.ts'
 import type { Adapter, ChatParams, ChatResult, ImagePart, ToolCall } from './types.ts'
+import { joinThinking } from './types.ts'
 
 const CACHEABLE_TAIL = new Set(['text', 'image', 'tool_result'])
 
@@ -91,7 +92,7 @@ export const anthropic: Adapter = {
     if (tools.length) body.tools = tools
     const effort = anthropicEffort(p.thinking)
     if (effort) {
-      body.thinking = { type: 'adaptive' }
+      body.thinking = { type: 'adaptive', display: 'summarized' }
       body.output_config = { effort }
     }
     const noSampling = /(?:haiku|sonnet|opus)[-.]5[-.]5(?:\b|$)/i.test(p.model.model)
@@ -125,6 +126,7 @@ export const anthropic: Adapter = {
     const created = u.cache_creation_input_tokens ?? (u.cache_creation?.ephemeral_5m_input_tokens ?? 0) + w1h
     return {
       text,
+      reasoning: joinThinking(...content.filter(block => block?.type === 'thinking').map(block => block.thinking)),
       toolCalls,
       usage: {
         input: u.input_tokens ?? 0,

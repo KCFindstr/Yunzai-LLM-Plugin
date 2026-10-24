@@ -17,13 +17,13 @@ it('records each live model round and parallel tool result, then persists a filt
   const slowStarted = new Promise<void>(resolve => { started = resolve })
   const secret = 'rollout-test-secret'
   const server = await mockServer((_req, n) => n > 2 ? [500, { error: { message: 'model failed' } }] : [200, {
-    choices: [{ message: n === 1 ? { content: '正在检查', reasoning_content: 'provider-private-reasoning', tool_calls: [
+    choices: [{ message: n === 1 ? { content: '正在检查', reasoning_content: `先检查工具结果 ${secret} alice@example.com`, tool_calls: [
       { id: 'quick-call', type: 'function', function: { name: 'rollout_quick', arguments: JSON.stringify({ password: secret, query: '公开查询' }) } },
       { id: 'slow-call', type: 'function', function: { name: 'rollout_slow', arguments: '{}' } },
       { id: 'bad-call', type: 'function', function: { name: 'not_offered', arguments: '{}' } },
       { id: 'json-call', type: 'function', function: { name: 'rollout_quick', arguments: '{bad' } },
     ] } : { content: '检查完成' }, finish_reason: n === 1 ? 'tool_calls' : 'stop' }],
-    usage: { prompt_tokens: 120, completion_tokens: 20 },
+    usage: { prompt_tokens: 120, completion_tokens: 20, completion_tokens_details: { reasoning_tokens: 10 } },
   }])
   writeUserConfig(`providers:\n  mock: { type: openai, baseUrl: '${server.url}', apiKey: ${secret}, maxRetries: 0 }\nmodels:\n  - { id: main, provider: mock, model: fake, pricing: { input: 1, output: 2 } }\ndefaultModel: main\nfallbackModels: []\nchat: { thinking: off, summarize: false }\nmemory: { enable: false }\ntools: { webSearch: { enable: false } }\n`)
   config.load()
@@ -42,6 +42,7 @@ it('records each live model round and parallel tool result, then persists a filt
     assert.equal(live.status, 'running')
     const events = rolloutHistory(live.id)!.events
     assert.ok(events.some(event => event.kind === 'response' && event.text === '正在检查'))
+    assert.ok(events.some(event => event.kind === 'response' && event.reasoning?.includes('先检查工具结果') && event.reasoningTokens === 10))
     assert.ok(events.some(event => event.callId === 'quick-call' && event.phase === 'completed'))
     assert.ok(!events.some(event => event.callId === 'slow-call' && event.phase === 'completed'))
     assert.equal(events.filter(event => event.phase === 'completed' && event.isError).length, 2)
@@ -77,7 +78,8 @@ it('records each live model round and parallel tool result, then persists a filt
       .map(file => fs.readFileSync(path.join(directory, file), 'utf8')).join('\n')
     assert.ok(!('context' in JSON.parse(index).rollouts[0]))
     assert.ok(!('events' in JSON.parse(index).rollouts[0]))
-    for (const hidden of [secret, 'alice@example.com', 'provider-private-reasoning']) assert.ok(!persisted.includes(hidden), hidden)
+    assert.ok(persisted.includes('先检查工具结果'))
+    for (const hidden of [secret, 'alice@example.com']) assert.ok(!persisted.includes(hidden), hidden)
   } finally { release(); await pending; await server.close() }
 })
 

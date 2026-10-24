@@ -275,7 +275,8 @@ async function runTurnInner(req: TurnRequest, ref: { turn?: TurnState; rolloutId
       record(model, quotaCtx, c, res.usage)
       updateRollout(ref.rolloutId, { steps: step, cost, tokens: turnInfo().tokens })
       recordRolloutEvent(ref.rolloutId, { kind: 'response', text: res.text || (res.toolCalls.length ? '模型请求调用工具' : res.pause ? '模型请求继续处理' : '（无可见文字）'),
-        step, thinking, ms: Date.now() - callStarted, inputTokens: res.usage.input, outputTokens: res.usage.output })
+        step, thinking, reasoning: res.reasoning, reasoningTokens: res.usage.reasoning,
+        ms: Date.now() - callStarted, inputTokens: res.usage.input, outputTokens: res.usage.output })
       msgs.push({ role: 'assistant', content: res.text, toolCalls: res.toolCalls, native: res.native, responseId: res.responseId })
       lastResponseId = res.responseId
       state = res.responseId && serverState ? { previousId: res.responseId, skip: msgs.length } : undefined

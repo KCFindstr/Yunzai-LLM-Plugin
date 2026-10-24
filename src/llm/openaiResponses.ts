@@ -2,7 +2,7 @@ import { deepMerge } from '../core/util.ts'
 import { dataUrl, genCallId, openaiEffort, parseArgs, toolImages } from './common.ts'
 import { joinUrl, requestJson } from './http.ts'
 import type { Adapter, ChatParams, ChatResult, Part, ToolCall } from './types.ts'
-import { stripThink } from './types.ts'
+import { inlineThinking, joinThinking, stripThink } from './types.ts'
 
 /** OpenAI Responses API (POST /responses). */
 export const openaiResponses: Adapter = {
@@ -50,7 +50,7 @@ export const openaiResponses: Adapter = {
     if (tools.length) body.tools = tools
     const effort = openaiEffort(p.thinking)
     if (effort) {
-      body.reasoning = { effort }
+      body.reasoning = { effort, summary: 'auto' }
       if (!store) body.include = ['reasoning.encrypted_content']
     }
     if (p.temperature != null) body.temperature = p.temperature
@@ -81,6 +81,10 @@ export const openaiResponses: Adapter = {
     const cacheRead = u.input_tokens_details?.cached_tokens ?? 0
     return {
       text: stripThink(text),
+      reasoning: joinThinking(...output.filter(item => item?.type === 'reasoning').flatMap(item => [
+        ...(Array.isArray(item.summary) ? item.summary.filter((part: any) => part?.type === 'summary_text').map((part: any) => part.text) : []),
+        ...(Array.isArray(item.content) ? item.content.filter((part: any) => part?.type === 'reasoning_text').map((part: any) => part.text) : []),
+      ]), inlineThinking(text)),
       toolCalls,
       usage: {
         input: Math.max(0, (u.input_tokens ?? 0) - cacheRead),
