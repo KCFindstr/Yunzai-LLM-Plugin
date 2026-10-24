@@ -7,7 +7,7 @@ import { describe, it } from 'node:test'
 const { registry } = await import('../src/tools/registry.ts')
 const { registerStickerTools } = await import('../src/stickers/tool.ts')
 const { addImageSticker, listStickers, removeSticker, stickerFile } = await import('../src/stickers/store.ts')
-const { extractStickerMarkers, stickerPromptLines } = await import('../src/stickers/picker.ts')
+const { extractStickerMarkers, sendSticker, stickerPromptLines } = await import('../src/stickers/picker.ts')
 
 registerStickerTools()
 
@@ -45,6 +45,19 @@ describe('sticker store & prompt', () => {
     assert.deepEqual(extractStickerMarkers('好耶 [表情:狗头]').names, ['狗头'])
     assert.deepEqual(extractStickerMarkers('（表情：开心）好').names, ['开心'])
     assert.equal(extractStickerMarkers('（表情：开心）好').text, '好')
+  })
+
+  it('does not count wrapped adapter failures as successful sends', async () => {
+    const [s] = addImageSticker(Buffer.concat([PNG, Buffer.from('delivery')]), { name: '发送测试' })
+    const cfg = { sendAs: 'sticker' as const, maxSendSize: 240 }
+    try {
+      for (const result of [false, { error: [Error('QQBot delivery failed')] }, { status: 'failed', retcode: -1 }]) {
+        assert.equal(await sendSticker({ reply: async () => result }, s, cfg), false)
+        assert.equal(s.uses, 0)
+      }
+      assert.equal(await sendSticker({ reply: async () => ({ message_id: 1, error: [] }) }, s, cfg), true)
+      assert.equal(s.uses, 1)
+    } finally { removeSticker(s.id) }
   })
 })
 

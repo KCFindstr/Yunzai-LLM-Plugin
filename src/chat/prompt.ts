@@ -98,7 +98,8 @@ export function buildHeader(e: any, eff: EffectiveConfig, input: ExtractedInput,
   if (input.quoted) {
     const id = input.quoted.senderId ? `(平台ID ${input.quoted.senderId})` : ''
     const src = input.quoted.fromBot ? `你${id}之前发的` : `${input.quoted.name}${id} 的`
-    quote.push(`【引用${src}消息】${truncate(input.quoted.text || '[非文本消息]', 300)}`)
+    const label = input.quoted.senderId ? `引用${src}消息` : `引用消息｜发送者ID未知${input.quoted.name !== '某人' ? `｜${input.quoted.name}` : ''}`
+    quote.push(`【${label}】${truncate(input.quoted.text || '[非文本消息]', 300)}`)
   }
   const render = (lines: string[]) => `${[...lines, head].join('\n')}\n`
   const memory = opts.memory ? [opts.memory] : []

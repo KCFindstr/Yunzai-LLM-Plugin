@@ -3971,10 +3971,15 @@ async function sendSticker(e, s, cfg) {
   const seg2 = await stickerSegment(s, cfg);
   if (!seg2) return false;
   try {
-    const res = await e.reply(seg2);
-    if (res?.error && s.kind === "mface" && s.file) {
+    const failed = (res2) => res2 === false || (Array.isArray(res2?.error) ? res2.error.length > 0 : Boolean(res2?.error)) || res2?.status === "failed" || res2?.retcode != null && res2.retcode !== 0 && res2.retcode !== 1;
+    let res = await e.reply(seg2);
+    if (failed(res) && s.kind === "mface" && s.file) {
       const fallback = await stickerSegment({ ...s, kind: "image" }, cfg);
-      if (fallback) await e.reply(fallback);
+      if (fallback) res = await e.reply(fallback);
+    }
+    if (failed(res)) {
+      log.warn("\u53D1\u9001\u8868\u60C5\u5931\u8D25\uFF1A\u9002\u914D\u5668\u8FD4\u56DE\u53D1\u9001\u5931\u8D25");
+      return false;
     }
     markUsed(s);
     return true;
@@ -4844,7 +4849,8 @@ function buildHeader(e, eff, input, isAdmin, opts = {}) {
   if (input.quoted) {
     const id = input.quoted.senderId ? `(\u5E73\u53F0ID ${input.quoted.senderId})` : "";
     const src = input.quoted.fromBot ? `\u4F60${id}\u4E4B\u524D\u53D1\u7684` : `${input.quoted.name}${id} \u7684`;
-    quote.push(`\u3010\u5F15\u7528${src}\u6D88\u606F\u3011${truncate(input.quoted.text || "[\u975E\u6587\u672C\u6D88\u606F]", 300)}`);
+    const label = input.quoted.senderId ? `\u5F15\u7528${src}\u6D88\u606F` : `\u5F15\u7528\u6D88\u606F\uFF5C\u53D1\u9001\u8005ID\u672A\u77E5${input.quoted.name !== "\u67D0\u4EBA" ? `\uFF5C${input.quoted.name}` : ""}`;
+    quote.push(`\u3010${label}\u3011${truncate(input.quoted.text || "[\u975E\u6587\u672C\u6D88\u606F]", 300)}`);
   }
   const render2 = (lines) => `${[...lines, head].join("\n")}
 `;

@@ -77,6 +77,9 @@ describe('quoted sender identity', () => {
     const unknown = await extractInput({ reply_id: 'original', getReply: async () => ({ message: [] }) }, { ...opts, includeImages: false })
     assert.equal(unknown.quoted!.senderId, undefined)
     assert.equal(unknown.quoted!.fromBot, false)
+    const header = buildHeader({ user_id: 20001 }, config.effective(), unknown, false)
+    assert.match(header.sent, /引用消息｜发送者ID未知/)
+    assert.doesNotMatch(header.sent, /引用某人|引用.*平台ID 20001/)
   })
 })
 

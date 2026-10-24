@@ -90,12 +90,15 @@ export async function sendSticker(e: any, s: Sticker, cfg: Pick<StickerSection, 
   const seg = await stickerSegment(s, cfg)
   if (!seg) return false
   try {
-    const res = await e.reply(seg)
-    if (res?.error && s.kind === 'mface' && s.file) {
+    const failed = (res: any) => res === false || (Array.isArray(res?.error) ? res.error.length > 0 : Boolean(res?.error)) ||
+      res?.status === 'failed' || (res?.retcode != null && res.retcode !== 0 && res.retcode !== 1)
+    let res = await e.reply(seg)
+    if (failed(res) && s.kind === 'mface' && s.file) {
       // market faces can fail (expired key / not owned): fall back to the preview image
       const fallback = await stickerSegment({ ...s, kind: 'image' }, cfg)
-      if (fallback) await e.reply(fallback)
+      if (fallback) res = await e.reply(fallback)
     }
+    if (failed(res)) { log.warn('发送表情失败：适配器返回发送失败'); return false }
     markUsed(s)
     return true
   } catch (err: any) {
