@@ -7,7 +7,7 @@ const responseModes = (() => {
 })()
 
 /** Each response owns its presentation state; live refreshes and reloads retain only that response's choice. */
-function responseBlock(text, { key, wrapperClass = '', ...options } = {}) {
+function responseBlock(text, { key, wrapperClass = '', controlsTarget, ...options } = {}) {
   const identity = `${location.hash}:${key}`
   let enabled = responseModes.get(identity) !== false
   const body = h('div', { class: 'response-content' })
@@ -15,14 +15,16 @@ function responseBlock(text, { key, wrapperClass = '', ...options } = {}) {
     const open = body.querySelector('details[data-disclosure]')?.open ?? options.open
     mount(body, contentBlock(text, { ...options, key, open, markdown: enabled }))
   }
-  const control = h('label', { class: 'markdown-switch' }, h('input', { type: 'checkbox', role: 'switch', checked: enabled, 'aria-label': '渲染 Markdown', onchange: e => {
-    enabled = e.target.checked
+  const control = h('button', { type: 'button', class: 'markdown-chip', 'data-response-control': key, 'aria-label': '渲染 Markdown', 'aria-pressed': String(enabled), onclick: () => {
+    enabled = !enabled
+    control.setAttribute('aria-pressed', String(enabled))
     responseModes.delete(identity); responseModes.set(identity, enabled)
     while (responseModes.size > 200) responseModes.delete(responseModes.keys().next().value)
     try { localStorage.setItem('response-markdown', JSON.stringify(Object.fromEntries(responseModes))) } catch {}
     draw()
-  } }), h('span', '渲染 Markdown'))
-  const root = h('div', { class: `response-block ${wrapperClass}`, 'data-response-key': key }, h('div', { class: 'response-controls' }, control), body)
+  } }, '渲染 Markdown')
+  if (controlsTarget) controlsTarget.append(control)
+  const root = h('div', { class: `response-block ${wrapperClass}`, 'data-response-key': key }, controlsTarget ? null : h('div', { class: 'response-controls' }, control), body)
   draw()
   return root
 }

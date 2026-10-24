@@ -86,6 +86,7 @@ function timelineEvent(event, opened, r) {
   const key = `event:${event.seq}`
   const argsKey = `args:${event.seq}`
   const isExpandable = event.kind === 'tool'
+  const markdownControls = event.kind === 'response' && event.text ? h('span', { class: 'response-inline-controls' }) : null
   const title = h('div', { class: 'computer-event-head' },
     h('strong', event.tool || label),
     isExpandable ? expandIndicator() : null,
@@ -94,6 +95,7 @@ function timelineEvent(event, opened, r) {
     event.thinking ? badge(`思考 ${event.thinking}`) : null,
     event.phase ? badge(event.phase === 'running' ? '执行中' : event.phase === 'skipped' ? '未执行' : event.isError ? '失败' : '已返回', event.isError ? 'bad' : event.phase === 'running' ? 'accent' : '') : null,
     event.ms != null ? h('span', { class: 'small muted' }, fmt.dur(event.ms)) : null,
+    markdownControls,
     h('time', { class: 'small muted', dateTime: new Date(event.at).toISOString() }, new Date(event.at).toLocaleTimeString('zh-CN', { hour12: false })))
   const contents = [
     event.images?.length ? h('div', { class: 'rollout-images' }, event.images.map((image, index) => {
@@ -101,7 +103,7 @@ function timelineEvent(event, opened, r) {
       return h('a', { href: url, target: '_blank', rel: 'noopener' }, h('img', { src: url, loading: 'lazy', alt: `${event.tool ?? '工具'} 返回的图片 ${index + 1}` }))
     })) : null,
     event.omittedImages ? h('p', { class: 'small warn' }, `${event.omittedImages} 张图片无法保存或超出图片保存上限。`) : null,
-    event.text ? textBlock(event.text, { key: `text:${event.seq}`, open: opened.get(`text:${event.seq}`), limit: 280, markdown: event.kind === 'response', className: event.isError ? 'small bad' : 'small' }) : null,
+    event.text ? textBlock(event.text, { key: `text:${event.seq}`, open: opened.get(`text:${event.seq}`), limit: 280, markdown: event.kind === 'response', controlsTarget: markdownControls, className: event.isError ? 'small bad' : 'small' }) : null,
     event.inputTokens != null ? h('div', { class: 'small muted' }, `输入 ${fmt.num(event.inputTokens)} / 输出 ${fmt.num(event.outputTokens)}`) : null,
     event.callId ? h('div', { class: 'small muted mono' }, event.callId) : null,
     event.args ? h('details', { class: 'computer-arguments', 'data-disclosure': argsKey, open: opened.get(argsKey) },
@@ -186,6 +188,7 @@ export async function render(root, [id]) {
     const [label, kind] = STATUS[r.status] ?? [r.status, '']
     const execution = timelineEntries(r)
     const progress = r.events.at(-1)
+    const replyControls = r.reply ? h('span', { class: 'response-inline-controls' }) : null
     mount(detail,
       card(h('span', { class: 'card-title' }, icon('layers'), '执行详情', badge(label, kind)),
         textBlock(r.input, { key: 'request', open: opened.get('request'), className: 'computer-task-text', limit: 220 }),
@@ -202,8 +205,8 @@ export async function render(root, [id]) {
         r.jobId ? h('a', { class: 'small', href: `#/${r.source === 'agy' ? 'agy' : 'computer'}/${enc(r.jobId)}` }, '查看来源任务 →') : null,
         ['running', 'queued'].includes(r.status) ? h('div', { class: 'computer-progress small', role: 'status' }, spinner(),
           r.status === 'queued' ? '等待处理' : progress?.kind === 'tool' ? `${progress.tool} ${progress.phase === 'running' ? '执行中' : '已返回'}` : progress?.text || '正在处理') : null),
-      card(h('span', { class: 'card-title' }, icon('chat'), '最终回复'),
-        r.reply ? textBlock(r.reply, { key: 'reply', open: opened.get('reply'), limit: 560, className: 'rollout-reply', markdown: true }) : empty(['queued', 'running'].includes(r.status) ? '执行结束后会显示最终回复。' : '本次执行没有生成最终回复。')),
+      card(h('span', { class: 'card-title' }, icon('chat'), '最终回复', replyControls),
+        r.reply ? textBlock(r.reply, { key: 'reply', open: opened.get('reply'), limit: 560, className: 'rollout-reply', markdown: true, controlsTarget: replyControls }) : empty(['queued', 'running'].includes(r.status) ? '执行结束后会显示最终回复。' : '本次执行没有生成最终回复。')),
       requestDetails(r, opened),
       card(h('span', { class: 'card-title' }, icon('logs'), '执行记录', badge(`${execution.length} 条`)),
         r.dropped ? h('p', { class: 'small warn' }, `较早的 ${r.dropped} 条记录已超过保留上限，以下为最近记录。`) : null,
