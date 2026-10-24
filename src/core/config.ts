@@ -320,6 +320,11 @@ export function normalize(raw: any): PluginConfig {
   }
   c.sticker = isPlainObject(c.sticker) ? c.sticker : {}
   c.tools = isPlainObject(c.tools) ? c.tools : {}
+  for (const [name, fallback] of Object.entries({ sendImage: 2, readImage: 8, loadSkill: 8, listStickers: 4 })) {
+    const tool = isPlainObject(c.tools[name]) ? c.tools[name] : {}
+    const value = Number(tool.maxPerTurn ?? fallback)
+    c.tools[name] = { ...tool, maxPerTurn: Number.isFinite(value) ? Math.min(32, Math.max(0, Math.floor(value))) : fallback }
+  }
   const ws = isPlainObject(c.tools.webSearch) ? c.tools.webSearch : {}
   c.tools.webSearch = {
     enable: ws.enable !== false,

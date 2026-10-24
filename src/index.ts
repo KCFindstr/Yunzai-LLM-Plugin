@@ -1,3 +1,4 @@
+import { registerImageTools } from './tools/images.ts'
 import { LLMAdmin } from './apps/admin.ts'
 import { LLMChat } from './apps/chat.ts'
 import { startPriceRefresh } from './billing/pricing.ts'
@@ -41,6 +42,7 @@ function startup() {
   registerStickerTools()
   registerRenderTool()
   registerExecTool()
+  registerImageTools()
   registerComputerTool()
   registerAgyTool()
   registerGoogleLensTool()

@@ -37,6 +37,11 @@ export function recordChatter(e: any, name: string, text: string) {
   store.save()
 }
 
+export function updateChatterImages(e: any, labels: string) {
+  const line = store.data[e.self_id + ':' + e.group_id]?.find(item => item.mid === String(e.message_id))
+  if (line) { line.text += '\n' + labels; store.save() }
+}
+
 /** The bot handled this message: it is (or will be) in the bot's own session history. */
 export function markChatterHandled(e: any) {
   if (!e?.group_id || e.message_id == null) return

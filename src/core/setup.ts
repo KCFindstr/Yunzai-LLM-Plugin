@@ -14,10 +14,10 @@ export interface RuntimeState { ready: boolean; checks: { label: string; ok: boo
 const names: Record<string, RuntimeKind> = { run_code: 'sandbox', computer_task: 'computer', agy: 'agy', google_lens: 'lens' }
 const cache = new Map<string, { until: number; state?: RuntimeState; pending?: Promise<RuntimeState> }>()
 const scripts: Record<RuntimeKind, string[]> = {
-  sandbox: ['test -r /opt/llm-sandbox/runner.py', 'command -v bwrap >/dev/null && command -v node >/dev/null && id sbx >/dev/null 2>&1', 'systemctl is-active --quiet llm-sandbox-firewall.service'],
-  computer: ['test -r /opt/llm-desktop/client.py', 'systemctl is-active --quiet llm-desktop.service'],
-  agy: ['test -r /opt/llm-agy/exec.py && test -r /opt/llm-agy/mount.sh', 'systemctl is-active --quiet llm-agy.service', 'systemctl is-active --quiet llm-desktop.service'],
-  lens: ['test -r /opt/llm-agy/google-image-search.py && test -d /usr/local/lib/agy-browser/playwright', 'systemctl is-active --quiet llm-desktop.service'],
+  sandbox: ['test -r /opt/llm-sandbox/runner.py && test -x /opt/llm-images/mount.sh', 'command -v bwrap >/dev/null && command -v node >/dev/null && id sbx >/dev/null 2>&1', 'systemctl is-active --quiet llm-sandbox-firewall.service'],
+  computer: ['test -r /opt/llm-desktop/client.py && test -x /opt/llm-images/mount.sh', 'systemctl is-active --quiet llm-desktop.service'],
+  agy: ['test -r /opt/llm-agy/exec.py && test -r /opt/llm-agy/mount.sh && test -x /opt/llm-images/mount.sh', 'systemctl is-active --quiet llm-agy.service', 'systemctl is-active --quiet llm-desktop.service'],
+  lens: ['test -r /opt/llm-agy/google-image-search.py && test -d /usr/local/lib/agy-browser/playwright && test -x /opt/llm-images/mount.sh', 'systemctl is-active --quiet llm-desktop.service'],
 }
 const labels: Record<RuntimeKind, string[]> = {
   sandbox: ['代码运行器', '隔离环境与运行语言', '沙盒网络隔离服务'], computer: ['桌面客户端', '桌面服务'],

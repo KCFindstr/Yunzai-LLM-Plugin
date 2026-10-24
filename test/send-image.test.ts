@@ -1,4 +1,6 @@
 import { fakeEvent, mockServer, writeUserConfig } from './helpers.ts'
+import { saveImage, imageScope } from '../src/chat/images.ts'
+import { scopeForImages } from '../src/tools/images.ts'
 import assert from 'node:assert/strict'
 import http from 'node:http'
 import { after, before, it } from 'node:test'
@@ -38,7 +40,7 @@ before(async () => {
 })
 after(async () => { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); await closeOwnBrowser() })
 function context(): ToolCtx {
-  return { e: {}, eff: normalize({}) as any, isAdmin: false, model: { id: 'blind', provider: 'test', model: 'test', vision: false }, turn: { commands: 0, searches: 0, fetches: 0, images: [] } }
+  return { e: {}, eff: normalize({ tools: { enable: true, webFetch: { enable: true } } }) as any, isAdmin: false, model: { id: 'blind', provider: 'test', model: 'test', vision: false }, turn: { commands: 0, searches: 0, fetches: 0, images: [] } }
 }
 async function send(path: string, ctx = context()) {
   return (await registry.execute([{ id: 'image', name: 'send_image', args: { url: base + path } }], ctx, [registry.get('send_image')!])).results[0]
@@ -84,7 +86,7 @@ it('enforces attempts and shared reply image slots, including parallel image cal
   const full = context(); full.turn.images = Array(MAX_IMAGES_PER_TURN).fill(PNG)
   const fullResult = await send('/image', full)
   assert.equal(fullResult.isError, true)
-  assert.match(fullResult.remaining, /剩余 0 次/)
+  assert.match(fullResult.remaining, /共享图片余量 0 张/)
   assert.equal(hits, before)
   const parallel = context(); parallel.turn.images.push(PNG)
   const results = await registry.execute([1, 2].map(id => ({ id: String(id), name: 'send_image', args: { url: base + '/image' } })), parallel, [registry.get('send_image')!])
@@ -92,14 +94,14 @@ it('enforces attempts and shared reply image slots, including parallel image cal
   assert.equal(results.results.filter(result => !result.isError).length, 1)
   assert.ok(results.results.every(result => /剩余 0 次.*余量 0 张/.test(result.remaining)))
   const disabled = context(); disabled.eff.tools.webFetch.enable = false
-  assert.ok(!registry.forTurn(disabled).some(tool => tool.name === 'send_image'))
+  assert.ok(registry.forTurn(disabled).some(tool => tool.name === 'send_image'))
 })
 
 it('sends tool allowance notes to the actual model and carries a validated URL image into its final reply and rollout', async () => {
   const modelServer = await mockServer((_request, n) => [200, {
     choices: [{ message: n === 1 ? { content: '', tool_calls: [{ id: 'image-call', type: 'function', function: { name: 'send_image', arguments: JSON.stringify({ url: base + '/image' }) } }] } : { content: '这张图给你看看' }, finish_reason: n === 1 ? 'tool_calls' : 'stop' }], usage: { prompt_tokens: 50, completion_tokens: 10 },
   }])
-  writeUserConfig(`providers:\n  mock: { type: openai, baseUrl: '${modelServer.url}', apiKey: test-key, maxRetries: 0 }\nmodels:\n  - { id: main, provider: mock, model: fake, vision: false }\ndefaultModel: main\nfallbackModels: []\nchat: { thinking: off, summarize: false, maxToolRounds: 2 }\nmemory: { enable: false }\n`)
+  writeUserConfig(`providers:\n  mock: { type: openai, baseUrl: '${modelServer.url}', apiKey: test-key, maxRetries: 0 }\nmodels:\n  - { id: main, provider: mock, model: fake, vision: false }\ndefaultModel: main\nfallbackModels: []\nchat: { thinking: off, summarize: false, maxToolRounds: 2 }\nmemory: { enable: false }\ntools: { sendImage: { maxPerTurn: 3 } }\n`)
   config.load()
   try {
     const outcome = await runTurn({ e: fakeEvent().e, eff: config.effective(), input: { text: '发这张图', images: [], imageSegments: [] }, isAdmin: true, convKey: 'url-image-test' })
@@ -107,8 +109,23 @@ it('sends tool allowance notes to the actual model and carries a validated URL i
     if (outcome.kind !== 'reply') return
     assert.deepEqual(outcome.images, [PNG])
     const result = modelServer.requests[1].body.messages.find(message => message.role === 'tool')
-    assert.match(result.content, /【工具余量】send_image：剩余 1 次.*共享图片余量 1 张；全局剩余 19 次；剩余工具轮次 1/)
+    assert.match(result.content, /【工具余量】send_image：剩余 2 次.*共享图片余量 1 张；全局剩余 20 次（辅助工具不占）；剩余工具轮次 1/)
     const event = rolloutHistory(recentRollouts('url-image-test')[0].id)!.events.find(event => event.callId === 'image-call' && event.phase === 'completed')!
     assert.equal(event.images?.length, 1)
   } finally { await modelServer.close() }
+})
+
+it('sends saved image paths of the current chat without network access, never another chat\'s', async () => {
+  const ctx = context(), saved = saveImage(scopeForImages(ctx), { type: 'image', data: PNG.toString('base64') })
+  const before = hits
+  const tool = registry.get('send_image')!
+  const result = await tool.run({ path: saved.path }, ctx) as any
+  assert.equal(result.isError, undefined, result.content)
+  assert.deepEqual(ctx.turn.images, [PNG])
+  assert.equal(hits, before)
+  const foreign = saveImage(imageScope('different-chat'), { type: 'image', data: PNG.toString('base64') })
+  const other = context(), refused = await tool.run({ path: foreign.path }, other) as any
+  assert.equal(refused.isError, true)
+  assert.match(refused.content, /当前对话/)
+  assert.deepEqual(other.turn.images, [])
 })

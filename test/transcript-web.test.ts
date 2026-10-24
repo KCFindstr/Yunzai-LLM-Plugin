@@ -109,6 +109,22 @@ it('renders safe Markdown and mention chips with independent response switches, 
     await page.waitForFunction(() => document.querySelector('.log')!.textContent!.includes('new live line'))
     assert.equal(await page.$$eval('.log .warn', (els: Element[]) => els.length), 2)
     assert.equal(await page.$$eval('.log .l', (els: Element[]) => new Set(els.map(el => el.getAttribute('data-seq'))).size), 2)
+    const selectedText = await page.$eval('.log .log-message', (el: Element) => {
+      const range = document.createRange(); range.selectNodeContents(el)
+      const selection = window.getSelection()!; selection.removeAllRanges(); selection.addRange(range)
+      ;(window as any).__selectedLogNode = el
+      return selection.toString()
+    })
+    const nextPoll = page.waitForResponse((response: any) => response.url().includes('/api/logs?'))
+    log.warn('fixture Network selection buffered')
+    await nextPoll
+    await page.waitForFunction(() => document.querySelector('.log-status')?.textContent?.includes('正在选择文本'))
+    assert.equal(await page.evaluate(() => window.getSelection()!.toString()), selectedText)
+    assert.equal(await page.evaluate(() => (window as any).__selectedLogNode.isConnected), true)
+    assert.ok(!(await page.$eval('.log', (el: Element) => el.textContent!)).includes('selection buffered'))
+    await page.evaluate(() => window.getSelection()!.removeAllRanges())
+    await page.waitForFunction(() => document.querySelector('.log')!.textContent!.includes('selection buffered'))
+    assert.equal(await page.evaluate(() => document.querySelector('.log .log-message') === (window as any).__selectedLogNode), true)
     assert.deepEqual(errors, []); assert.deepEqual(remote, [])
   } finally { await browser?.close(); stopWeb() }
 })

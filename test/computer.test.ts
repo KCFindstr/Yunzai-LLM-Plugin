@@ -1,8 +1,11 @@
 import { TMP, PLUGIN_ROOT, writeUserConfig, fakeEvent, mockServer } from './helpers.ts'
+import { currentImages } from '../src/tools/images.ts'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
-import { describe, it } from 'node:test'
+import { after, describe, it } from 'node:test'
+import { closeOwnBrowser } from '../src/render/browser.ts'
+after(closeOwnBrowser)
 import { ComputerQueue, type ComputerJob } from '../src/computer/queue.ts'
 import { trimScreenshots, runComputer, computerDebug } from '../src/computer/agent.ts'
 import { config, normalize } from '../src/core/config.ts'
@@ -283,8 +286,8 @@ describe('background delegation integration', () => {
       assert.equal(request.body.model, 'vision')
       if (count === 1) {
         assert.match(JSON.stringify(request.body.messages), /Internal desktop observation/)
-        assert.ok(request.body.tools.some((tool: any) => tool.function.name === 'computer_result'))
-        return [200, { choices: [{ message: { role: 'assistant', content: '', tool_calls: [{ id: 'image', type: 'function', function: { name: 'computer_result', arguments: '{"indices":[1]}' } }] }, finish_reason: 'tool_calls' }] }]
+        assert.ok(request.body.tools.some((tool: any) => tool.function.name === 'send_image'))
+        return [200, { choices: [{ message: { role: 'assistant', content: '', tool_calls: [{ id: 'image', type: 'function', function: { name: 'send_image', arguments: JSON.stringify({ path: JSON.stringify(request.body.messages).match(/\/work\/attachments\/[a-f0-9]{10}\/image-[a-f0-9]{40}\.png/)![0] }) } }] }, finish_reason: 'tool_calls' }] }]
       }
       return [200, { choices: [{ message: { role: 'assistant', content: '拍好啦喵！' }, finish_reason: 'stop' }] }]
     })
@@ -293,6 +296,8 @@ describe('background delegation integration', () => {
       config.set('models', [{ id: 'original', provider: 'mock', model: 'vision', vision: true, thinking: 'off' }, { id: 'different', provider: 'mock', model: 'wrong-model' }])
       config.set('defaultModel', 'different')
       const { completeComputerJob } = await import('../src/tools/computer.ts')
+      const { registerSendImageTool } = await import('../src/tools/sendImage.ts')
+      registerSendImageTool()
       const { e, sent } = fakeEvent({ group_id: 99100 })
       const eff = config.effective()
       eff.sticker = { ...eff.sticker, enable: false }
@@ -300,7 +305,7 @@ describe('background delegation integration', () => {
       eff.reply = { ...eff.reply, typing: { minDelay: 0, maxDelay: 0, charsPerSecond: 1000 }, globalRate: { count: 100, perSeconds: 1 }, groupRate: { count: 100, perSeconds: 1 } }
       const job = new ComputerQueue([]).submit('owner', 'show desktop', 2)
       job.status = 'completed'
-      const screenshot = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==', 'base64')
+      const screenshot = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aL1sAAAAASUVORK5CYII=', 'base64')
       await completeComputerJob(job, { report: 'Internal desktop observation', images: [screenshot] }, { e, eff, isAdmin: true, model: config.getModel('original')!, turn: { commands: 0, searches: 0, fetches: 0, images: [] } })
       assert.equal(server.requests.length, 2)
       assert.equal(sent[0].msg, '拍好啦喵！')
@@ -320,7 +325,7 @@ describe('background delegation integration', () => {
     const { computerHistory } = await import('../src/computer/history.ts')
     const { e } = fakeEvent()
     const job = new ComputerQueue([]).submit('owner', 'partial delivery', 2)
-    const screenshot = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==', 'base64')
+    const screenshot = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aL1sAAAAASUVORK5CYII=', 'base64')
     await assert.rejects(completeComputerJob(job, { report: 'Worker report', images: [screenshot, screenshot] }, { e, eff: config.effective(), model: { id: 'original' } } as any, {
       runTurn: async () => ({ kind: 'reply', text: 'My response', images: [screenshot, screenshot], modelId: 'original', cost: 0, thinking: 'off' }),
       deliver: async (_e, _text, _eff, opts) => { opts.onImageSent?.(screenshot); throw new Error('second image failed') },
@@ -336,9 +341,11 @@ describe('background delegation integration', () => {
     const { registerComputerTool } = await import('../src/tools/computer.ts')
     const { registry } = await import('../src/tools/registry.ts')
     registerComputerTool()
-    const screenshot = Buffer.from('screen')
-    const ctx: any = { eff: config.effective(), turn: { images: [], computerResult: { id: 'job', images: [screenshot] } } }
-    await registry.get('computer_result')!.run({ indices: [1, 1, 9] }, ctx)
+    const { registerSendImageTool } = await import('../src/tools/sendImage.ts')
+    registerSendImageTool()
+    const screenshot = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aL1sAAAAASUVORK5CYII=', 'base64')
+    const ctx: any = { e: fakeEvent().e, eff: config.effective(), turn: { images: [], inputImages: [{ type: 'image', data: screenshot.toString('base64') }], computerResult: { id: 'job', images: [screenshot] } } }
+    await registry.get('send_image')!.run({ path: currentImages(ctx)[0].path }, ctx)
     assert.deepEqual(ctx.turn.images, [screenshot])
     ctx.e = fakeEvent().e
     const output = await registry.get('computer_task')!.run({ action: 'respond', response: 'Approve' }, ctx)

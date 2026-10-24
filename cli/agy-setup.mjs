@@ -1,3 +1,4 @@
+import { provisionImageStore } from './image-store.mjs'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -6,6 +7,7 @@ import { createHash } from 'node:crypto'
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const distro = process.argv[2] || 'yunzai-llm-sandbox'
 if (!/^[\w.-]+$/.test(distro)) throw Error('Invalid distro')
+provisionImageStore(distro, root)
 const executable = path.join(root, 'data/agy-setup/agy.exe')
 if (!fs.existsSync(executable)) {
   const manifest = await (await fetch('https://antigravity-cli-auto-updater-974169037036.us-central1.run.app/manifests/windows_amd64.json')).json()

@@ -114,7 +114,7 @@ Only erasable TS syntax (no enums/parameter properties/namespaces) — `erasable
     stdin/stdout): size-capped tmpfs `/work` → systemd scope (MemoryMax, no swap, TasksMax 128, CPUQuota 200%)
     → setpriv to uid 2000 `sbx` + no_new_privs → bwrap (all namespaces except net; ro /usr and /etc; neutral
     hostname/hosts; resolv.conf bound onto its real path because WSL symlinks it into /mnt/wsl) → `timeout -s KILL`.
-    stdout/stderr capped while draining; images in `/work/out` (≤2/turn, shared with render_html) returned base64.
+    stdout/stderr capped while draining; code execution returns stdout/stderr and exit status, without scanning image directories; explicit image reads return bounded image bytes.
   - Network: iptables chain LLMSBX (owner match uid 2000, restored at boot by `llm-sandbox-firewall.service`):
     DNS only to the WSL resolver, REJECT private/loopback/CGNAT/link-local/multicast ranges, SMTP ports, >20 new
     conns/s; IPv6 rejected. Verified: host 172.20.64.1, router, 127.0.0.1, 10.255.255.254:80, 169.254.169.254 blocked.
@@ -149,14 +149,14 @@ Only erasable TS syntax (no enums/parameter properties/namespaces) — `erasable
 - Model ids may contain Chinese (`MODEL_ID` in cli/schema.mjs); the runtime never restricted them, only the CLI.
 - Per-reply tool caps are stated in each tool's description: `ToolDef.limit(ctx)` → `registry.specs(defs, ctx)` appends
   `（每次回复…）` (from config, so stable per config = still cacheable). The system prompt only states the round budget
-  (`chat.maxToolRounds`). Shared constants: `MAX_IMAGES_PER_TURN` (render.ts, shared with run_code),
+  (`chat.maxToolRounds`). Shared constants: `MAX_IMAGES_PER_TURN` (send_image attachment limit),
   `MAX_COMMANDS_PER_TURN` (commands/tools.ts). Note: scripts that import src/ must run with cwd = bot root
   (`paths.ts` resolves `plugins/Yunzai-LLM-Plugin` from cwd), or they read/create a stray empty config.
 - Shared sandbox workspace + in-sandbox rendering (2026-10-21): runner.py actions `run` / `render` / `cleanup`, with an
   optional `session` id → `/var/lib/llm-sandbox/s-<id>` tmpfs persists across calls (root-owned `<dir>.last` marks
   activity; idle > 1h is swept). The agent gives each reply one session (`TurnState.sandboxSession`, created lazily by
   `turnSession`) and `runTurn` cleans it up in `finally`. Calls on a session are serialized in exec.ts (parallel tool
-  calls in one round). run_code only auto-sends images in out/ changed by that call; files elsewhere (img/) are for HTML.
+  calls in one round). run_code returns only code output; code must print a file path explicitly when needed. render_html returns saved paths. Only send_image attaches images after the final text. Files elsewhere (img/) are for HTML.
   - render_html: when run_code is available for the turn, renders inside the sandbox with Chrome headless shell +
     puppeteer-core 25.14.0 at /usr/local/lib/llm-render (exec/render.mjs; needs `pipe: true` because the sandbox
     firewall blocks loopback, `--no-sandbox` because Chrome's sandbox can't nest in bwrap; JS off, CSP from wrapHtml,

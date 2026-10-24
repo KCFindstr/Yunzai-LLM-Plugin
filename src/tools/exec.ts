@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto'
 import type { ExecToolConfig } from '../core/configTypes.ts'
 import { log } from '../core/log.ts'
 import { truncate } from '../core/util.ts'
-import { MAX_IMAGES_PER_TURN, registry, type ToolCtx } from './registry.ts'
+import { registry, type ToolCtx } from './registry.ts'
 import { runtimeToolReady } from '../core/setup.ts'
 
 const MAX_CODE = 50_000
@@ -150,7 +150,7 @@ export function runInSandbox(
   lang: string,
   code: string,
   cfg: ExecToolConfig,
-  opts: { maxImages?: number; signal?: AbortSignal; session?: string } = {},
+  opts: { signal?: AbortSignal; session?: string } = {},
 ): Promise<ExecResult> {
   const req = {
     action: 'run',
@@ -161,9 +161,16 @@ export function runInSandbox(
     memoryMB: cfg.memoryMB,
     diskMB: cfg.diskMB,
     maxOutput: cfg.maxOutput,
-    maxImages: opts.maxImages ?? MAX_IMAGES_PER_TURN,
   }
   return serialize(opts.session, () => callRunner(cfg, req, cfg.timeout + 25, opts.signal))
+}
+
+/** Read an explicitly requested image from this reply's workspace. */
+export async function readSandboxImage(ctx: ToolCtx, file: string): Promise<{ name: string; mime: string; b64: string }> {
+  const session = ctx.turn.sandboxSession
+  if (!session || !sandboxEnabled(ctx)) throw Error('本轮没有可读取的代码工作目录')
+  const result = await serialize(session, () => callRunner(ctx.eff.tools.exec, { action: 'read_image', session, path: file }, 20, ctx.signal))
+  return result.image
 }
 
 /** Render a full HTML document with the sandbox's headless Chrome; relative URLs resolve against /work. */
@@ -197,7 +204,6 @@ export function formatExecResult(r: ExecResult, maxOutput: number): string {
   if (r.stdout) parts.push(`[stdout]\n${clip(r.stdout, r.stdoutTotal, maxOutput - stderr.length)}`)
   if (stderr) parts.push(`[stderr]\n${stderr}`)
   if (!r.stdout && !r.stderr) parts.push('（没有输出，记得用 print/console.log 打印结果）')
-  if (r.images.length) parts.push(`生成的图片 ${r.images.map(i => i.name).join('、')} 会在你的文字回复之后发送。`)
   return parts.join('\n')
 }
 
@@ -209,7 +215,7 @@ export function registerExecTool() {
       '在隔离的 Linux 沙盒里运行代码并返回输出。适合：精确计算、数据处理、统计、画图表、解析网页/接口数据、验证代码片段。' +
       '沙盒可以访问公网（pip/npm 可安装到当前目录，但很慢，尽量用自带的库）。同一次回复里的多次 run_code 和 render_html 共用当前目录（回复结束后清空），可以先下载/生成文件再在 HTML 里用相对路径引用。' +
       'Python 自带 requests、numpy、pandas、matplotlib、bs4；Node 22 可直接用 fetch。' +
-      '结果必须 print / console.log 出来；保存到 out/ 目录的图片（png/jpg/gif）会单独随回复发送，只打算放进 HTML 的图片请存到别的目录（如 img/）。' +
+      '结果须用 print / console.log 打印。' +
       '不要用它做简单心算或闲聊。',
     parameters: {
       type: 'object',
@@ -220,8 +226,8 @@ export function registerExecTool() {
       required: ['language', 'code'],
     },
     available: sandboxEnabled,
-    limit: ctx => `最多运行 ${ctx.eff.tools.exec.maxRunsPerTurn} 次，与 render_html/send_image 共用最多 ${MAX_IMAGES_PER_TURN} 张回复图片`,
-    remaining: ctx => `剩余 ${Math.max(0, ctx.eff.tools.exec.maxRunsPerTurn - (ctx.turn.execRuns ?? 0))} 次；共享图片余量 ${Math.max(0, MAX_IMAGES_PER_TURN - ctx.turn.images.length)} 张`,
+    limit: ctx => `最多运行 ${ctx.eff.tools.exec.maxRunsPerTurn} 次`,
+    remaining: ctx => `剩余 ${Math.max(0, ctx.eff.tools.exec.maxRunsPerTurn - (ctx.turn.execRuns ?? 0))} 次`,
     async run(args, ctx) {
       const cfg = ctx.eff.tools.exec
       const lang = String(args.language ?? '')
@@ -232,9 +238,7 @@ export function registerExecTool() {
       ctx.turn.execRuns = (ctx.turn.execRuns ?? 0) + 1
       if (ctx.turn.execRuns > cfg.maxRunsPerTurn) return { content: `每轮最多运行 ${cfg.maxRunsPerTurn} 次代码`, isError: true }
 
-      const maxImages = Math.max(0, MAX_IMAGES_PER_TURN - ctx.turn.images.length)
-      const res = await runInSandbox(lang, code, cfg, { maxImages, signal: ctx.signal, session: turnSession(ctx) })
-      for (const img of res.images) ctx.turn.images.push(Buffer.from(img.b64, 'base64'))
+      const res = await runInSandbox(lang, code, cfg, { signal: ctx.signal, session: turnSession(ctx) })
       log.info(`run_code ${lang} exit=${res.exitCode}${res.timedOut ? ' timeout' : ''}${res.killed ? ' killed' : ''} ${res.durationMs}ms`)
       return { content: formatExecResult(res, cfg.maxOutput), isError: res.timedOut || res.killed }
     },

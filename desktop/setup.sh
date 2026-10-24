@@ -43,6 +43,8 @@ exec setpriv --reuid=pc --regid=pc --clear-groups --no-new-privs \
  --dir /mnt/wsl --ro-bind /usr/local/lib/llm-desktop/resolv.conf /mnt/wsl/resolv.conf --symlink usr/bin /bin --symlink usr/sbin /sbin \
  --symlink usr/lib /lib --symlink usr/lib64 /lib64 --proc /proc --dev /dev --tmpfs /tmp --tmpfs /run \
  --bind /var/lib/llm-desktop/disk/home /home/pc --bind /var/lib/llm-desktop/disk/work /work \
+ --bind-try /var/lib/llm-desktop/agy-share /work/projects \
+ --ro-bind /var/lib/llm-images /work/attachments \
  --bind /var/lib/llm-desktop/control /control --chdir /work --clearenv \
  --setenv PATH /usr/local/bin:/usr/bin:/bin --setenv HOME /home/pc --setenv USER pc \
  --setenv LANG C.UTF-8 --setenv DISPLAY :99 --setenv TZ Asia/Tokyo \
@@ -74,6 +76,7 @@ cat > /etc/systemd/system/llm-desktop.service <<'SERVICE'
 Description=Persistent isolated pixel desktop for Yunzai
 After=network-online.target
 [Service]
+ExecStartPre=/opt/llm-images/mount.sh
 ExecStartPre=/opt/llm-desktop/firewall.sh
 ExecStartPre=/bin/sh -c 'mountpoint -q /var/lib/llm-desktop/disk || mount -o loop,nosuid,nodev /var/lib/llm-desktop/desktop.ext4 /var/lib/llm-desktop/disk'
 ExecStartPre=/bin/sh -c 'cat /etc/resolv.conf > /usr/local/lib/llm-desktop/resolv.conf; chmod 644 /usr/local/lib/llm-desktop/resolv.conf'

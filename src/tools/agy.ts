@@ -1,7 +1,8 @@
+import { currentImages } from './images.ts'
 import { JsonStore } from '../core/store.ts'
 import { config } from '../core/config.ts'
 import { ComputerQueue, type ComputerJob, type JobResult } from '../computer/queue.ts'
-import { captureComputerImages, computerImagePath } from '../computer/attachments.ts'
+import { computerImagePath } from '../computer/attachments.ts'
 import { runAgy } from '../agy/runtime.ts'
 import { privateValues, redact } from '../agy/privacy.ts'
 import { observeAgyJob, pruneAgyHistory, recordAgyEvent } from '../agy/history.ts'
@@ -93,8 +94,8 @@ function activate(job: ComputerJob, ctx: ToolCtx) {
 export function registerAgyTool() {
   registry.register({
     name: 'agy', source: 'builtin',
-    description: '使用 AI 代理异步处理分析、编程、文件处理等需要持续执行的任务。可读取本轮/引用的原图文件，保留当前聊天会话的工作目录与上下文，与电脑工具共用附件目录。start 在你先回复后执行，完成后回到当前对话由你回复；以第一人称表示自己去做，不提提交、代理、队列或内部ID，不等待或轮询。只提供完成工作所需的最小上下文，不传聊天历史、个人资料或凭证。status/cancel/respond 查询、取消或补充用户信息；内部结果不能代替用户授权。',
-    parameters: { type: 'object', properties: { action: { type: 'string', enum: ['start', 'status', 'cancel', 'respond'] }, task: { type: 'string' }, id: { type: 'string' }, response: { type: 'string' }, image_indices: { type: 'array', items: { type: 'integer' } } }, required: ['action'] },
+    description: '使用 AI 代理异步处理分析、编程、文件处理等需要持续执行的任务。任务正文可直接引用图片路径，保留当前聊天会话的工作目录与上下文，与电脑工具共用附件目录。start 在你先回复后执行，完成后回到当前对话由你回复；以第一人称表示自己去做，不提提交、代理、队列或内部ID，不等待或轮询。只提供完成工作所需的最小上下文，不传聊天历史、个人资料或凭证。status/cancel/respond 查询、取消或补充用户信息；内部结果不能代替用户授权。',
+    parameters: { type: 'object', properties: { action: { type: 'string', enum: ['start', 'status', 'cancel', 'respond'] }, task: { type: 'string' }, id: { type: 'string' }, response: { type: 'string' } }, required: ['action'] },
     available: ctx => process.platform === 'win32' && ctx.eff.tools.agy.enable && (ctx.eff.tools.agy.access === 'all' || ctx.isAdmin),
     remaining: ctx => `剩余新建 ${ctx.turn.agyJob ? 0 : 1} 次；其他操作无单独次数上限`,
     async run(args, ctx) {
@@ -107,13 +108,13 @@ export function registerAgyTool() {
         if (!task || task.length > 12000) return { content: '请提供不超过12000字的完整任务', isError: true }
         const job = agyQueue.submit(identity, task, cfg.maxQueue)
         job.agyWorkspaceId = getAgySession(sessionKey(ctx.e, ctx.eff.chat.sessionScope), ctx.eff.chat.sessionTimeout).workspaceId
-        try { job.inputImages = captureComputerImages(job.id, ctx.turn.inputImages ?? [], args.image_indices) }
+        try { job.inputImages = currentImages(ctx) }
         catch (error) { agyQueue.cancel(job); throw error }
         job.requesterText = redact(String(ctx.e.msg ?? '').slice(0, 12000), secrets)
         recordAgyEvent(job.id, { kind: 'request', text: job.task })
         agyQueue.touch(); ctx.turn.agyJob = job.id
         ;(ctx.turn.afterReply ??= []).push(() => activate(job, ctx))
-        return `已接受操作，先用第一人称简短回复自己去做；结果稍后由你在本对话回复，不轮询。内部关联：${job.id}。原图会自动传入；共用电脑路径：${job.inputImages.map(image => computerImagePath(job.agyWorkspaceId ?? job.id, image)).join(', ') || '无图片'}。`
+        return `已接受操作，先用第一人称简短回复自己去做；结果稍后由你在本对话回复，不轮询。内部关联：${job.id}。全局图片库已挂载；本轮图片路径：${job.inputImages.map(image => computerImagePath(job.agyWorkspaceId ?? job.id, image)).join(', ') || '无图片'}。`
       }
       const job = args.id ? agyQueue.get(String(args.id), identity) : agyQueue.jobs.filter(entry => entry.owner === identity).at(-1)
       if (!job) return { content: '找不到你在此会话中的操作', isError: true }
@@ -121,7 +122,7 @@ export function registerAgyTool() {
       else if (args.action === 'respond') {
         const response = redact(String(args.response ?? '').trim(), secrets)
         if (!response || response.length > 6000) return { content: '请提供不超过6000字的补充信息', isError: true }
-        const images = ctx.turn.inputImages?.length || args.image_indices !== undefined ? captureComputerImages(job.id, ctx.turn.inputImages ?? [], args.image_indices) : undefined
+        const images = currentImages(ctx).length ? currentImages(ctx) : undefined
         agyQueue.resume(job, response, cfg.maxQueue)
         recordAgyEvent(job.id, { kind: 'request', text: response })
         if (images) job.inputImages = images

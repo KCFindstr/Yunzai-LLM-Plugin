@@ -7,6 +7,7 @@ import { prepareRuntimeTools, runtimeToolReady } from '../core/setup.ts'
 
 export interface TurnState {
   toolCalls?: number
+  helperCalls?: Record<string, number>
   /** Command dispatched to another plugin this turn (ends the loop). */
   dispatched?: string
   commands: number
@@ -27,6 +28,8 @@ export interface TurnState {
   asyncResult?: { kind: 'agy'; id: string }
   /** Current/quoted image bytes already loaded for this turn; never persisted in the chat transcript. */
   inputImages?: ImagePart[]
+  imageScope?: string
+  imageRefs?: import('../chat/images.ts').SavedImage[]
   computerResult?: { id: string; images: Buffer[] }
 }
 
@@ -52,6 +55,8 @@ export interface ToolDef {
   description: string
   parameters: Record<string, any>
   source?: 'builtin' | 'custom' | 'http'
+  /** Local helper: excluded from the main call/round budgets. */
+  budgetExempt?: boolean
   available?(ctx: ToolCtx): boolean
   /** per-reply cap, appended to the description sent to the model (e.g. "最多调用 3 次") */
   limit?(ctx: ToolCtx): string | undefined
@@ -60,8 +65,21 @@ export interface ToolDef {
   run(args: Record<string, any>, ctx: ToolCtx): Promise<ToolOutput | string>
 }
 
-/** Shared reply-image allowance for rendering, code output and public URL images. */
+/** Maximum images explicitly attached to a reply. */
 export const MAX_IMAGES_PER_TURN = 2
+/**
+ * Helper tools (budgetExempt) have their own per-reply limits and do not use up chat.maxToolCalls;
+ * the rounds they run in still count toward chat.maxToolRounds.
+ */
+const DEFAULT_HELPER_LIMITS: Record<string, number> = { send_image: 2, read_image: 8, load_skill: 8, list_stickers: 4 }
+export function helperToolLimit(ctx: Pick<ToolCtx, 'eff'>, name: string): number {
+  const key = { send_image: 'sendImage', read_image: 'readImage', load_skill: 'loadSkill', list_stickers: 'listStickers' }[name]
+  const tool = key ? ctx.eff.tools[key as 'sendImage' | 'readImage' | 'loadSkill' | 'listStickers'] : undefined
+  return tool?.maxPerTurn ?? DEFAULT_HELPER_LIMITS[name] ?? 32
+}
+export function helperToolRemaining(ctx: ToolCtx, name: string): number {
+  return Math.max(0, helperToolLimit(ctx, name) - (ctx.turn.helperCalls?.[name] ?? 0))
+}
 const MAX_RESULT_CHARS = 8000
 const TOOL_TIMEOUT_MS = 60_000
 
@@ -90,16 +108,16 @@ class Registry {
 
   /** Tools offered this turn, in deterministic order (stable tool list = stable prompt cache). */
   forTurn(ctx: ToolCtx, hide: Set<string> = new Set()): ToolDef[] {
-    if (!ctx.eff.tools.enable || ctx.eff.chat?.maxToolCalls === 0) return []
+    if (!ctx.eff.tools.enable || ctx.eff.chat?.maxToolRounds === 0) return []
     // Worker data may only be summarized; it must never authorize side effects or bypass privacy filtering.
     if (ctx.turn.asyncResult) return []
     const disabled = new Set(ctx.eff.tools.disabled ?? [])
-    return this.all().filter(d => !disabled.has(d.name) && !hide.has(d.name) && (d.available?.(ctx) ?? true) && runtimeToolReady(d.name, ctx.eff))
+    return this.all().filter(d => !disabled.has(d.name) && !hide.has(d.name) && (!d.budgetExempt || helperToolLimit(ctx, d.name) > 0) && (ctx.eff.chat?.maxToolCalls !== 0 || d.budgetExempt) && (d.available?.(ctx) ?? true) && runtimeToolReady(d.name, ctx.eff))
   }
 
   specs(defs: ToolDef[], ctx: ToolCtx): ToolSpec[] {
     return defs.map(d => {
-      const limit = d.limit?.(ctx)
+      const limit = d.limit?.(ctx) ?? (d.budgetExempt ? `最多调用 ${helperToolLimit(ctx, d.name)} 次` : undefined)
       return { name: d.name, description: limit ? `${d.description}（每次回复${limit}）` : d.description, parameters: d.parameters }
     })
   }
@@ -118,9 +136,15 @@ class Registry {
           return result
         }
         // Reserve synchronously before awaiting: parallel calls cannot overrun the global allowance.
-        if ((ctx.turn.toolCalls ?? 0) >= maxCalls) return done({ id: call.id, name: call.name, content: '所有工具的全局调用次数已用完，请直接给出最终回复', isError: true })
-        ctx.turn.toolCalls = (ctx.turn.toolCalls ?? 0) + 1
         const def = allowed.get(call.name)
+        const helper = this.tools.get(call.name)?.budgetExempt === true
+        if (!helper && (ctx.turn.toolCalls ?? 0) >= maxCalls) return done({ id: call.id, name: call.name, content: '普通工具的全局调用次数已用完；仍可使用辅助工具，或直接给出最终回复', isError: true })
+        if (helper && helperToolRemaining(ctx, call.name) === 0) return done({ id: call.id, name: call.name, content: '本次回复该工具调用次数已用完', isError: true })
+        if (helper) {
+          const counts = ctx.turn.helperCalls ??= {}
+          counts[call.name] = (counts[call.name] ?? 0) + 1
+        }
+        else ctx.turn.toolCalls = (ctx.turn.toolCalls ?? 0) + 1
         if (!def || (def.available && !def.available(ctx)) || !runtimeToolReady(call.name, ctx.eff)) {
           log.warn(`模型调用了未提供的工具 ${call.name}(${brief(call.args ?? {})})`)
           return done({ id: call.id, name: call.name, content: `工具 ${call.name} 不可用`, isError: true })
@@ -145,8 +169,8 @@ class Registry {
       }),
     )
     return { results: results.map(result => {
-      const def = allowed.get(result.name)
-      return { ...result, remaining: !def ? '不可用' : def.remaining?.(ctx) ?? (def.limit ? '剩余次数未提供' : '无单独次数上限'), globalRemaining: Math.max(0, maxCalls - (ctx.turn.toolCalls ?? 0)) }
+      const def = allowed.get(result.name) ?? (this.tools.get(result.name)?.budgetExempt ? this.tools.get(result.name) : undefined)
+      return { ...result, remaining: !def ? '不可用' : def.budgetExempt ? `剩余 ${helperToolRemaining(ctx, def.name)} 次${def.remaining ? '；' + def.remaining(ctx) : ''}` : def.remaining?.(ctx) ?? (def.limit ? '剩余次数未提供' : '无单独次数上限'), globalRemaining: Math.max(0, maxCalls - (ctx.turn.toolCalls ?? 0)) }
     }), terminal }
   }
 }

@@ -1,9 +1,10 @@
 import { TMP, PLUGIN_ROOT, fakeEvent, mockServer, writeUserConfig } from './helpers.ts'
+import { saveImage, readImage, imageScope, listImages } from '../src/chat/images.ts'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { describe, it } from 'node:test'
-import { captureComputerImages, computerImagePath, readComputerImages } from '../src/computer/attachments.ts'
+import { computerImagePath, readComputerImages } from '../src/computer/attachments.ts'
 import { ComputerQueue } from '../src/computer/queue.ts'
 import { config } from '../src/core/config.ts'
 import { emptyUsage } from '../src/llm/types.ts'
@@ -13,28 +14,27 @@ const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR
 const image = { type: 'image' as const, data: png.toString('base64'), mime: 'image/png' }
 const gif = Buffer.concat([Buffer.from('GIF89a'), Buffer.alloc(20)])
 
-describe('computer input image snapshots', () => {
-  it('keeps selected original bytes after the turn, without URLs or base64 in job metadata', () => {
-    const images = captureComputerImages('a123456789', [image, { type: 'image', data: gif.toString('base64'), mime: 'wrong/type' }], [2, 2])
-    assert.equal(images.length, 1)
-    assert.equal(images[0].mime, 'image/gif')
-    assert.equal(images[0].index, 2)
-    assert.match(computerImagePath('a123456789', images[0]), /^\/work\/attachments\/a123456789\/image-2-.*\.gif$/)
-    assert.deepEqual(Buffer.from(readComputerImages('a123456789', images)[0].data, 'base64'), gif)
-    assert.doesNotMatch(JSON.stringify(images), /"data"|"url"|base64/)
-    assert.deepEqual(captureComputerImages('a123456789', [image], []), [])
+describe('persistent conversation image references', () => {
+  it('deduplicates bytes and keeps identical paths across workers and later reads', () => {
+    const scope = imageScope('conversation A')
+    const saved = saveImage(scope, image)
+    assert.equal(saveImage(scope, image).path, saved.path)
+    assert.equal(listImages(scope).length, 1)
+    assert.match(saved.path, /^\/work\/attachments\/[a-f0-9]{10}\/image-[a-f0-9]{40}\.png$/)
+    assert.equal(computerImagePath('a123456789', saved), saved.path)
+    assert.deepEqual(Buffer.from(readComputerImages('b123456789', [saved])[0].data, 'base64'), png)
+    assert.equal(readImage(saved.path, scope).part.data, image.data)
+    assert.doesNotMatch(JSON.stringify(saved), /"data"|"url"|base64/)
   })
-
-  it('rejects invalid selections, missing bytes, traversal and tampered snapshots', () => {
-    assert.throws(() => captureComputerImages('a123456789', [image], [2]), /编号/)
-    assert.throws(() => captureComputerImages('a123456789', [image], '1'), /编号/)
-    assert.throws(() => captureComputerImages('a123456789', [{ type: 'image', url: 'https://expired.test/image' }]), /未加载/)
-    assert.throws(() => captureComputerImages('../outside', [image]), /编号/)
-    const images = captureComputerImages('b123456789', [image])
-    assert.throws(() => readComputerImages('b123456789', [{ ...images[0], name: '../../config.yaml' }]), /文件名/)
-    fs.writeFileSync(path.join(TMP, 'data/computer-inputs/b123456789', images[0].name), 'changed')
-    assert.throws(() => readComputerImages('b123456789', images), /损坏/)
-    assert.throws(() => captureComputerImages('b123456789', [{ ...image, data: 'A'.repeat(5_000_000) }]), /过大/)
+  it('reads only the current chat folder and rejects other chats, invented paths, traversal and corrupted bytes', () => {
+    const scope = imageScope('conversation B'), saved = saveImage(scope, image)
+    assert.equal(readImage(saved.path, scope).part.data, image.data)
+    assert.throws(() => readImage(saved.path, imageScope('conversation C')), /当前对话/)
+    assert.throws(() => readImage('/work/attachments/../config.yaml', scope), /当前对话/)
+    assert.throws(() => saveImage('../outside', image), /来源标识/)
+    assert.throws(() => saveImage(scope, { type: 'image', url: 'https://expired.test' }), /缺失/)
+    fs.writeFileSync(path.join(TMP, 'data/images', scope, saved.name), 'tampered')
+    assert.throws(() => readImage(saved.path, scope), /损坏|文件无效/)
   })
 })
 
@@ -47,18 +47,15 @@ function prepare() {
 }
 
 describe('image handoff to desktop worker', () => {
-  it('stages images before the model starts and preserves exact paths across checkpoints and resume', async () => {
+  it('preserves global image paths across checkpoints and resume without staging', async () => {
     const cfg = prepare()
     const job = new ComputerQueue([]).submit('owner', 'Inspect the attached image on the desktop', 2)
-    job.inputImages = captureComputerImages(job.id, [image])
+    job.inputImages = [saveImage(imageScope('desktop-test'), image)]
     const file = computerImagePath(job.id, job.inputImages[0])
-    let staged = 0
     let calls = 0
     const execute = () => runComputer(job, { cfg, eff: config.effective(), signal: new AbortController().signal, quota: {},
       request: async () => ({ text: 'screen', image }),
-      stageImages: async (_cfg, entry) => { assert.equal(entry, job); staged++ },
       modelCall: async params => {
-        assert.ok(staged > 0)
         const context = JSON.stringify(params.messages)
         assert.ok(context.includes(file))
         assert.doesNotMatch(params.system, /Google Lens|images\.google\.com|Upload the actual image/)
@@ -70,20 +67,9 @@ describe('image handoff to desktop worker', () => {
     await execute()
     job.response = 'Continue checking source pages'
     await execute()
-    assert.equal(staged, 2)
     assert.equal(calls, 3)
   })
 
-  it('does not call the model when transferring images fails', async () => {
-    const cfg = prepare()
-    const job = new ComputerQueue([]).submit('owner', 'image lookup', 2)
-    job.inputImages = captureComputerImages(job.id, [image])
-    await assert.rejects(runComputer(job, { cfg, eff: config.effective(), signal: new AbortController().signal, quota: {},
-      request: async () => ({ text: 'screen' }),
-      stageImages: async () => { throw Error('disk full') },
-      modelCall: async () => { throw Error('model must not run') },
-    }), /disk full/)
-  })
 
   it('carries chat input images through the real tool loop without launching or replying from the worker', async () => {
     prepare()

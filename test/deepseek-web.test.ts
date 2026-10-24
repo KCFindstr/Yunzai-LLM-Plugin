@@ -18,6 +18,7 @@ function context(): ToolCtx {
 it('DeepSeek tools reuse the provider key, map search summaries and cap Markdown fetch output', async t => {
   const calls: { url: string; init: any }[] = []
   t.mock.method(globalThis, 'fetch', async (url: any, init: any) => {
+    if (String(url).startsWith('https://example.com')) return new Response('Page', { headers: { 'content-type': 'text/html' } })
     calls.push({ url: String(url), init })
     return Response.json(String(url).endsWith('/search') ? { results: [{ title: 'Result', url: 'https://example.com', summary: 'Detailed summary', snippet: 'Short snippet' }] }
       : { title: 'Page', content: '# Markdown\n' + 'x'.repeat(600) })
@@ -65,4 +66,52 @@ it('DeepSeek Fetch retains direct image viewing and blocks private page URLs', a
   assert.ok(typeof page !== 'string' && page.images?.length)
   ctx.eff.tools.webFetch.allowPrivateNetwork = false
   await assert.rejects(() => fetchPage('http://127.0.0.1/private', ctx))
+})
+
+it('HTML responses use the configured reader regardless of the URL', async t => {
+  const ctx = context()
+  const urls = [
+    'https://commons.moegirl.org.cn/File:Hikawa_kyouka_pc.png',
+    'https://example.com/wiki/Image:Portrait.jpg',
+    'https://example.com/wiki/%E6%96%87%E4%BB%B6:Portrait.png',
+  ]
+  t.mock.method(globalThis, 'fetch', async (url: any, init: any) => {
+    if (urls.includes(String(url))) return new Response('Wiki page', { headers: { 'content-type': 'text/html' } })
+    assert.equal(String(url), 'https://api.deepseek.com/v1/tools/fetch')
+    assert.ok(urls.includes(JSON.parse(init.body).url))
+    return Response.json({ title: 'File description', content: 'Wiki page' })
+  })
+  for (const url of urls) assert.match(String(await fetchPage(url, ctx)), /Wiki page/)
+  t.mock.restoreAll()
+  ctx.eff.tools.webFetch.reader = 'jina'
+  t.mock.method(globalThis, 'fetch', async (url: any) => {
+    if (String(url) === urls[0]) return new Response('Wiki page', { headers: { 'content-type': 'text/html' } })
+    assert.equal(String(url), `https://r.jina.ai/${urls[0]}`)
+    return new Response('Wiki page')
+  })
+  assert.equal(await fetchPage(urls[0], ctx), 'Wiki page')
+})
+
+it('direct fetch failures retain the transport cause in the error message', async t => {
+  t.mock.method(globalThis, 'fetch', async () => {
+    throw new TypeError('fetch failed', { cause: Object.assign(new Error('connection reset'), { code: 'ECONNRESET' }) })
+  })
+  const ctx = context()
+  ctx.eff.tools.webFetch.reader = 'direct'
+  await assert.rejects(() => fetchPage('https://example.com/pic.png', ctx), /fetch failed \(ECONNRESET: connection reset\)/)
+})
+
+it('recognizes extensionless images after redirects for either reader', async t => {
+  const png = Buffer.concat([Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex'), Buffer.alloc(64)])
+  const ctx = context()
+  t.mock.method(globalThis, 'fetch', async (url: any) => {
+    if (String(url) === 'https://example.com/download?id=1') return new Response(null, { status: 302, headers: { location: '/asset' } })
+    assert.equal(String(url), 'https://example.com/asset')
+    return new Response(png, { headers: { 'content-type': 'image/png' } })
+  })
+  for (const reader of ['deepseek', 'jina'] as const) {
+    ctx.eff.tools.webFetch.reader = reader
+    const page = await fetchPage('https://example.com/download?id=1', ctx)
+    assert.ok(typeof page !== 'string' && page.images?.[0]?.mime === 'image/png')
+  }
 })

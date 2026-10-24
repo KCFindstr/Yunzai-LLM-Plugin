@@ -168,7 +168,7 @@ def sandboxed(work, argv, *, timeout, mem, tasks, cap, pw, tz):
         '--proc', '/proc', '--dev', '/dev',
         '--size', str(64 * 1024 * 1024), '--tmpfs', '/tmp',
         '--size', str(64 * 1024 * 1024), '--tmpfs', '/dev/shm',
-        '--bind', work, '/work', '--chdir', '/work',
+        '--bind', work, '/work', '--ro-bind', '/var/lib/llm-images', '/work/attachments', '--chdir', '/work',
         '--clearenv',
         '--setenv', 'HOME', '/work', '--setenv', 'PATH', '/work/.local/bin:/usr/local/bin:/usr/bin:/bin',
         '--setenv', 'LANG', 'C.UTF-8', '--setenv', 'PYTHONIOENCODING', 'utf-8', '--setenv', 'MPLBACKEND', 'Agg',
@@ -219,28 +219,6 @@ def read_image(p, name):
         return {'name': name, 'mime': IMAGE_EXT[ext], 'b64': base64.b64encode(f.read()).decode()}
 
 
-def new_images(work, since, limit):
-    """Images in out/ created or changed by this call (earlier ones in a session were already sent)."""
-    images = []
-    outdir = os.path.join(work, 'out')
-    # the runner reads as root: never follow a symlinked out/ out of the workspace
-    if not limit or os.path.islink(outdir) or not os.path.isdir(outdir):
-        return images
-    for name in sorted(os.listdir(outdir)):
-        p = os.path.join(outdir, name)
-        try:
-            if os.path.getmtime(p) < since:
-                continue
-        except OSError:
-            continue
-        img = read_image(p, name)
-        if img:
-            images.append(img)
-        if len(images) >= limit:
-            break
-    return images
-
-
 def main():
     req = json.load(sys.stdin)
     action = req.get('action', 'run')
@@ -257,6 +235,19 @@ def main():
             destroy(os.path.join(BASE, f's-{session}'))
         print(json.dumps({'ok': True}))
         return
+    if action == 'read_image':
+        work = os.path.join(BASE, f's-{session}')
+        file = str(req.get('path') or '')
+        relative = file[6:] if file.startswith('/work/') else file
+        target = os.path.realpath(os.path.join(work, relative))
+        if not session or not os.path.isdir(work) or os.path.isabs(relative) or not target.startswith(os.path.realpath(work) + os.sep):
+            raise ValueError('image path outside current workspace')
+        img = read_image(target, os.path.basename(target))
+        if not img:
+            raise ValueError('image missing, unsupported or over 5 MiB')
+        print(json.dumps({'image': img}))
+        return
+    subprocess.run(['/opt/llm-images/mount.sh'], check=True, stdout=subprocess.DEVNULL)
     if action not in ('run', 'render'):
         print(json.dumps({'error': f'unknown action: {action}'}))
         return
@@ -269,18 +260,16 @@ def main():
     mem = clamp(req.get('memoryMB'), 64, 4096, 512)
     disk = clamp(req.get('diskMB'), 8, 2048, 128)
     cap = clamp(req.get('maxOutput'), 256, 200_000, 8000)
-    max_images = clamp(req.get('maxImages'), 0, 8, 2)
     tz = str(req.get('tz') or 'Asia/Shanghai')
     pw = pwd.getpwnam(SBX_USER)
 
     work, ephemeral = open_workspace(session, disk, pw)
     try:
-        started = time.time() - 1  # mtime granularity
         if action == 'run':
             fname, argv = LANGS[lang]
             put_file(work, fname, str(req.get('code', '')), pw)
             res = sandboxed(work, argv, timeout=timeout, mem=mem, tasks=128, cap=cap, pw=pw, tz=tz)
-            res['images'] = new_images(work, started, max_images)
+            res['images'] = []
         else:
             # Chrome needs more threads and memory than typical scripts
             put_file(work, '.render.html', str(req.get('html', '')), pw)

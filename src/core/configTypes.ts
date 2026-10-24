@@ -108,7 +108,7 @@ export interface ChatSection {
   groupContext: number
   groupContextMaxChars: number
   maxToolRounds: number
-  /** Total individual tool-call attempts per reply, including calls in parallel batches. */
+  /** Non-exempt tool-call attempts per reply, including calls in parallel batches. */
   maxToolCalls: number
   maxOutputTokens: number
   temperature: number | null
@@ -164,6 +164,10 @@ export interface HttpToolConfig {
 
 export interface ToolsSection {
   enable: boolean
+  sendImage: { maxPerTurn: number }
+  readImage: { maxPerTurn: number }
+  loadSkill: { maxPerTurn: number }
+  listStickers: { maxPerTurn: number }
   webSearch: {
     enable: boolean
     provider: 'native' | 'deepseek' | 'anysearch' | 'tavily' | 'brave' | 'searxng' | 'jina' | 'none'

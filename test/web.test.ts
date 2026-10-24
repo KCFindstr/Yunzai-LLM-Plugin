@@ -80,6 +80,19 @@ describe('web panel', () => {
     assert.ok(data.overridden.includes('memory.embedding.minScore'))
   })
 
+  it('configures individual helper caps through the same API/schema used by the web form', async () => {
+    const result = await call('PUT', '/api/config', { path: 'tools.readImage.maxPerTurn', value: 3 })
+    assert.equal(result.status, 200)
+    assert.equal(config.get().tools.readImage.maxPerTurn, 3)
+    const data = await (await call('GET', '/api/config')).json()
+    assert.equal(data.schema.fields.tools.fields.readImage.fields.maxPerTurn.t, 'num')
+    assert.equal(data.effective.tools.readImage.maxPerTurn, 3)
+    assert.equal((await call('PUT', '/api/config', { path: 'tools.readImage.maxPerTurn', value: -1 })).status, 400)
+    assert.equal((await call('PUT', '/api/config', { path: 'tools.loadSkill.maxPerTurn', value: 33 })).status, 400)
+    assert.equal((await call('PUT', '/api/config', { path: 'tools.readImage.maxPerTurn', value: 0 })).status, 200)
+    assert.equal((await call('PUT', '/api/config', { path: 'tools.readImage.maxPerTurn', value: 8 })).status, 200)
+  })
+
   it('validates raw YAML against the config being written', async () => {
     const bad = await call('PUT', '/api/config/raw', { text: 'defaultModel: missing\n' })
     assert.equal(bad.status, 400)

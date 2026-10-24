@@ -1,6 +1,9 @@
+import { config } from '../core/config.ts'
+import { captureImageSegments } from './message.ts'
+import { chatImageScope, imageLabel, truncateImageText } from './images.ts'
 import { formatNow, truncate } from '../core/util.ts'
 import { observeUsers, knownName, rememberMessage } from './roster.ts'
-import { markChatterHandled, recordChatter } from './chatter.ts'
+import { markChatterHandled, recordChatter, updateChatterImages } from './chatter.ts'
 
 interface Line {
   t: number
@@ -79,6 +82,17 @@ export function recordGroupMessage(e: any) {
   })
   if (list.length > MAX_LINES) list.splice(0, list.length - MAX_LINES)
   logs.set(key, list)
+  const cfg = config.get(), eff = config.effective(e.group_id)
+  if (cfg.enable && eff.enable && eff.chat.includeImages && !cfg.trigger.groupBlacklist.map(String).includes(String(e.group_id)) && (!cfg.trigger.groupWhitelist.length || cfg.trigger.groupWhitelist.map(String).includes(String(e.group_id)))) {
+    const line = list.at(-1)!
+    e._llmImageCapture ??= captureImageSegments(e.message ?? [], chatImageScope(e))
+    void e._llmImageCapture.then((stored: Awaited<ReturnType<typeof captureImageSegments>>) => {
+      if (!stored.savedImages.length) return
+      const labels = stored.savedImages.map(imageLabel).join('\n')
+      line.text += '\n' + labels
+      updateChatterImages(e, labels)
+    }).catch(() => {})
+  }
 }
 
 export function recordBotMessage(e: any, text: string, conv?: string) {
@@ -112,7 +126,7 @@ export function recentLines(e: any, n: number, maxChars: number, conv?: string, 
     const l = list[i]
     if (l.t < cutoff) break
     if (mid && l.mid === mid) continue
-    out.push(`[${formatNow(new Date(l.t))}] ${l.name}: ${truncate(l.text, maxChars)}`)
+    out.push(`[${formatNow(new Date(l.t))}] ${l.name}: ${truncateImageText(l.text, maxChars)}`)
   }
   return out.reverse().map((line, index) => `${index + 1}. ${line}`)
 }

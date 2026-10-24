@@ -67,11 +67,12 @@ describe('markdown output', () => {
     const ctx: any = { eff, turn: { images: [] } }
     const specs = Object.fromEntries(registry.specs([registry.get('web_fetch')!, registry.get('render_html')!], ctx).map(s => [s.name, s.description]))
     assert.match(specs.web_fetch, /（每次回复最多调用 5 次）$/)
-    assert.match(specs.render_html, /（每次回复最多 2 张图片，与 run_code\/send_image 共用）$/)
+    assert.match(specs.render_html, /返回保存路径/)
     assert.doesNotMatch(registry.get('web_fetch')!.description, /每次回复/, 'registered description stays static')
     const s = buildSystemPrompt({ isGroup: true, botName: 'B', eff, tools: ['web_fetch'], nativeSearch: false, markdown: false })
     assert.match(s, /工具最多 4 轮/)
     assert.match(s, /合计 7 次/)
+    assert.match(s, /辅助工具，不占次数但同样占轮数/)
     assert.doesNotMatch(buildSystemPrompt({ isGroup: true, botName: 'B', eff, tools: [], nativeSearch: false, markdown: false }), /工具最多/)
   })
 

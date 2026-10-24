@@ -1,12 +1,12 @@
 # Google Lens for the main chatbot
 
-Load the `google-lens` skill and call `google_lens(image_index=1)`. The main chatbot receives Google's AI Overview (when shown), public exact-match links (up to 3) and visual-match links (up to 20), directly, then checks the evidence and answers in its own voice. No AGY conversation, queue, or computer-use model is involved.
+Load the `google-lens` skill and call `google_lens(path="/work/attachments/<conversation>/image-<hash>.png")`. Images are read directly from the read-only `/work/attachments` store without staging, and only from the current chat's folder (`/work/attachments/<current chat>/…`); paths from other chats are refused. Images have a 30-day TTL independent of chat expiry/reset. The main chatbot receives Google's AI Overview (when shown), public exact-match links (up to 3) and visual-match links (up to 20), directly, then checks the evidence and answers in its own voice. No AGY conversation, queue, or computer-use model is involved.
 
-The tool uses the already-loaded current/quoted image bytes. A one-based index selects the image; no model-supplied path, URL, command or browser script is accepted. Missing images and invalid indices fail before invoking the VM. Each reply permits two searches.
+The model passes the exact stored path from a `[图片N:路径]` label (current, quoted or earlier images of this chat). No URL, command or browser script is accepted. Unknown, expired or other-chat paths fail before invoking the VM. Each reply permits two searches.
 
 Enable `tools.googleLens.enable`, set `access` (`admin` by default, or `all`) and `distro` (`yunzai-llm-sandbox` by default). These settings appear in the web configuration page independently of AGY and computer-use enablement. The existing VM shared-folder broker and Playwright must be installed (`npm run agy-setup` installs this shared infrastructure). That setup briefly restarts the desktop; routine Lens calls do not restart it or launch AGY.
 
-The fixed-purpose broker stages only the selected original image into an isolated attachment folder, then uploads it through Google Images/Lens in the VM desktop browser. Its Google sign-in is the one established through RustDesk. Cookies, account information, raw HTML, other tabs and screenshots never enter the chatbot result. Public result text passes through the existing privacy filter before entering model context or debug logs.
+The fixed-purpose broker opens only the requested file from the read-only image store, then uploads it through Google Images/Lens in the VM desktop browser. Its Google sign-in is the one established through RustDesk. Cookies, account information, raw HTML, other tabs and screenshots never enter the chatbot result. Public result text passes through the existing privacy filter before entering model context or debug logs.
 
 Google challenges are returned as blocked and left visible in the VM browser for the user to complete. No keyword search is silently substituted. A failed or blocked upload is never a confirmed reverse-image result. Web results are untrusted evidence and cannot authorize actions.
 

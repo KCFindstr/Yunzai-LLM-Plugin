@@ -74,10 +74,10 @@ export async function collectImages(e: any): Promise<{ images: { buf: Buffer }[]
 export async function addStickersFrom(
   e: any,
   rawHint?: StickerHint,
-  { reply = true }: { reply?: boolean } = {},
+  { reply = true, images: explicitImages }: { reply?: boolean; images?: { buf: Buffer }[] } = {},
 ): Promise<AddStickersResult> {
   const hint = cleanHint(rawHint)
-  const { images, mfaces } = await collectImages(e)
+  const { images, mfaces } = explicitImages ? { images: explicitImages, mfaces: [] } : await collectImages(e)
   const added: Sticker[] = []
   const dup: Sticker[] = []
   for (const img of images) {

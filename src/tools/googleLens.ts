@@ -1,7 +1,7 @@
+import { chatImageScope, readImage } from '../chat/images.ts'
 import { randomBytes } from 'node:crypto'
 import { config } from '../core/config.ts'
 import { log } from '../core/log.ts'
-import { captureComputerImages, readComputerImages } from '../computer/attachments.ts'
 import { privateValues, redact } from '../agy/privacy.ts'
 import { lensBridge } from '../lens/runtime.ts'
 import { registry } from './registry.ts'
@@ -9,8 +9,8 @@ import { registry } from './registry.ts'
 export function registerGoogleLensTool(bridge: typeof lensBridge = lensBridge) {
   registry.register({
     name: 'google_lens', source: 'builtin',
-    description: '将本轮或引用的原图直接上传到 Google Lens 进行以图搜图与查图片出处，返回 Google AI Overview 识别总结（如有）、公开精确匹配链接（最多3条）与视觉匹配链接（最多20条）。图片编号从1开始，无需文件路径。使用前加载 google-lens 技能。',
-    parameters: { type: 'object', properties: { image_index: { type: 'integer', minimum: 1, maximum: 8 } }, additionalProperties: false },
+    description: '将本轮或引用的原图直接上传到 Google Lens 进行以图搜图与查图片出处，返回 Google AI Overview 识别总结（如有）、公开精确匹配链接（最多3条）与视觉匹配链接（最多20条）。使用已保存图片的确切 path，可查询历史图片。使用前加载 google-lens 技能。',
+    parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'], additionalProperties: false },
     available: ctx => process.platform === 'win32' && ctx.eff.tools.googleLens.enable && (ctx.eff.tools.googleLens.access === 'all' || ctx.isAdmin),
     limit: () => '最多调用 2 次',
     remaining: ctx => `剩余 ${Math.max(0, 2 - (ctx.turn.lensSearches ?? 0))} 次`,
@@ -18,16 +18,12 @@ export function registerGoogleLensTool(bridge: typeof lensBridge = lensBridge) {
       const cfg = ctx.eff.tools.googleLens
       if (!cfg.enable || (cfg.access !== 'all' && !ctx.isAdmin) || ctx.turn.asyncResult || ctx.turn.computerResult) return { content: '此工具未启用或无使用权限', isError: true }
       if ((ctx.turn.lensSearches ?? 0) >= 2) return { content: '本轮以图搜图次数已达上限', isError: true }
-      const images = ctx.turn.inputImages ?? []
-      if (!images.length) return { content: '本轮没有可上传的原图，请让用户附图或引用原图；历史图片占位符不能用于反搜。', isError: true }
       const job = randomBytes(5).toString('hex')
       const signal = AbortSignal.any([AbortSignal.timeout(55_000), ...(ctx.signal ? [ctx.signal] : [])])
       try {
-        const inputs = captureComputerImages(job, images, [args.image_index ?? 1])
+        const { image } = readImage(args.path, ctx.turn.imageScope ?? chatImageScope(ctx.e))
         ctx.turn.lensSearches = (ctx.turn.lensSearches ?? 0) + 1
-        const stage = await bridge(cfg.distro, { op: 'stage', job, files: readComputerImages(job, inputs) }, signal)
-        if (!stage.ok) throw Error('原图未能传入 Google Lens 工作目录')
-        const result = await bridge(cfg.distro, { op: 'google_image_search', job, path: inputs[0]!.name }, signal)
+        const result = await bridge(cfg.distro, { op: 'google_image_search', job, path: image.path }, signal)
         // Only public evidence enters model context. Never send browser screenshots/account state to chat.
         const secrets = privateValues(config.get())
         const exact_matches: { title: string; url: string }[] = []

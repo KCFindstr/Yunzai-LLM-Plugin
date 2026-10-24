@@ -27,7 +27,7 @@ import { computerQueue } from '../tools/computer.ts'
 import { agyQueue, cancelAgyJob } from '../tools/agy.ts'
 import { agyHistory, agyJobView } from '../agy/history.ts'
 import { computerHistory, readComputerScreenshot } from '../computer/history.ts'
-import { registry } from '../tools/registry.ts'
+import { helperToolLimit, registry } from '../tools/registry.ts'
 import { deleteSkill, listSkills, parseSkillMarkdown, saveSkill, skillsForTools } from '../tools/skills.ts'
 import { prepareRuntimeTools, runtimeToolReady, setupStatus } from '../core/setup.ts'
 
@@ -616,7 +616,7 @@ export const routes: Route[] = [
     const eff = config.effective()
     await prepareRuntimeTools(eff)
     const disabled = new Set(config.get().tools.disabled)
-    return registry.all().map(t => ({ name: t.name, source: t.source ?? 'builtin', description: t.description, parameters: t.parameters, enabled: !disabled.has(t.name), runtimeReady: runtimeToolReady(t.name, eff) }))
+    return registry.all().map(t => ({ name: t.name, budgetExempt: t.budgetExempt === true, maxPerReply: t.budgetExempt ? helperToolLimit({ eff }, t.name) : null, source: t.source ?? 'builtin', description: t.description, parameters: t.parameters, enabled: !disabled.has(t.name), runtimeReady: runtimeToolReady(t.name, eff) }))
   }),
   R('PUT', '/api/tools/:name', ({ params, body }) => {
     if (!registry.get(params[0])) throw fail('没有这个工具', 404)

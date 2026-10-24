@@ -1,3 +1,4 @@
+import { readLocalImage } from '../tools/imageFiles.ts'
 import { registry } from '../tools/registry.ts'
 import { addStickersFrom } from './add.ts'
 import { listStickers } from './store.ts'
@@ -7,11 +8,13 @@ export function registerStickerTools() {
     name: 'add_sticker',
     source: 'builtin',
     description:
-      '添加并保存表情包到机器人的表情库。当用户要求添加、保存、收藏表情包或图片时调用（支持本消息附带的图片/表情，或回复/引用的图片消息）。' +
+      '添加并保存表情包到机器人的表情库。当用户要求添加、保存、收藏表情包或图片时调用，用 path 明确指定要保存的图片。' +
       '你能看到这张图时，把下面五项都按图片内容填好（用户指定的名称/用途优先）；看不到或不确定的项留空，系统会用视觉模型补全。',
     parameters: {
       type: 'object',
+      required: ['path'],
       properties: {
+        path: { type: 'string', description: '要保存的图片的确切本地路径' },
         name: { type: 'string', description: '2-6个字的简短名称，口语化、能概括这个表情（如“狗头保命”“猫猫震惊”）；用户指定了就用用户的' },
         desc: { type: 'string', description: '画面内容与情绪，20字以内' },
         use: { type: 'string', description: '适合在什么聊天场景发，20字以内' },
@@ -29,19 +32,15 @@ export function registerStickerTools() {
       }
       // whatever the model read from the image; empty fields are filled by the vision indexer
       const hint = { name: args.name, desc: args.desc, use: args.use, tags: args.tags, text: args.text }
-      const res = await addStickersFrom(ctx.e, hint, { reply: false })
-      if (!res.total) {
-        return {
-          content: '未在当前消息或引用的消息中找到任何图片或表情。请提示用户：需要附带图片，或引用/回复一张图片消息再进行保存。',
-          isError: true,
-        }
-      }
+      if (typeof args.path !== 'string' || !args.path.trim()) return { content: '请提供要保存的图片 path', isError: true }
+      const { part } = await readLocalImage(args.path, ctx)
+      const res = await addStickersFrom(ctx.e, hint, { reply: false, images: [{ buf: Buffer.from(part.data!, 'base64') }] })
       return `表情包已处理完成：\n${res.lines.join('\n')}\n请在最终回复中简短口语化地告知用户已保存成功（可以提及保存的表情名称）。`
     },
   })
 
   registry.register({
-    name: 'list_stickers',
+    name: 'list_stickers', budgetExempt: true,
     source: 'builtin',
     description: '查看或搜索机器人表情库中已保存的表情包列表。当用户询问机器人有哪些表情包或搜索特定表情时调用。',
     parameters: {

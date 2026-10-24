@@ -1,3 +1,4 @@
+import { chatImageScope, imageLabel, saveImage } from './images.ts'
 import { checkQuota, record, type QuotaBlock, type QuotaCtx } from '../billing/ledger.ts'
 import { computeCost, resolvePrice } from '../billing/pricing.ts'
 import { config } from '../core/config.ts'
@@ -41,6 +42,8 @@ export function degradedFeatures(modelId: string): Feature[] {
 function featureToDrop(err: any, on: Record<Feature, boolean>): Feature | undefined {
   if (!(err instanceof LLMError) || ![400, 422].includes(err.status ?? 0)) return undefined
   const msg = `${err.message} ${err.body ?? ''}`.toLowerCase()
+  // A rejected declaration is a schema bug, not evidence that this model cannot call tools.
+  if (/invalid.{0,50}schema|schema.{0,50}(?:invalid|validation)|parameters.{0,100}(?:required|not defined)|oneof|anyof/.test(msg)) return undefined
   if (on.nativeSearch && /search|grounding|server tool|tool type|web_search|google_search|url_context|combin/.test(msg)) return 'nativeSearch'
   if (on.thinking && /reason|thinking|effort|output_config/.test(msg)) return 'thinking'
   // generic tool complaint: the built-in search tool is the more exotic suspect, drop it first
@@ -142,6 +145,9 @@ async function runTurnInner(req: TurnRequest, ref: { turn?: TurnState; rolloutId
   turn.asyncResult = req.asyncResult
   turn.computerResult = req.computerResult
   turn.computerJob = req.computerResult?.id
+  turn.imageScope = chatImageScope(e)
+  turn.imageRefs = input.savedImages ?? input.images.map(part => saveImage(turn.imageScope!, part))
+  const attachmentNote = turn.imageRefs.length ? '\n' + turn.imageRefs.map(imageLabel).join('\n') : ''
   ref.turn = turn
   const ctx: ToolCtx = { e, eff, isAdmin, model, turn }
   let nativeSearch =
@@ -188,10 +194,10 @@ async function runTurnInner(req: TurnRequest, ref: { turn?: TurnState; rolloutId
   // Mark for background archiving; the ordered group window still includes overlapping exchanges.
   if (!req.computerResult && !req.asyncResult) markHandled(e, convKey)
 
-  const userMsg: UserMsg = { role: 'user', content: [{ type: 'text', text: header.sent + text }, ...input.images] }
+  const userMsg: UserMsg = { role: 'user', content: [{ type: 'text', text: header.sent + text }, ...input.images.flatMap((part, index) => [{ type: 'text' as const, text: imageLabel(turn.imageRefs![index], index) }, part]), ...turn.imageRefs.slice(input.images.length).map((image, index) => ({ type: 'text' as const, text: imageLabel(image, input.images.length + index) }))] }
   const storedUser: UserMsg = {
     role: 'user',
-    content: [{ type: 'text', text: header.stored + text + (input.images.length ? ' [图片]'.repeat(input.images.length) : '') }],
+    content: [{ type: 'text', text: header.stored + text + attachmentNote }],
   }
 
   const prefix: Msg[] = []
@@ -216,7 +222,8 @@ async function runTurnInner(req: TurnRequest, ref: { turn?: TurnState; rolloutId
   let finalText = ''
   let cleanEnd = false
   let lastResponseId: string | undefined
-  const maxRounds = Math.max(1, eff.chat.maxToolRounds + 1)
+  // Every round that runs tools counts, helpers included; the extra round is for the final answer.
+  const maxRounds = Math.max(0, eff.chat.maxToolRounds)
   const started = Date.now()
 
   let retriedStateless = false
@@ -265,7 +272,9 @@ async function runTurnInner(req: TurnRequest, ref: { turn?: TurnState; rolloutId
     tokens: { input: usage.input, output: usage.output, cacheRead: usage.cacheRead, ...(usage.inputIncomplete ? { inputIncomplete: true } : {}) },
   })
   try {
-    for (let round = 0; round < maxRounds; round++) {
+    // The tool list stays the same all turn (a changing list would invalidate the prompt cache);
+    // calls over a limit get an error result from registry.execute instead.
+    for (let round = 0; round <= maxRounds; round++) {
       const step = round + 1, callStarted = Date.now()
       recordRolloutEvent(ref.rolloutId, { kind: 'progress', text: '等待模型响应', step })
       const res = await call()
@@ -290,17 +299,24 @@ async function runTurnInner(req: TurnRequest, ref: { turn?: TurnState; rolloutId
         break
       }
       if (res.text) log.debug(`[${model.id}] 第${round + 1}轮附带文字：${brief(res.text, 300)}`)
-      for (const call of res.toolCalls) recordRolloutEvent(ref.rolloutId, { kind: 'tool', text: round >= maxRounds - 1 ? '已达到工具轮数上限，未执行' : '正在执行',
-        step, tool: call.name, callId: call.id, args: agyHistoryText(call.args), phase: round >= maxRounds - 1 ? 'skipped' : 'running' })
-      if (round >= maxRounds - 1) break
+      const roundsSpent = round >= maxRounds
+      for (const call of res.toolCalls) recordRolloutEvent(ref.rolloutId, { kind: 'tool', text: roundsSpent ? '已达到工具轮数上限，未执行' : '正在执行',
+        step, tool: call.name, callId: call.id, args: agyHistoryText(call.args), phase: roundsSpent ? 'skipped' : 'running' })
+      if (roundsSpent) break
       const { results, terminal } = await registry.execute(res.toolCalls, ctx, offered, (result, ms) => {
+        if (result.images?.length && result.name !== 'read_image') {
+          const refs = result.images.map(part => saveImage(turn.imageScope!, part))
+          result.content += '\n' + refs.map(imageLabel).join('\n')
+          turn.imageRefs!.push(...refs.filter(ref => !turn.imageRefs!.some(old => old.path === ref.path)))
+        }
         const images = recordRolloutImages(ref.rolloutId, result.images)
         recordRolloutEvent(ref.rolloutId, { kind: 'tool', text: result.content, step, tool: result.name,
           callId: result.id, phase: 'completed', ms, isError: result.isError, images,
           omittedImages: (result.images?.length ?? 0) - images.length })
       })
-      const roundsLeft = Math.max(0, maxRounds - round - 2)
-      for (const result of results) result.content += `\n【工具余量】${result.name}：${result.remaining}；全局剩余 ${result.globalRemaining} 次；剩余工具轮次 ${roundsLeft}${roundsLeft && result.globalRemaining ? '。' : '，请直接给出最终回复。'}`
+      const roundsLeft = maxRounds - round - 1
+      for (const result of results) result.content += `\n【工具余量】${result.name}：${result.remaining}；全局剩余 ${result.globalRemaining} 次（辅助工具不占）；剩余工具轮次 ${roundsLeft}`
+        + (!roundsLeft ? '，请直接给出最终回复。' : !result.globalRemaining ? '，此后仅可调用辅助工具 send_image/read_image/load_skill/list_stickers。' : '。')
       msgs.push({ role: 'tool', results })
       if (terminal) break
       if (checkQuota(model, quotaCtx)) break
@@ -330,6 +346,8 @@ async function runTurnInner(req: TurnRequest, ref: { turn?: TurnState; rolloutId
     turn.dispatched && `（已为对方执行指令 ${turn.dispatched}）`,
     turn.images.length && `（已发送 ${turn.images.length} 张图片）`,
   ].filter(Boolean)
+  const outputRefs = turn.images.map(buffer => saveImage(turn.imageScope!, { type: 'image', data: buffer.toString('base64') }))
+  if (outputRefs.length) notes.push(outputRefs.map(imageLabel).join('\n'))
   const persisted = [finalText, ...notes].filter(Boolean).join('\n') || '…'
   appendTurn(convKey, storedUser, { role: 'assistant', content: persisted })
   const after = peekSession(convKey)

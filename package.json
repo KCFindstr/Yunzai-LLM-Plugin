@@ -29,7 +29,7 @@
     "gemini",
     "plugin"
   ],
-  "author": "",
+  "author": "KCFindstr",
   "license": "MIT",
   "devDependencies": {
     "@types/node": "^26.6.5",

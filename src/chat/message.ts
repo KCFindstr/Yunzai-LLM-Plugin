@@ -1,3 +1,4 @@
+import { chatImageScope, saveImage, type SavedImage } from './images.ts'
 import { detectImageMime, fetchBuffer, truncate } from '../core/util.ts'
 import type { ImagePart } from '../llm/types.ts'
 import { knownName } from './roster.ts'
@@ -17,6 +18,7 @@ export interface QuotedMessage {
 export interface ExtractedInput {
   text: string
   images: ImagePart[]
+  savedImages?: SavedImage[]
   quoted?: QuotedMessage
   /** Raw segments that were images/stickers (for sticker-adding flows). */
   imageSegments: any[]
@@ -127,6 +129,17 @@ export async function getQuoted(e: any): Promise<QuotedMessage | undefined> {
   return q
 }
 
+/** Persist every successfully loaded image, even if vision or a tool never uses it. */
+export async function captureImageSegments(message: any[], scope: string) {
+  const urls = [...new Set(message.map(imageUrl).filter((url): url is string => Boolean(url)))]
+  const parts: ImagePart[] = [], savedImages: SavedImage[] = []
+  for (let offset = 0; offset < urls.length; offset += 4) {
+    const loaded = await Promise.all(urls.slice(offset, offset + 4).map(loadImage))
+    for (const part of loaded) if (part) { parts.push(part); savedImages.push(saveImage(scope, part)) }
+  }
+  return { parts, savedImages }
+}
+
 export async function extractInput(
   e: any,
   opts: { includeImages: boolean; maxImages: number; includeQuoted: boolean; vision: boolean },
@@ -136,19 +149,14 @@ export async function extractInput(
   const imageSegments = message.filter(s => s?.type === 'image' || s?.type === 'mface')
   const quoted = opts.includeQuoted ? await getQuoted(e) : undefined
 
-  const images: ImagePart[] = []
-  const maxImages = Math.max(0, Math.floor(opts.maxImages))
-  if (opts.includeImages && opts.vision && maxImages > 0) {
-    const urls = [...new Set([
-      ...message.map(imageUrl).filter((url): url is string => Boolean(url)),
-      ...(quoted?.imageUrls ?? []),
-    ])]
-    for (let offset = 0; offset < urls.length && images.length < maxImages;) {
-      const batch = urls.slice(offset, offset + maxImages - images.length)
-      offset += batch.length
-      const loaded = await Promise.all(batch.map(loadImage))
-      for (const img of loaded) if (img) images.push(img)
-    }
+  const scope = chatImageScope(e)
+  const stored = opts.includeImages ? await (e._llmImageCapture ?? captureImageSegments(message, scope)) : { parts: [], savedImages: [] }
+  const currentUrls = new Set(message.map(imageUrl))
+  const quotes = opts.includeImages && quoted?.imageUrls.length ? await captureImageSegments(quoted.imageUrls.filter(url => !currentUrls.has(url)).map(url => ({ type: 'image', url })), scope) : { parts: [], savedImages: [] }
+  const savedImages: SavedImage[] = [], parts: ImagePart[] = []
+  for (const batch of [stored, quotes]) for (const [index, image] of batch.savedImages.entries()) {
+    savedImages.push(image); parts.push(batch.parts[index])
   }
-  return { text, images, quoted, imageSegments }
+  const images = opts.vision ? parts.slice(0, Math.max(0, Math.floor(opts.maxImages))) : []
+  return { text, images, savedImages, quoted, imageSegments }
 }

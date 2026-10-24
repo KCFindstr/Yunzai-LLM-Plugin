@@ -4,7 +4,26 @@ The optional computer agent owns a shared character desktop, not the host's Wind
 
 ## Setup
 
-First provision the dedicated WSL distro with `npm run exec-setup` (see README). Then run `npm run computer-setup -- --distro yunzai-llm-sandbox`. The setup requires a dedicated distro with Windows automount and executable interop disabled. Do not use a personal development distro. Restart the bot after enabling `tools.computer`.
+The desktop requires an installed WSL2 runtime with systemd support and a dedicated distro provisioned by `exec-setup`. In the plugin directory, run:
+
+```powershell
+# First install: create and provision the dedicated distro.
+npm run exec-setup -- --install --distro yunzai-llm-sandbox
+npm run computer-setup -- --distro yunzai-llm-sandbox
+```
+
+For an existing dedicated distro, omit `--install` from `exec-setup`. The setup disables Windows automount and executable interop. Do not use a personal development distro. Restart the bot after enabling `tools.computer`.
+
+If the command only prints `wsl.exe` help (especially help listing installation options but no `--exec`), the Windows WSL launcher is not ready to execute Linux commands. In **administrator PowerShell**, run:
+
+```powershell
+wsl --install --no-distribution --web-download
+# Restart Windows if requested, then:
+wsl --update --web-download
+wsl --list --verbose
+```
+
+Then run the two npm setup commands above. Merely having `wsl.exe` on PATH does not mean WSL is installed. If WSL rejects `--name` or `--location`, update WSL before retrying; these options are needed to create the dedicated distro. An existing WSL1 distro must first be converted with `wsl --set-version yunzai-llm-sandbox 2`. Setup now checks these prerequisites before mounting images or installing desktop packages, and reports the recovery command instead of a bare WSL help dump.
 
 ```yaml
 tools:
@@ -30,11 +49,11 @@ Examples: “take a screenshot of your desktop”, “去哔哩哔哩找一个�
 
 ## Chat images and reverse image search
 
-Attach an image or quote its original message and ask “用浏览器 Google 图片以图搜图，查这是谁”. `computer_task(start)` automatically snapshots the current/quoted image bytes already loaded by chat. Optional `image_indices: [1]` selects by the order seen in this turn; omit it for all images, or use `[]` for none (up to eight images, 3.7 MB each). Chat's `includeImages`, `includeQuoted`, `maxImages` and vision-model settings still govern which images are loaded.
+All tools share the global image store mounted read-only at `/work/attachments`. Pass paths from `[图片N:路径]` labels directly in `computer_task` / AGY task text or code; all saved images are available regardless of which chat received them or whether a tool previously used them. No `image_paths` staging parameter is needed. `read_image(path=...)` reloads native vision content. Save intermediate edits and previews in `/work/tmp/` (create as needed); reserve `/work/out/` for final images intended for the user. In run_code, new or updated images in out/ are automatically sent with the reply. Images expire after 30 days, independently of chat reset/expiry. Current/quoted and enabled passive group images are captured even when no vision call or tool uses them.
 
 Original files are stored outside the short-lived code sandbox in `data/computer-inputs/<job>/`. When the queued task actually runs, the trusted transport writes them as user `pc` into the existing desktop's mounted work directory. The worker receives verified absolute paths such as `/work/attachments/<job>/image-1-<hash>.jpg`. No additional VM, desktop service, browser session or setup is created. GIFs retain their original bytes; expired signed URLs do not affect an already captured task. Transfer failure stops the task before model execution instead of inventing a usable path.
 
-The browser worker opens Google Images / Lens, uploads the attached file using its path, and inspects visual matches and source pages. Keyword searches alone are not reverse image search, and a similar image is not proof of identity. CAPTCHA/login barriers are reported. Resume restores the files and paths; `respond` with new images replaces the job's inputs, otherwise it retains the originals. Chat history's old `[图片]` placeholders contain no image bytes: quote or attach the source again when starting a new image task.
+The browser worker opens Google Images / Lens, uploads the attached file using its path, and inspects visual matches and source pages. Keyword searches alone are not reverse image search, and a similar image is not proof of identity. CAPTCHA/login barriers are reported. Resume restores the files and paths; `respond` can refer to any saved path directly; the global mount stays available. Chat history's old `[图片]` placeholders contain no image bytes: quote or attach the source again when starting a new image task.
 
 The minimal screenshot is not a browser-only capability limit. The worker can run Bash/Python, open installed Linux GUI apps on the same display, download compatible portable apps and install tools in its own persistent home/work directories. It cannot run host Windows apps, use sudo or install system packages into the read-only OS. New binaries need compatible dependencies; AppImage may need extraction because FUSE is not exposed. The skill tells it to check installed tools, use absolute paths for user-local executables, detach GUI processes and verify the result visually. No extra apps are installed merely by asking what is supported.
 
@@ -44,7 +63,7 @@ The minimal screenshot is not a browser-only capability limit. The worker can ru
 - One job controls the desktop at a time. Queued jobs wait; each requester can queue at most two jobs. Paused jobs release the lease; resumed tasks re-observe the desktop.
 - The worker reports completion, failure or a necessary question to the chat model. Only an actual new incoming user message can authorize continuation, not a worker report or an invented approval from the main model.
 - Bot shutdown cancels work; queued/running jobs become interrupted on restart, never automatically replayed. Status/report metadata survives in `data/computer-jobs.json`. Resume deliberately; the desktop/files remain.
-- API observations are not automatically posted to chat. `share=true` selects up to four screenshots for the chat model to inspect; it selects which to send through `computer_result`. Requested screenshots are real X11 captures, not generated images.
+- API observations are not automatically posted to chat. `share=true` selects up to four screenshots for the chat model to inspect; it selects which to send through `send_image`. Requested screenshots are real X11 captures, not generated images.
 - Delivery errors are recorded without automatic retries that could duplicate messages. Status can retrieve the report.
 
 ## Environment and persistence

@@ -142,6 +142,9 @@ function charsetOf(contentType: string, head: Buffer): string {
   return (fromMeta || 'utf-8').toLowerCase()
 }
 
+/** The request never got a response (DNS, connection, TLS, timeout), as opposed to a refused or invalid URL. */
+class TransportError extends Error {}
+
 async function fetchPublic(raw: string, ctx: ToolCtx): Promise<Response> {
   const allowPrivate = ctx.eff.tools.webFetch.allowPrivateNetwork
   let url = raw
@@ -151,6 +154,10 @@ async function fetchPublic(raw: string, ctx: ToolCtx): Promise<Response> {
       redirect: 'manual',
       headers: { 'user-agent': UA, accept: 'text/html,application/xhtml+xml,application/json,text/plain;q=0.9,*/*;q=0.5' },
       signal: AbortSignal.timeout((ctx.eff.tools.webFetch.timeout || 15) * 1000),
+    }).catch((err: any) => {
+      const cause = err?.cause
+      const detail = [cause?.code, cause?.message].filter(Boolean).join(': ')
+      throw new TransportError(detail ? `${err.message} (${detail})` : String(err?.message ?? err), { cause: err })
     })
     if (res.status >= 300 && res.status < 400 && res.headers.get('location')) {
       url = new URL(res.headers.get('location')!, url).href
@@ -175,7 +182,6 @@ async function readCapped(res: Response, maxBytes: number): Promise<Buffer> {
 /** Image types every provider accepts; larger files are refused rather than sent (Anthropic caps images near 5MB). */
 const VIEWABLE_IMAGES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp'])
 const MAX_IMAGE_BYTES = 3_700_000
-const IMAGE_PATH = /\.(png|jpe?g|gif|webp)$/i
 
 /** An image response as an image part for vision models, checked by its bytes rather than the server's content-type. */
 async function fetchImage(res: Response, contentType: string): Promise<ToolOutput | string> {
@@ -189,11 +195,35 @@ async function fetchImage(res: Response, contentType: string): Promise<ToolOutpu
   }
 }
 
+/**
+ * Fetch a link directly (same redirect and private-address checks as direct mode) and return it if it is an image.
+ * Anything else, or a transport failure the reader may get past, returns undefined so the reader handles the link.
+ */
+async function probeImage(url: string, ctx: ToolCtx): Promise<ToolOutput | string | undefined> {
+  let res: Response
+  try {
+    res = await fetchPublic(url, ctx)
+  } catch (err) {
+    if (err instanceof TransportError) return undefined
+    throw err
+  }
+  const ct = res.headers.get('content-type') ?? ''
+  if (res.ok && /image|octet-stream/i.test(ct)) return fetchImage(res, ct)
+  await res.body?.cancel().catch(() => {})
+  return undefined
+}
+
 export async function fetchPage(url: string, ctx: ToolCtx): Promise<ToolOutput | string> {
   const wf = { ...ctx.eff.tools.webFetch, jinaKey: resolveKeys(ctx.eff.tools.webFetch.jinaKey)[0] ?? '' }
   const max = wf.maxChars || 6000
   const vision = ctx.model.vision !== false
-  if (wf.reader === 'deepseek' && !(vision && IMAGE_PATH.test(new URL(url).pathname))) {
+  // Readers turn images into text, and only the response says whether a link is an image (extensionless and
+  // redirected download links are common): for vision models, try the link directly first.
+  if (wf.reader !== 'direct' && vision) {
+    const image = await probeImage(url, ctx)
+    if (image) return image
+  }
+  if (wf.reader === 'deepseek') {
     const target = new URL(url)
     if (!['http:', 'https:'].includes(target.protocol) || target.username || target.password || url.length > 8192) {
       throw new Error('DeepSeek Fetch 需要不含用户名和密码的 http(s) 链接（最多 8192 字符）')
@@ -202,8 +232,7 @@ export async function fetchPage(url: string, ctx: ToolCtx): Promise<ToolOutput |
     const page = await deepseekTool('fetch', { url }, ctx)
     return truncate(`${page.title ? `标题: ${page.title}\n\n` : ''}${page.content}`, max)
   }
-  // Jina Reader turns images into text: fetch image links directly so a vision model sees the picture.
-  if (wf.reader === 'jina' && !(vision && IMAGE_PATH.test(new URL(url).pathname))) {
+  if (wf.reader === 'jina') {
     if (!wf.allowPrivateNetwork) await assertPublicUrl(url)
     const res = await fetch(`https://r.jina.ai/${url}`, {
       headers: { accept: 'text/plain', ...(wf.jinaKey ? { authorization: `Bearer ${wf.jinaKey}` } : {}) },

@@ -148,8 +148,8 @@ const chat = obj(
     summarize: bool('压缩旧对话为摘要'),
     groupContext: int('附带最近群聊条数', { min: 0, max: 100 }),
     groupContextMaxChars: int('群聊每条最多字数', { min: 10 }),
-    maxToolRounds: int('工具调用轮数上限', { min: 0, max: 100 }),
-    maxToolCalls: int('所有工具合计调用次数上限（并行调用分别计数）', { min: 0, max: 1000 }),
+    maxToolRounds: int('工具轮数上限（含只调用辅助工具的轮次；0关闭工具）', { min: 0, max: 100 }),
+    maxToolCalls: int('普通工具合计次数上限（并行分别计数；不含发送/读取图片、加载技能、表情列表）', { min: 0, max: 1000 }),
     maxOutputTokens: int('最大输出 token', { min: 64 }),
     temperature: num('温度', { min: 0, max: 2, nullable: true }),
     thinking: oneOf(THINKING_SETTING, '默认思考强度'),
@@ -213,6 +213,10 @@ const sticker = obj(
 const tools = obj(
   {
     enable: bool('工具总开关'),
+    sendImage: obj({ maxPerTurn: int('每次回复最多发送图片请求数（0禁用）', { min: 0, max: 32 }) }, '发送图片 send_image'),
+    readImage: obj({ maxPerTurn: int('每次回复最多读取图片次数（0禁用）', { min: 0, max: 32 }) }, '读取图片 read_image'),
+    loadSkill: obj({ maxPerTurn: int('每次回复最多加载技能次数（0禁用）', { min: 0, max: 32 }) }, '加载技能 load_skill'),
+    listStickers: obj({ maxPerTurn: int('每次回复最多查看表情列表次数（0禁用）', { min: 0, max: 32 }) }, '表情列表 list_stickers'),
     webSearch: obj(
       {
         enable: bool('联网搜索'),

@@ -5,7 +5,8 @@ import { after, before, beforeEach, describe, it } from 'node:test'
 import { extractInput } from '../src/chat/message.ts'
 import { buildHeader } from '../src/chat/prompt.ts'
 import { config } from '../src/core/config.ts'
-import { recordGroupMessage, clearGroupLogs } from '../src/chat/groupLog.ts'
+import { chatImageScope, readImage, imageScope } from '../src/chat/images.ts'
+import { recentLines, recordGroupMessage, clearGroupLogs } from '../src/chat/groupLog.ts'
 
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9ZlWQAAAAASUVORK5CYII=', 'base64')
 const requests: string[] = []
@@ -50,7 +51,9 @@ describe('quoted sender identity', () => {
     assert.equal(input.quoted!.senderId, 'original')
   })
   it('recovers missing sender IDs by exact message ID in the same bot and group only', async () => {
-    recordGroupMessage({ self_id: 10000, group_id: 42500, user_id: 42501, message_id: 'original-image', sender: { nickname: '原发言人' }, message: [image('quoted')] })
+    const original: any = { self_id: 10000, group_id: 42500, user_id: 42501, message_id: 'original-image', sender: { nickname: '原发言人' }, message: [image('quoted')] }
+    recordGroupMessage(original)
+    await original._llmImageCapture
     const e = { self_id: 10000, group_id: 42500, user_id: 42502, reply_id: 'original-image', getReply: async () => ({ message: [image('quoted')] }) }
     const input = await extractInput(e, { ...opts, includeImages: false })
     assert.equal(input.quoted!.senderId, '42501')
@@ -87,7 +90,8 @@ describe('image input budget', () => {
   it('counts successful loads, not failed URLs, toward the image limit', async () => {
     const input = await extractInput({ message: [image('missing'), image('valid'), image('unneeded')] }, opts)
     assert.equal(input.images.length, 1)
-    assert.deepEqual(requests, ['/missing', '/valid'])
+    assert.deepEqual(requests, ['/missing', '/valid', '/unneeded'])
+    assert.equal(input.savedImages?.length, 2)
     assert.equal(input.text, '[图片][图片][图片]')
   })
 
@@ -99,7 +103,7 @@ describe('image input budget', () => {
     assert.deepEqual(requests, ['/missing', '/valid'])
   })
 
-  it('retains placeholders when all downloads fail or vision is disabled', async () => {
+  it('retains placeholders and stores originals when vision is disabled', async () => {
     const failed = await extractInput({ message: [image('missing')] }, opts)
     assert.equal(failed.text, '[图片]')
     assert.deepEqual(failed.images, [])
@@ -107,12 +111,31 @@ describe('image input budget', () => {
     const disabled = await extractInput({ message: [image('valid')] }, { ...opts, vision: false })
     assert.equal(disabled.text, '[图片]')
     assert.deepEqual(disabled.images, [])
-    assert.deepEqual(requests, [])
+    assert.deepEqual(requests, ['/valid'])
   })
 
   it('floors a fractional image limit without stalling the download loop', async () => {
     const input = await extractInput({ message: [image('missing'), image('valid'), image('unneeded')] }, { ...opts, maxImages: 1.5 })
     assert.equal(input.images.length, 1)
-    assert.deepEqual(requests, ['/missing', '/valid'])
+    assert.deepEqual(requests, ['/missing', '/valid', '/unneeded'])
   })
+})
+
+it('persists passive group images without a bot call and preserves complete paths in history', async () => {
+  const e: any = { self_id: 10000, group_id: 42500, user_id: 42501, message_id: 'passive-store', sender: { nickname: 'Observer' }, message: [image('unused')] }
+  recordGroupMessage(e)
+  const stored = await e._llmImageCapture
+  assert.equal(stored.savedImages.length, 1)
+  const saved = stored.savedImages[0]
+  assert.equal(readImage(saved.path, chatImageScope(e)).part.data, png.toString('base64'))
+  const lines = recentLines({ ...e, message_id: 'later-message' }, 5, 12)
+  assert.ok(lines.join('\n').includes(saved.path))
+})
+
+it('saves images even when they are not supplied to a vision model', async () => {
+  const event = { self_id: 'bot', user_id: 'owner', message: [image('not-used-by-vision')] }
+  const input = await extractInput(event, { ...opts, maxImages: 0, vision: false })
+  assert.equal(input.images.length, 0)
+  assert.equal(input.savedImages?.length, 1)
+  assert.equal(readImage(input.savedImages![0].path, chatImageScope(event)).part.data, png.toString('base64'))
 })

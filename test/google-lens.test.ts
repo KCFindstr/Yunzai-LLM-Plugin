@@ -1,4 +1,5 @@
 import './helpers.ts'
+import { currentImages } from '../src/tools/images.ts'
 import assert from 'node:assert/strict'
 import { it } from 'node:test'
 import { normalize } from '../src/core/config.ts'
@@ -17,21 +18,18 @@ it('uploads only the selected context image directly and filters browser data be
   const calls: any[] = []
   registerGoogleLensTool(async (_distro, request) => {
     calls.push(request)
-    if (request.op === 'stage') return { ok: true }
-    return { status: 'ok', uploaded: true,
+        return { status: 'ok', uploaded: true,
       exact_matches: [{ title: 'Exact artwork alice@example.com', url: 'https://example.org/exact?token=private' }],
       visual_matches: [{ title: 'Artwork alice@example.com', url: 'https://example.org/art?token=private' }],
       ai_overview: { text: 'The image shows Saiba Momoi from Blue Archive. alice@example.com',
         sources: [{ title: 'Saiba Momoi - Wiki', url: 'https://example.org/wiki?token=private' }, 'not an object'] },
       image: { data: 'PRIVATE_SCREENSHOT' }, cookies: 'PRIVATE_COOKIES' }
   })
-  const ctx = context(), result = await registry.get('google_lens')!.run({ image_index: 2 }, ctx) as any
+  const ctx = context(), result = await registry.get('google_lens')!.run({ path: currentImages(ctx)[1].path }, ctx) as any
   assert.equal(result.isError, false)
-  assert.equal(calls.length, 2)
-  assert.equal(calls[0].files.length, 1)
-  assert.equal(calls[0].files[0].data, ctx.turn.inputImages![1].data)
-  assert.equal(calls[1].job, calls[0].job)
-  assert.equal(calls[1].path, calls[0].files[0].name)
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0].path, currentImages(ctx)[1].path)
+  assert.equal(calls[0].files, undefined)
   assert.equal(ctx.turn.afterReply, undefined)
   assert.deepEqual(ctx.turn.images, [])
   assert.ok(result.content.includes('https://example.org/exact'))
@@ -53,9 +51,9 @@ it('enforces access, valid context images and reply limits before crossing the V
   registerGoogleLensTool(async () => { calls++; return { ok: true, status: 'ok', uploaded: true, exact_matches: [], visual_matches: [] } })
   const tool = registry.get('google_lens')!, ctx = context()
   ctx.isAdmin = false
-  assert.equal((await tool.run({}, ctx) as any).isError, true)
+  assert.equal((await tool.run({ path: currentImages(ctx)[0]?.path }, ctx) as any).isError, true)
   ctx.isAdmin = true
-  assert.equal((await tool.run({ image_index: 99 }, ctx) as any).isError, true)
+  assert.equal((await tool.run({ path: '/work/attachments/invalid' }, ctx) as any).isError, true)
   ctx.turn.inputImages = []
   assert.equal((await tool.run({}, ctx) as any).isError, true)
   assert.equal(calls, 0)
@@ -70,7 +68,8 @@ it('enforces access, valid context images and reply limits before crossing the V
 
 it('reports Google verification blocks without claiming a successful image search', async () => {
   registerGoogleLensTool(async (_distro, request) => request.op === 'stage' ? { ok: true } : { status: 'blocked', error: 'Complete verification in the VM browser' })
-  const result = await registry.get('google_lens')!.run({}, context()) as any
+  const ctx = context()
+  const result = await registry.get('google_lens')!.run({ path: currentImages(ctx)[0].path }, ctx) as any
   assert.equal(result.isError, true)
   const output = JSON.parse(result.content)
   assert.equal(output.status, 'blocked'); assert.equal(output.uploaded, false)

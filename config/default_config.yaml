@@ -173,22 +173,22 @@ chat:
   sessionTimeout: 180
   # 记忆上限（超过后一次性丢弃较早的一半，比逐条滑动更省 token：缓存前缀保持不变）
   # 一轮 = 一条用户消息 + 一条机器人回复；20 轮最多 40 条历史消息
-  historyMaxTurns: 20
+  historyMaxTurns: 10
   # 同一会话最多排队多少条请求；超出时提示繁忙
   maxPending: 20
   # 最近群友身份条数，0 关闭，最大 30；只列称呼与 ID
   rosterSize: 12
   # 已保存对话历史的估算 token 上限，与轮数限制共同生效
-  historyMaxTokens: 6000
+  historyMaxTokens: 8192
   # 丢弃的历史用便宜模型压缩成摘要保留
   summarize: true
   # 附带的最近群聊条数，0–100（帮助理解语境；不会写入长期记忆）
   groupContext: 16
   # 每条最近群聊最多附带多少字符
   groupContextMaxChars: 200
-  # 单次回复最多调用几轮工具
-  maxToolRounds: 20
-  # 所有工具合计最多调用次数（同一轮的并行调用分别计数；0 禁用工具调用）
+  # 单次回复最多调用几轮工具（每轮可并行多个调用；只调用辅助工具的轮次也计入；0 关闭全部工具）
+  maxToolRounds: 24
+  # 普通工具合计调用次数（并行分别计数；辅助工具 send_image/read_image/load_skill/list_stickers 不占；0 仅保留辅助工具）
   maxToolCalls: 20
   # 单次最大输出 token（含思考）
   maxOutputTokens: 8192
@@ -313,6 +313,15 @@ sticker:
 tools:
   # 所有模型工具的总开关
   enable: true
+  # 以下辅助工具不占 chat.maxToolCalls，但所在轮次计入 chat.maxToolRounds；单工具每次回复次数范围0–32，0禁用；失败/无效参数也计数
+  sendImage:
+    maxPerTurn: 2
+  readImage:
+    maxPerTurn: 8
+  loadSkill:
+    maxPerTurn: 8
+  listStickers:
+    maxPerTurn: 4
   # 联网搜索，与网页读取独立配置
   webSearch:
     # 是否启用搜索；还需有效的服务或模型配置

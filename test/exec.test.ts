@@ -30,7 +30,20 @@ const provisioned =
 const cfg = { enable: true, distro: DISTRO, access: 'admin' as const, languages: ['python', 'node', 'bash'] as any, timeout: 10, memoryMB: 256, diskMB: 32, maxOutput: 2000, maxRunsPerTurn: 3 }
 
 describe('WSL sandbox', { skip: !provisioned && `发行版 ${DISTRO} 未配置` }, () => {
-  it('runs python and returns images from out/', async () => {
+  it('returns only code output, without scanning tmp/, img/ or out/', async () => {
+    const r = await runInSandbox('python', [
+      'import base64,pathlib',
+      "data=base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aL1sAAAAASUVORK5CYII=')",
+      "pathlib.Path('tmp').mkdir(exist_ok=True)",
+      "pathlib.Path('img').mkdir(exist_ok=True)",
+      "pathlib.Path('tmp/intermediate.png').write_bytes(data)",
+      "pathlib.Path('img/html-asset.png').write_bytes(data)",
+      "pathlib.Path('out/final.png').write_bytes(data)",
+    ].join('\n'), cfg)
+    assert.equal(r.exitCode, 0, r.stderr)
+    assert.deepEqual(r.images, [])
+  })
+  it('runs python without returning images from out/', async () => {
     const r = await runInSandbox(
       'python',
       'import struct,zlib\nprint(sum(range(101)))\n' +
@@ -41,8 +54,7 @@ describe('WSL sandbox', { skip: !provisioned && `发行版 ${DISTRO} 未配置` 
     )
     assert.equal(r.exitCode, 0, r.stderr)
     assert.equal(r.stdout.trim(), '5050')
-    assert.equal(r.images.length, 1)
-    assert.equal(r.images[0].name, 'a.png')
+    assert.equal(r.images.length, 0)
   })
   it('cannot see Windows drives, the plugin, or other runs', async () => {
     const r = await runInSandbox('bash', 'ls /mnt/c /mnt/d /var/lib/llm-sandbox /opt 2>&1; id -u; cat /etc/hostname', cfg)
@@ -75,7 +87,7 @@ describe('WSL sandbox', { skip: !provisioned && `发行版 ${DISTRO} 未配置` 
     ].join('\n')
     const a = await runInSandbox('python', code, cfg, { session })
     assert.equal(a.stdout.trim(), 'saved', a.stderr)
-    assert.equal(a.images.length, 0, 'img/ is not auto-sent, only out/')
+    assert.equal(a.images.length, 0, 'no images are returned automatically')
     const b = await runInSandbox('bash', 'ls img', cfg, { session })
     assert.equal(b.stdout.trim(), 'dot.png')
     const html = wrapHtml('<h2>测试</h2><img src="img/dot.png" width="40"><img src="file:///etc/passwd"><script>document.title="x"</script>')
@@ -92,4 +104,45 @@ describe('WSL sandbox', { skip: !provisioned && `发行版 ${DISTRO} 未配置` 
     const m = await runInSandbox('python', 'x=[]\nwhile True: x.append(bytearray(10**7))', cfg)
     assert.equal(m.killed, true)
   })
+})
+
+
+it('run_code exposes paths only through stdout; explicit image tools read the same workspace files', { skip: !provisioned }, async () => {
+  const { config } = await import('../src/core/config.ts')
+  const { registry } = await import('../src/tools/registry.ts')
+  const { registerExecTool, stopKeepalive } = await import('../src/tools/exec.ts')
+  const { registerImageTools } = await import('../src/tools/images.ts')
+  const { registerSendImageTool } = await import('../src/tools/sendImage.ts')
+  const { registerRenderTool } = await import('../src/tools/render.ts')
+  const { prepareRuntimeTools } = await import('../src/core/setup.ts')
+  const { closeOwnBrowser } = await import('../src/render/browser.ts')
+  const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aL1sAAAAASUVORK5CYII='
+  registerExecTool(); registerImageTools(); registerSendImageTool(); registerRenderTool()
+  const eff = config.effective()
+  eff.tools.exec = cfg
+  eff.tools.enable = true
+  eff.tools.webFetch.enable = false
+  const ctx: any = { e: { user_id: 'explicit-code-test', self_id: 'bot' }, eff, isAdmin: true, model: { vision: true }, turn: { images: [], commands: 0, searches: 0, fetches: 0 } }
+  await prepareRuntimeTools(eff, ['run_code'], true)
+  try {
+    const result: any = await registry.get('run_code')!.run({ language: 'python', code: 'import base64,pathlib\npathlib.Path("tmp").mkdir(exist_ok=True)\npathlib.Path("tmp/chosen.png").write_bytes(base64.b64decode("' + png + '"))\nprint("/work/tmp/chosen.png")' }, ctx)
+    assert.match(result.content, /\[stdout\]\n\/work\/tmp\/chosen.png/)
+    assert.doesNotMatch(result.content, /生成的图片|图片1:|自动|发送/)
+    assert.equal(ctx.turn.images.length, 0)
+    const read: any = await registry.get('read_image')!.run({ path: '/work/tmp/chosen.png' }, ctx)
+    assert.equal(read.images[0].data, png)
+    assert.equal(ctx.turn.images.length, 0)
+    const rendered: any = await registry.get('render_html')!.run({ html: '<img src="/work/tmp/chosen.png">' }, ctx)
+    assert.match(String(rendered), /\/work\/attachments\//)
+    assert.equal(ctx.turn.images.length, 0)
+    const sent: any = await registry.get('send_image')!.run({ path: '/work/tmp/chosen.png' }, ctx)
+    assert.ok(!sent.isError, sent.content)
+    assert.deepEqual(ctx.turn.images, [Buffer.from(png, 'base64')])
+    const unsafe: any = await registry.get('send_image')!.run({ path: '/work/../../etc/passwd.png' }, ctx)
+    assert.equal(unsafe.isError, true)
+  } finally {
+    if (ctx.turn.sandboxSession) cleanupSandbox(cfg, ctx.turn.sandboxSession)
+    stopKeepalive()
+    await closeOwnBrowser()
+  }
 })

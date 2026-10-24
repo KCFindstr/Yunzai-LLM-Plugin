@@ -1,3 +1,4 @@
+import { provisionImageStore } from './image-store.mjs'
 import { spawnSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -7,6 +8,7 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const index = process.argv.indexOf('--distro')
 const distro = index < 0 ? 'yunzai-llm-sandbox' : process.argv[index + 1]
 if (process.platform !== 'win32' || !/^[\w.-]+$/.test(distro ?? '')) throw Error('Requires Windows and a dedicated WSL desktop distro')
+provisionImageStore(distro, root)
 function wsl(args, input) {
   const result = spawnSync('wsl.exe', ['-d', distro, '-u', 'root', '-e', ...args], { input, encoding: 'utf8', windowsHide: true, timeout: 180000 })
   if (result.status !== 0) throw Error(result.stderr || 'Lens setup failed')

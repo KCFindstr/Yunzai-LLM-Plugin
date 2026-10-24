@@ -76,11 +76,28 @@ describe('sticker tools', () => {
   it('add_sticker reports a missing image', async () => {
     const res: any = await registry.get('add_sticker')!.run({}, { isAdmin: true, e: { user_id: '1', message: [{ type: 'text', text: '存一下' }] }, eff: { sticker: { enable: true } } } as any)
     assert.ok(res.isError)
-    assert.match(res.content, /未在当前消息或引用的消息中找到任何图片/)
+    assert.match(res.content, /请提供要保存的图片 path/)
   })
 
   it('list_stickers reports an empty library', async () => {
     for (const s of listStickers()) removeSticker(s.id)
     assert.match(String(await registry.get('list_stickers')!.run({}, {} as any)), /为空/)
   })
+})
+
+
+it('add_sticker saves only the explicit path, independently of current context images', async () => {
+  const { chatImageScope, saveImage } = await import('../src/chat/images.ts')
+  const e = { self_id: 'bot', user_id: '1', message: [{ type: 'image', url: 'https://must-not-fetch.invalid/image.png' }], getReply: () => { throw Error('must not collect context') } }
+  const selected = saveImage(chatImageScope(e), { type: 'image', data: PNG.toString('base64') })
+  const result: any = await registry.get('add_sticker')!.run({ path: selected.path, name: '指定图片', desc: '指定的图', use: '表示开心', tags: ['开心', '猫', '可爱'], text: '' }, {
+    isAdmin: true, e, eff: { sticker: { enable: true } }, turn: { images: [] },
+  } as any)
+  assert.ok(!result.isError, result.content)
+  const saved = listStickers().find(sticker => sticker.name === '指定图片')!
+  assert.ok(saved)
+  assert.deepEqual(fs.readFileSync(stickerFile(saved)!), PNG)
+  removeSticker(saved.id)
+  const required = registry.get('add_sticker')!.parameters.required
+  assert.ok(required.includes('path'))
 })

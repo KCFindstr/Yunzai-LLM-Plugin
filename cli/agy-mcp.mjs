@@ -12,7 +12,7 @@ function execute(operation) {
     let output = ''; let done = false
     const finish = value => { if (!done) { done = true; clearTimeout(timer); resolve(value) } }
     const timer = setTimeout(() => { child.kill(); finish({ error: 'Sandbox timeout' }) }, 65000)
-    child.stdout.on('data', chunk => { output += chunk; if (output.length > 5100000) { child.kill(); finish({ error: 'Output limit' }) } })
+    child.stdout.on('data', chunk => { output += chunk; if (output.length > 7100000) { child.kill(); finish({ error: 'Output limit' }) } })
     child.on('error', () => finish({ error: 'Sandbox unavailable' }))
     child.on('close', () => { try { finish(JSON.parse(output)) } catch { finish({ error: 'Invalid sandbox response' }) } })
     child.stdin.on('error', () => finish({ error: 'Sandbox request could not be sent' }))

@@ -96,7 +96,7 @@ export function deleteSkill(name: string): boolean {
 
 export function registerSkillTool() {
   registry.register({
-    name: 'load_skill',
+    name: 'load_skill', budgetExempt: true,
     source: 'builtin',
     description: '加载一个技能的完整说明。系统提示里只列出了技能名和简介，需要使用某个技能时先调用它获取详细步骤。',
     parameters: {
