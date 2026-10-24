@@ -281,14 +281,14 @@ async function runTurnInner(req: TurnRequest, ref: { turn?: TurnState; rolloutId
       lastResponseId = res.responseId
       state = res.responseId && serverState ? { previousId: res.responseId, skip: msgs.length } : undefined
 
+      // Keep visible text from every round, including rounds that invoke tools or pause.
+      if (res.text.trim()) finalText += `${finalText ? '\n' : ''}${res.text}`
       if (res.pause) continue
       if (!res.toolCalls.length) {
-        finalText = res.text
         cleanEnd = true
         if (res.stopReason === 'refusal' && !finalText) finalText = '这个我不太方便回答呢'
         break
       }
-      finalText = res.text
       if (res.text) log.debug(`[${model.id}] 第${round + 1}轮附带文字：${brief(res.text, 300)}`)
       for (const call of res.toolCalls) recordRolloutEvent(ref.rolloutId, { kind: 'tool', text: round >= maxRounds - 1 ? '已达到工具轮数上限，未执行' : '正在执行',
         step, tool: call.name, callId: call.id, args: agyHistoryText(call.args), phase: round >= maxRounds - 1 ? 'skipped' : 'running' })

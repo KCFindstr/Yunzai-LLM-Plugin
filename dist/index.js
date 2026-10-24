@@ -6121,14 +6121,13 @@ ${session.summary}` }] });
       msgs.push({ role: "assistant", content: res.text, toolCalls: res.toolCalls, native: res.native, responseId: res.responseId });
       lastResponseId = res.responseId;
       state = res.responseId && serverState ? { previousId: res.responseId, skip: msgs.length } : void 0;
+      if (res.text.trim()) finalText += `${finalText ? "\n" : ""}${res.text}`;
       if (res.pause) continue;
       if (!res.toolCalls.length) {
-        finalText = res.text;
         cleanEnd = true;
         if (res.stopReason === "refusal" && !finalText) finalText = "\u8FD9\u4E2A\u6211\u4E0D\u592A\u65B9\u4FBF\u56DE\u7B54\u5462";
         break;
       }
-      finalText = res.text;
       if (res.text) log.debug(`[${model2.id}] \u7B2C${round + 1}\u8F6E\u9644\u5E26\u6587\u5B57\uFF1A${brief(res.text, 300)}`);
       for (const call2 of res.toolCalls) recordRolloutEvent(ref.rolloutId, {
         kind: "tool",

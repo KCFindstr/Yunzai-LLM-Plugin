@@ -10,6 +10,7 @@ import { runTurn } from '../src/chat/agent.ts'
 import { recentRollouts, recordRolloutContext, recordRolloutEvent, rolloutHistory, startRollout, updateRollout } from '../src/chat/rollouts.ts'
 import { recentTurns } from '../src/chat/turnLog.ts'
 import { registry } from '../src/tools/registry.ts'
+import { peekSession } from '../src/chat/session.ts'
 
 it('records each live model round and parallel tool result, then persists a filtered rollout and linked turn', async () => {
   let release!: () => void, started!: () => void
@@ -47,11 +48,16 @@ it('records each live model round and parallel tool result, then persists a filt
     assert.ok(!events.some(event => event.callId === 'slow-call' && event.phase === 'completed'))
     assert.equal(events.filter(event => event.phase === 'completed' && event.isError).length, 2)
     release()
-    assert.equal((await pending).kind, 'reply')
+    const reply = await pending
+    assert.equal(reply.kind, 'reply')
+    if (reply.kind === 'reply') assert.equal(reply.text, '正在检查\n检查完成')
+    const stored = peekSession(req.convKey)!.messages.at(-1)!
+    assert.equal(stored.role === 'assistant' ? stored.content : undefined, '正在检查\n检查完成')
+    assert.equal(recentTurns()[0].reply, '正在检查\n检查完成')
     const done = rolloutHistory(live.id)!
     assert.equal(done.status, 'completed')
     assert.equal(done.steps, 2)
-    assert.equal(done.reply, '检查完成')
+    assert.equal(done.reply, '正在检查\n检查完成')
     assert.ok(done.context!.tools.some(tool => tool.name === 'rollout_quick'))
     assert.ok(!done.context!.tools.some(tool => tool.name === 'not_offered'))
     assert.ok(done.context!.messages.at(-1)!.text.includes('检查一下'))
@@ -154,4 +160,30 @@ it('bounds history and retention and marks unfinished records interrupted after 
   const child = spawnSync(process.execPath, ['--input-type=module', '-e', script], { encoding: 'utf8', windowsHide: true, env: process.env })
   assert.equal(child.status, 0, child.stderr)
   assert.equal(JSON.parse(child.stdout.trim().split('\n').at(-1)!).status, 'interrupted')
+})
+
+
+it('merges multiple tool rounds, ignores empty final text, and retains text when a later request fails', async () => {
+  const server = await mockServer((_req, n) => {
+    if (n === 5) return [500, { error: { message: 'later round failed' } }]
+    const tool = n !== 3
+    return [200, { choices: [{ message: { content: n === 3 ? '   ' : `round ${n}`, ...(tool ? {
+      tool_calls: [{ id: `call-${n}`, type: 'function', function: { name: 'merge_probe', arguments: '{}' } }],
+    } : {}) }, finish_reason: tool ? 'tool_calls' : 'stop' }], usage: { prompt_tokens: 10, completion_tokens: 10 } }]
+  })
+  writeUserConfig(`providers:\n  mock: { type: openai, baseUrl: '${server.url}', apiKey: test-key, maxRetries: 0 }\nmodels:\n  - { id: main, provider: mock, model: fake }\ndefaultModel: main\nfallbackModels: []\nchat: { thinking: off, summarize: false }\nmemory: { enable: false }\n`)
+  config.load()
+  registry.register({ name: 'merge_probe', description: 'probe', parameters: {}, run: async () => 'tool result' })
+  const req = { e: fakeEvent().e, eff: config.effective(), input: { text: 'merge', images: [], imageSegments: [] }, isAdmin: true, convKey: 'merge:empty' }
+  try {
+    const merged = await runTurn(req)
+    assert.equal(merged.kind, 'reply')
+    if (merged.kind === 'reply') assert.equal(merged.text, 'round 1\nround 2')
+    const stored = peekSession(req.convKey)!.messages.at(-1)!
+    assert.equal(stored.role === 'assistant' ? stored.content : undefined, 'round 1\nround 2')
+    const partial = await runTurn({ ...req, convKey: 'merge:failure' })
+    assert.equal(partial.kind, 'reply')
+    if (partial.kind === 'reply') assert.equal(partial.text, 'round 4')
+    assert.equal(server.requests.length, 5)
+  } finally { await server.close(); registry.unregisterWhere(tool => tool.name === 'merge_probe') }
 })
