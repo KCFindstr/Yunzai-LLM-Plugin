@@ -289,6 +289,9 @@ function resolveKeys(apiKey) {
   const arr2 = Array.isArray(apiKey) ? apiKey : apiKey ? [apiKey] : [];
   return arr2.map((k) => String(k ?? "").trim()).map((k) => k.startsWith("env:") ? (process.env[k.slice(4)] ?? "").trim() : k).filter((k) => k && !/^(sk-)?your[-_]/i.test(k) && k !== "sk-your-api-key-here");
 }
+function deepseekToolKey(apiKey) {
+  return resolveKeys(apiKey)[0] ?? resolveKeys(config.getProvider("deepseek")?.apiKey)[0] ?? "";
+}
 function asArray(v) {
   if (Array.isArray(v)) return v;
   if (v == null || v === "") return [];
@@ -345,7 +348,7 @@ function normalize(raw) {
   const ws = isPlainObject(c.tools.webSearch) ? c.tools.webSearch : {};
   c.tools.webSearch = {
     enable: ws.enable !== false,
-    provider: ["native", "anysearch", "tavily", "brave", "searxng", "jina", "none"].includes(ws.provider) ? ws.provider : "none",
+    provider: ["native", "deepseek", "anysearch", "tavily", "brave", "searxng", "jina", "none"].includes(ws.provider) ? ws.provider : "none",
     apiKey: typeof ws.apiKey === "string" ? ws.apiKey : "",
     baseUrl: typeof ws.baseUrl === "string" ? ws.baseUrl : "",
     maxResults: Math.min(10, Math.max(1, Number(ws.maxResults) || 5)),
@@ -356,7 +359,7 @@ function normalize(raw) {
     enable: wf.enable !== false,
     maxChars: Number.isFinite(Number(wf.maxChars)) && Number(wf.maxChars) >= 500 ? Number(wf.maxChars) : 6e3,
     timeout: Math.min(60, Math.max(1, Number(wf.timeout) || 15)),
-    reader: wf.reader === "jina" ? "jina" : "direct",
+    reader: ["jina", "deepseek"].includes(wf.reader) ? wf.reader : "direct",
     jinaKey: typeof wf.jinaKey === "string" ? wf.jinaKey : "",
     allowPrivateNetwork: wf.allowPrivateNetwork === true,
     maxPerTurn: Math.min(100, Math.max(1, Number(wf.maxPerTurn ?? wf.maxFetchesPerTurn) || 3))
@@ -4132,6 +4135,7 @@ function searchReady(eff, model2) {
     const selected = model2 ?? config.getModel(eff.model || config.defaultModelId());
     return Boolean(selected && selected.nativeSearch !== false && ["anthropic", "openai-responses", "gemini"].includes(config.getProvider(selected.provider)?.type ?? ""));
   }
+  if (ws.provider === "deepseek") return Boolean(deepseekToolKey(ws.apiKey));
   if (ws.provider === "searxng") return httpUrl(ws.baseUrl);
   return ["anysearch", "jina"].includes(ws.provider) || resolveKeys(ws.apiKey).length > 0;
 }
@@ -9235,11 +9239,32 @@ init_ssrf();
 init_config();
 init_setup();
 var UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36";
+async function deepseekTool(operation, body, ctx) {
+  const key = deepseekToolKey(ctx.eff.tools.webSearch.provider === "deepseek" ? ctx.eff.tools.webSearch.apiKey : void 0);
+  if (!key) throw new Error("\u672A\u914D\u7F6E DeepSeek API Key");
+  const res = await fetch(`https://api.deepseek.com/v1/tools/${operation}`, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout((operation === "search" ? 20 : ctx.eff.tools.webFetch.timeout || 15) * 1e3)
+  });
+  if (!res.ok) throw new Error(`DeepSeek ${operation} HTTP ${res.status}`);
+  const data = await res.json();
+  if (operation === "search" ? !Array.isArray(data?.results) : typeof data?.content !== "string") {
+    throw new Error(`DeepSeek ${operation}: invalid response`);
+  }
+  return data;
+}
 async function searchExternal(query, ctx) {
   const ws = { ...ctx.eff.tools.webSearch, apiKey: resolveKeys(ctx.eff.tools.webSearch.apiKey)[0] ?? "" };
   const n = Math.min(Math.max(ws.maxResults || 5, 1), 10);
   const timeout = AbortSignal.timeout(2e4);
   switch (ws.provider) {
+    case "deepseek": {
+      if ([...query].length > 128) throw new Error("DeepSeek \u641C\u7D22 query \u6700\u591A 128 \u4E2A\u5B57\u7B26");
+      const data = await deepseekTool("search", { query, count: n, need_content: false }, ctx);
+      return data.results.slice(0, n).map((r) => ({ title: r.title, url: r.url, snippet: r.summary || r.snippet }));
+    }
     case "anysearch": {
       const res = await fetch("https://api.anysearch.com/v1/search", {
         method: "POST",
@@ -9373,6 +9398,17 @@ async function fetchPage(url, ctx) {
   const wf = { ...ctx.eff.tools.webFetch, jinaKey: resolveKeys(ctx.eff.tools.webFetch.jinaKey)[0] ?? "" };
   const max = wf.maxChars || 6e3;
   const vision = ctx.model.vision !== false;
+  if (wf.reader === "deepseek" && !(vision && IMAGE_PATH.test(new URL(url).pathname))) {
+    const target = new URL(url);
+    if (!["http:", "https:"].includes(target.protocol) || target.username || target.password || url.length > 8192) {
+      throw new Error("DeepSeek Fetch \u9700\u8981\u4E0D\u542B\u7528\u6237\u540D\u548C\u5BC6\u7801\u7684 http(s) \u94FE\u63A5\uFF08\u6700\u591A 8192 \u5B57\u7B26\uFF09");
+    }
+    if (!wf.allowPrivateNetwork) await assertPublicUrl(url);
+    const page = await deepseekTool("fetch", { url }, ctx);
+    return truncate(`${page.title ? `\u6807\u9898: ${page.title}
+
+` : ""}${page.content}`, max);
+  }
   if (wf.reader === "jina" && !(vision && IMAGE_PATH.test(new URL(url).pathname))) {
     if (!wf.allowPrivateNetwork) await assertPublicUrl(url);
     const res2 = await fetch(`https://r.jina.ai/${url}`, {
@@ -10414,7 +10450,7 @@ var tools = obj(
     webSearch: obj(
       {
         enable: bool("\u8054\u7F51\u641C\u7D22"),
-        provider: oneOf(["native", "anysearch", "tavily", "brave", "searxng", "jina", "none"], "\u641C\u7D22\u670D\u52A1"),
+        provider: oneOf(["native", "deepseek", "anysearch", "tavily", "brave", "searxng", "jina", "none"], "\u641C\u7D22\u670D\u52A1"),
         apiKey: secret("\u641C\u7D22 API Key"),
         baseUrl: str("SearXNG \u5730\u5740", { pattern: /^https?:\/\/\S+$/ }),
         maxResults: int("\u7ED3\u679C\u6570", { min: 1, max: 10 }),
@@ -10427,7 +10463,7 @@ var tools = obj(
         enable: bool("\u7F51\u9875\u8BFB\u53D6"),
         maxChars: int("\u6700\u591A\u5B57\u7B26", { min: 500 }),
         timeout: int("\u8D85\u65F6\uFF08\u79D2\uFF09", { min: 1 }),
-        reader: oneOf(["direct", "jina"], "\u8BFB\u53D6\u65B9\u5F0F"),
+        reader: oneOf(["direct", "jina", "deepseek"], "\u8BFB\u53D6\u65B9\u5F0F"),
         jinaKey: secret("Jina Key"),
         allowPrivateNetwork: bool("\u5141\u8BB8\u8BBF\u95EE\u5185\u7F51\uFF08\u5371\u9669\uFF09"),
         maxPerTurn: int("\u6BCF\u8F6E\u6700\u591A\u6253\u5F00\u7F51\u9875\u6B21\u6570", { min: 1, max: 100 })

@@ -146,12 +146,12 @@ export function setupWizard(initialData, onChange) {
   function searchStep() {
     const search = data.effective.tools.webSearch, fetch = data.effective.tools.webFetch
     const provider = field('搜索服务', search.enable ? search.provider : 'none', { name: 'searchProvider', options: [
-      ['none', '不使用搜索'], ['native', '模型自带搜索'], ['anysearch', 'AnySearch'], ['tavily', 'Tavily'], ['brave', 'Brave'], ['searxng', '自建 SearXNG'], ['jina', 'Jina'],
+      ['none', '不使用搜索'], ['native', '模型自带搜索'], ['deepseek', 'DeepSeek'], ['anysearch', 'AnySearch'], ['tavily', 'Tavily'], ['brave', 'Brave'], ['searxng', '自建 SearXNG'], ['jina', 'Jina'],
     ] })
     const key = secret('搜索 API Key', search.apiKey)
     key.control.name = 'searchKey'
     const url = field('SearXNG 地址', search.baseUrl || '', { type: 'url' })
-    const reading = field('网页读取', fetch.enable ? fetch.reader : 'off', { name: 'pageReader', options: [['off', '关闭'], ['direct', '直接读取'], ['jina', 'Jina Reader']] })
+    const reading = field('网页读取', fetch.enable ? fetch.reader : 'off', { name: 'pageReader', options: [['off', '关闭'], ['direct', '直接读取'], ['deepseek', 'DeepSeek Fetch'], ['jina', 'Jina Reader']] })
     const readerKey = secret('Jina Reader Key（可选）', fetch.jinaKey)
     const calls = field('每轮最多搜索次数', search.maxPerTurn, { type: 'number', min: 1, max: 100, required: true })
     const hint = h('p', { class: 'small muted', role: 'status' })
@@ -166,7 +166,7 @@ export function setupWizard(initialData, onChange) {
       const type = data.effective.providers[model?.provider]?.type
       hint.textContent = selected === 'native'
         ? (model?.nativeSearch !== false && ['anthropic', 'openai-responses', 'gemini'].includes(type) ? '默认模型已支持自带搜索。' : '默认模型不支持自带搜索，请选择外部搜索服务。')
-        : ['anysearch', 'jina'].includes(selected) ? '此服务的 Key 可选；已有 Key 留空会保留。' : selected === 'none' ? '仍可单独开启网页读取。' : '填写服务所需的密钥或地址；已有 Key 留空会保留。'
+        : selected === 'deepseek' ? '留空复用 DeepSeek 提供商的 Key；DeepSeek Fetch 共用此密钥。' : ['anysearch', 'jina'].includes(selected) ? '此服务的 Key 可选；已有 Key 留空会保留。' : selected === 'none' ? '仍可单独开启网页读取。' : '填写服务所需的密钥或地址；已有 Key 留空会保留。'
     }
     provider.control.addEventListener('change', sync); reading.control.addEventListener('change', sync); sync()
     return [h('p', { class: 'muted' }, '搜索提供实时信息，网页读取用于展开链接内容。两者可以分别开启。'), form([

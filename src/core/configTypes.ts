@@ -166,7 +166,7 @@ export interface ToolsSection {
   enable: boolean
   webSearch: {
     enable: boolean
-    provider: 'native' | 'anysearch' | 'tavily' | 'brave' | 'searxng' | 'jina' | 'none'
+    provider: 'native' | 'deepseek' | 'anysearch' | 'tavily' | 'brave' | 'searxng' | 'jina' | 'none'
     apiKey: string
     baseUrl: string
     maxResults: number
@@ -176,7 +176,7 @@ export interface ToolsSection {
     enable: boolean
     maxChars: number
     timeout: number
-    reader: 'direct' | 'jina'
+    reader: 'direct' | 'jina' | 'deepseek'
     jinaKey: string
     allowPrivateNetwork: boolean
     maxPerTurn: number

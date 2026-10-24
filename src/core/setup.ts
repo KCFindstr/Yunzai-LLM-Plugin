@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { config, resolveKeys } from './config.ts'
+import { config, resolveKeys, deepseekToolKey } from './config.ts'
 import { DATA_DIR } from './paths.ts'
 import type { EffectiveConfig, ModelConfig } from './configTypes.ts'
 import { isolatedEnvironment } from '../agy/environment.ts'
@@ -98,6 +98,7 @@ export function searchReady(eff: EffectiveConfig, model?: ModelConfig): boolean 
     const selected = model ?? config.getModel(eff.model || config.defaultModelId())
     return Boolean(selected && selected.nativeSearch !== false && ['anthropic', 'openai-responses', 'gemini'].includes(config.getProvider(selected.provider)?.type ?? ''))
   }
+  if (ws.provider === 'deepseek') return Boolean(deepseekToolKey(ws.apiKey))
   if (ws.provider === 'searxng') return httpUrl(ws.baseUrl)
   return ['anysearch', 'jina'].includes(ws.provider) || resolveKeys(ws.apiKey).length > 0
 }

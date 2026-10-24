@@ -1,7 +1,7 @@
 import { detectImageMime, truncate } from '../core/util.ts'
 import { registry, type ToolCtx, type ToolOutput } from './registry.ts'
 import { assertPublicUrl } from './ssrf.ts'
-import { resolveKeys } from '../core/config.ts'
+import { resolveKeys, deepseekToolKey } from '../core/config.ts'
 import { searchReady } from '../core/setup.ts'
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36'
@@ -12,11 +12,33 @@ interface SearchHit {
   snippet: string
 }
 
+async function deepseekTool(operation: 'search' | 'fetch', body: Record<string, unknown>, ctx: ToolCtx): Promise<any> {
+  const key = deepseekToolKey(ctx.eff.tools.webSearch.provider === 'deepseek' ? ctx.eff.tools.webSearch.apiKey : undefined)
+  if (!key) throw new Error('未配置 DeepSeek API Key')
+  const res = await fetch(`https://api.deepseek.com/v1/tools/${operation}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout((operation === 'search' ? 20 : ctx.eff.tools.webFetch.timeout || 15) * 1000),
+  })
+  if (!res.ok) throw new Error(`DeepSeek ${operation} HTTP ${res.status}`)
+  const data = await res.json()
+  if (operation === 'search' ? !Array.isArray(data?.results) : typeof data?.content !== 'string') {
+    throw new Error(`DeepSeek ${operation}: invalid response`)
+  }
+  return data
+}
+
 async function searchExternal(query: string, ctx: ToolCtx): Promise<SearchHit[]> {
   const ws = { ...ctx.eff.tools.webSearch, apiKey: resolveKeys(ctx.eff.tools.webSearch.apiKey)[0] ?? '' }
   const n = Math.min(Math.max(ws.maxResults || 5, 1), 10)
   const timeout = AbortSignal.timeout(20000)
   switch (ws.provider) {
+    case 'deepseek': {
+      if ([...query].length > 128) throw new Error('DeepSeek 搜索 query 最多 128 个字符')
+      const data = await deepseekTool('search', { query, count: n, need_content: false }, ctx)
+      return data.results.slice(0, n).map((r: any) => ({ title: r.title, url: r.url, snippet: r.summary || r.snippet }))
+    }
     case 'anysearch': {
       // https://github.com/anysearch-ai/anysearch-skill — key optional (anonymous = lower rate limit)
       const res = await fetch('https://api.anysearch.com/v1/search', {
@@ -171,6 +193,15 @@ export async function fetchPage(url: string, ctx: ToolCtx): Promise<ToolOutput |
   const wf = { ...ctx.eff.tools.webFetch, jinaKey: resolveKeys(ctx.eff.tools.webFetch.jinaKey)[0] ?? '' }
   const max = wf.maxChars || 6000
   const vision = ctx.model.vision !== false
+  if (wf.reader === 'deepseek' && !(vision && IMAGE_PATH.test(new URL(url).pathname))) {
+    const target = new URL(url)
+    if (!['http:', 'https:'].includes(target.protocol) || target.username || target.password || url.length > 8192) {
+      throw new Error('DeepSeek Fetch 需要不含用户名和密码的 http(s) 链接（最多 8192 字符）')
+    }
+    if (!wf.allowPrivateNetwork) await assertPublicUrl(url)
+    const page = await deepseekTool('fetch', { url }, ctx)
+    return truncate(`${page.title ? `标题: ${page.title}\n\n` : ''}${page.content}`, max)
+  }
   // Jina Reader turns images into text: fetch image links directly so a vision model sees the picture.
   if (wf.reader === 'jina' && !(vision && IMAGE_PATH.test(new URL(url).pathname))) {
     if (!wf.allowPrivateNetwork) await assertPublicUrl(url)

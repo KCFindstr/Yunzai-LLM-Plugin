@@ -258,6 +258,11 @@ export function resolveKeys(apiKey?: string | string[]): string[] {
     .filter(k => k && !/^(sk-)?your[-_]/i.test(k) && k !== 'sk-your-api-key-here')
 }
 
+/** Reuse the configured DeepSeek chat credential; an explicit search key takes precedence. */
+export function deepseekToolKey(apiKey?: string): string {
+  return resolveKeys(apiKey)[0] ?? resolveKeys(config.getProvider('deepseek')?.apiKey)[0] ?? ''
+}
+
 function asArray<T>(v: any): T[] {
   if (Array.isArray(v)) return v
   if (v == null || v === '') return []
@@ -318,7 +323,7 @@ export function normalize(raw: any): PluginConfig {
   const ws = isPlainObject(c.tools.webSearch) ? c.tools.webSearch : {}
   c.tools.webSearch = {
     enable: ws.enable !== false,
-    provider: ['native', 'anysearch', 'tavily', 'brave', 'searxng', 'jina', 'none'].includes(ws.provider) ? ws.provider : 'none',
+    provider: ['native', 'deepseek', 'anysearch', 'tavily', 'brave', 'searxng', 'jina', 'none'].includes(ws.provider) ? ws.provider : 'none',
     apiKey: typeof ws.apiKey === 'string' ? ws.apiKey : '',
     baseUrl: typeof ws.baseUrl === 'string' ? ws.baseUrl : '',
     maxResults: Math.min(10, Math.max(1, Number(ws.maxResults) || 5)),
@@ -329,7 +334,7 @@ export function normalize(raw: any): PluginConfig {
     enable: wf.enable !== false,
     maxChars: Number.isFinite(Number(wf.maxChars)) && Number(wf.maxChars) >= 500 ? Number(wf.maxChars) : 6000,
     timeout: Math.min(60, Math.max(1, Number(wf.timeout) || 15)),
-    reader: wf.reader === 'jina' ? 'jina' : 'direct',
+    reader: ['jina', 'deepseek'].includes(wf.reader) ? wf.reader : 'direct',
     jinaKey: typeof wf.jinaKey === 'string' ? wf.jinaKey : '',
     allowPrivateNetwork: wf.allowPrivateNetwork === true,
     maxPerTurn: Math.min(100, Math.max(1, Number(wf.maxPerTurn ?? wf.maxFetchesPerTurn) || 3)),

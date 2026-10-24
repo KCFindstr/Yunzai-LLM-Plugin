@@ -216,7 +216,7 @@ const tools = obj(
     webSearch: obj(
       {
         enable: bool('联网搜索'),
-        provider: oneOf(['native', 'anysearch', 'tavily', 'brave', 'searxng', 'jina', 'none'], '搜索服务'),
+        provider: oneOf(['native', 'deepseek', 'anysearch', 'tavily', 'brave', 'searxng', 'jina', 'none'], '搜索服务'),
         apiKey: secret('搜索 API Key'),
         baseUrl: str('SearXNG 地址', { pattern: /^https?:\/\/\S+$/ }),
         maxResults: int('结果数', { min: 1, max: 10 }),
@@ -229,7 +229,7 @@ const tools = obj(
         enable: bool('网页读取'),
         maxChars: int('最多字符', { min: 500 }),
         timeout: int('超时（秒）', { min: 1 }),
-        reader: oneOf(['direct', 'jina'], '读取方式'),
+        reader: oneOf(['direct', 'jina', 'deepseek'], '读取方式'),
         jinaKey: secret('Jina Key'),
         allowPrivateNetwork: bool('允许访问内网（危险）'),
         maxPerTurn: int('每轮最多打开网页次数', { min: 1, max: 100 }),

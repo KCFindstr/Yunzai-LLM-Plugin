@@ -247,15 +247,15 @@ chat:
   # 丢弃的历史用便宜模型压缩成摘要保留
   summarize: true
   # 附带的最近群聊条数，0–100（帮助理解语境；不会写入长期记忆）
-  groupContext: 6
+  groupContext: 16
   # 每条最近群聊最多附带多少字符
-  groupContextMaxChars: 80
+  groupContextMaxChars: 200
   # 单次回复最多调用几轮工具
-  maxToolRounds: 4
+  maxToolRounds: 20
   # 所有工具合计最多调用次数（同一轮的并行调用分别计数；0 禁用工具调用）
   maxToolCalls: 20
   # 单次最大输出 token（含思考）
-  maxOutputTokens: 2048
+  maxOutputTokens: 8192
   # 温度，null = 不发送该参数（推荐，部分新模型不支持自定义温度）
   temperature: null
   # 默认思考强度（模型可单独设置）：off / minimal / low / medium / high / xhigh / max，
@@ -382,6 +382,7 @@ tools:
     # 是否启用搜索；还需有效的服务或模型配置
     enable: true
     # native = 使用模型自带搜索（anthropic / openai-responses / gemini 类型支持）
+    # deepseek = DeepSeek Search；apiKey 留空复用 providers.deepseek.apiKey
     # anysearch = AnySearch（apiKey 可选，不填用匿名额度、限速更低）
     # tavily / brave 需要 apiKey；jina 的 apiKey 可选；searxng 需要 baseUrl；none = 关闭
     provider: native
@@ -401,6 +402,7 @@ tools:
     maxChars: 6000
     # 单次网页读取超时，单位秒
     timeout: 15
+    # deepseek = DeepSeek Fetch；复用 DeepSeek 搜索或提供商密钥
     # direct = 直接抓取 / jina = 通过 r.jina.ai 读取（可选 jinaKey）
     reader: direct
     # Jina Reader 密钥，可选；支持 env:变量名
