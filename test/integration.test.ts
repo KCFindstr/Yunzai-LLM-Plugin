@@ -243,6 +243,25 @@ describe('chat flow', () => {
     assert.doesNotMatch(q2.messages[1].content, /今天好热/, 'ambient chat not persisted into history')
   })
 
+  it('preserves prefix in input text without stripping it when triggered by prefix', async () => {
+    config.set('trigger.prefixes', ['A'])
+    try {
+      srvReplies.push(textReply('我知道呀'))
+      const r = await trigger({
+        atBot: false,
+        msg: 'A都知道',
+        message: [{ type: 'text', text: 'A都知道' }],
+        message_id: 'prefix-turn',
+      })
+      assert.equal(r.handled, true)
+      assert.deepEqual(r.sent.map(s => s.msg), ['我知道呀'])
+      const content = srv.requests[0].body.messages.at(-1).content
+      assert.match(content, /A都知道/)
+    } finally {
+      config.delete('trigger.prefixes')
+    }
+  })
+
   it('converts model mention markers into real group at segments end to end', async () => {
     srvReplies.push(textReply('好呀，[at:20010] 轮到你啦'))
     const { sent } = await trigger({ group_id: 30002, user_id: 20009, message_id: 'mention-turn', message: [

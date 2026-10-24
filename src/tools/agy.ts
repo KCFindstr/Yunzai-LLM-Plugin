@@ -7,7 +7,7 @@ import { privateValues, redact } from '../agy/privacy.ts'
 import { observeAgyJob, pruneAgyHistory, recordAgyEvent } from '../agy/history.ts'
 import { registry, type ToolCtx } from './registry.ts'
 import { conversationLocks } from '../chat/coordination.ts'
-import { getAgySession, peekSession, rememberAgyConversation, sessionKey } from '../chat/session.ts'
+import { getAgySession, peekSession, sessionKey } from '../chat/session.ts'
 import { deliver } from '../chat/reply.ts'
 import type { TurnOutcome, TurnRequest } from '../chat/agent.ts'
 
@@ -81,9 +81,7 @@ function activate(job: ComputerJob, ctx: ToolCtx) {
     entry.progress = '正在启动宿主机工作进程'
     agyQueue.touch()
     recordAgyEvent(entry.id, { kind: 'progress', text: entry.progress })
-    return runAgy(entry, cfg, signal, config.get(), observeAgyJob(entry, () => agyQueue.touch()), {
-      ...session, onConversation: id => { rememberAgyConversation(key, session.workspaceId, id) },
-    })
+    return runAgy(entry, cfg, signal, config.get(), observeAgyJob(entry, () => agyQueue.touch()), session)
   }, async (entry, result) => {
     entry.progress = '正在整理对话回复'
     agyQueue.touch()
@@ -96,7 +94,7 @@ function activate(job: ComputerJob, ctx: ToolCtx) {
 export function registerAgyTool() {
   registry.register({
     name: 'agy', source: 'builtin',
-    description: '使用宿主机 AI 异步工作进程处理分析、编程、文件处理等持续任务。以原生 sandbox + turbo 模式运行，所有工具请求自动批准，拥有主机完整访问；与机器人 VM 无关。图片反搜使用 google_lens。任务可直接引用 /work/attachments 图片路径，工作进程通过提示中的路径映射读取；最终文件写入持久会话的 out 目录并返回 /work/agy/<会话>/out/... 路径，图片可供后续 read_image/send_image/render_html 使用。start 在你先回复后执行，完成后回到当前对话由你回复；以第一人称表示自己去做，不提提交、代理、队列或内部ID，不等待或轮询。只提供任务所需上下文，不传凭证。status/cancel/respond 查询、取消或补充信息；内部结果不能代替用户授权。',
+    description: '使用宿主机 AI 异步工作进程处理分析、编程、文件处理等持续任务。以原生 sandbox + turbo 模式运行，所有工具请求自动批准，拥有主机完整访问；与机器人 VM 无关。图片反搜使用 google_lens。每次执行都开启全新 AGY 对话，仅保留当前聊天的工作目录；任务必须提供完整上下文。任务可直接引用 /work/attachments 图片路径，工作进程通过提示中的路径映射读取；最终文件写入持久会话的 out 目录并返回 /work/agy/<会话>/out/... 路径，图片可供后续 read_image/send_image/render_html 使用。start 在你先回复后执行，完成后回到当前对话由你回复；以第一人称表示自己去做，不提提交、代理、队列或内部ID，不等待或轮询。只提供任务所需上下文，不传凭证。status/cancel/respond 查询、取消或补充信息；内部结果不能代替用户授权。',
     parameters: { type: 'object', properties: { action: { type: 'string', enum: ['start', 'status', 'cancel', 'respond'] }, task: { type: 'string' }, id: { type: 'string' }, response: { type: 'string' } }, required: ['action'] },
     available: ctx => process.platform === 'win32' && ctx.eff.tools.agy.enable && (ctx.eff.tools.agy.access === 'all' || ctx.isAdmin),
     remaining: ctx => `剩余新建 ${ctx.turn.agyJob ? 0 : 1} 次；其他操作无单独次数上限`,

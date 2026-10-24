@@ -122,10 +122,6 @@ export class LLMChat extends BasePlugin {
           includeQuoted: eff.chat.includeQuoted,
           vision: model?.vision !== false,
         })
-        if (reason === 'prefix') {
-          const p = cfg.trigger.prefixes.find(x => input.text.startsWith(x))
-          if (p) input.text = input.text.slice(p.length).trim()
-        }
 
         const out = await runTurn({ e, eff, input, isAdmin, convKey })
         afterReply = out.afterReply

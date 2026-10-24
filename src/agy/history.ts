@@ -146,7 +146,7 @@ export function observeAgyJob(job: ComputerJob, changed: () => void) {
       if (delta) texts.set(index, ((texts.get(index) ?? '') + delta).slice(0, 12000))
       if (step.state !== 'DONE') return
       finished.add(key)
-      const text = typeof step.text === 'string' && step.text.trim() ? step.text : texts.get(index) ?? ''
+      const text = typeof step.text === 'string' ? step.text : texts.get(index) ?? ''
       texts.delete(index)
       job.steps = (job.steps ?? 0) + 1
       progress(`已完成 ${job.steps} 轮处理`)

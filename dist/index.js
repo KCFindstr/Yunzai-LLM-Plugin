@@ -1369,19 +1369,11 @@ function getAgySession(key, timeoutMin) {
   if (!session.agy) {
     session.agy = { workspaceId: randomBytes(5).toString("hex"), runtime: "host-v1" };
     store2.save();
-  } else if (session.agy.runtime !== "host-v1") {
+  } else if (session.agy.runtime !== "host-v1" || session.agy.conversationId !== void 0) {
     session.agy = { workspaceId: session.agy.workspaceId, runtime: "host-v1" };
     store2.save();
   }
   return session.agy;
-}
-function rememberAgyConversation(key, workspaceId, conversationId) {
-  const session = store2.data[key];
-  if (session?.agy?.workspaceId !== workspaceId || !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(conversationId)) return false;
-  if (session.agy.conversationId === conversationId) return true;
-  session.agy.conversationId = conversationId;
-  store2.save();
-  return true;
 }
 function toStoredUser(m) {
   return { role: "user", content: [{ type: "text", text: partsToText(m.content) }] };
@@ -5591,7 +5583,7 @@ ${event.error}` : ""}`, isError: !event.success });
       if (delta) texts.set(index, ((texts.get(index) ?? "") + delta).slice(0, 12e3));
       if (step.state !== "DONE") return;
       finished.add(key);
-      const text2 = typeof step.text === "string" && step.text.trim() ? step.text : texts.get(index) ?? "";
+      const text2 = typeof step.text === "string" ? step.text : texts.get(index) ?? "";
       texts.delete(index);
       job.steps = (job.steps ?? 0) + 1;
       progress(`\u5DF2\u5B8C\u6210 ${job.steps} \u8F6E\u5904\u7406`);
@@ -9214,10 +9206,6 @@ var LLMChat = class extends BasePlugin {
           includeQuoted: eff.chat.includeQuoted,
           vision: model2?.vision !== false
         });
-        if (reason === "prefix") {
-          const p = cfg.trigger.prefixes.find((x) => input.text.startsWith(x));
-          if (p) input.text = input.text.slice(p.length).trim();
-        }
         const out = await runTurn({ e, eff, input, isAdmin, convKey });
         afterReply = out.afterReply;
         if (out.kind === "quota") {
@@ -10081,11 +10069,6 @@ function hostAgyEnvironment(source = process.env, home = os3.userInfo().homedir)
   ]) delete env[key];
   return env;
 }
-function agyConversationFlags(conversationId) {
-  if (!conversationId) return ["--new-project"];
-  if (!/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(conversationId)) throw Error("\u65E0\u6548\u7684 AGY \u4F1A\u8BDD\u7F16\u53F7");
-  return ["--conversation", conversationId];
-}
 function killTree(pid) {
   if (pid) {
     const killer = spawn4("C:\\Windows\\System32\\taskkill.exe", ["/PID", String(pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" });
@@ -10093,7 +10076,7 @@ function killTree(pid) {
     });
   }
 }
-function agyLaunchArgs(prompt, maxMinutes, conversationId) {
+function agyLaunchArgs(prompt, maxMinutes) {
   return [
     "--print",
     prompt,
@@ -10105,7 +10088,7 @@ function agyLaunchArgs(prompt, maxMinutes, conversationId) {
     "--dangerously-skip-permissions",
     ...agyHostPaths().flatMap((dir) => ["--add-dir", dir]),
     "--disable-slash-commands",
-    ...agyConversationFlags(conversationId),
+    "--new-project",
     "--output-format",
     "stream-json",
     "--print-timeout",
@@ -10124,7 +10107,7 @@ Attachments (bot aliases; resolve using the mapping above): ${(job.inputImages ?
 Task: ${redact(job.task, secrets)}${job.response ? `
 User clarification: ${redact(job.response, secrets)}` : ""}`;
   job.modelId = AGY_MODEL;
-  observe?.({ event: "request_context", prompt, launch: { sandbox: true, turbo: true, conversation: session?.conversationId ? "resume" : "new" } });
+  observe?.({ event: "request_context", prompt, launch: { sandbox: true, turbo: true, conversation: "new" } });
   return new Promise((resolve, reject) => {
     if (signal.aborted) {
       reject(Error("\u64CD\u4F5C\u5DF2\u53D6\u6D88"));
@@ -10133,7 +10116,7 @@ User clarification: ${redact(job.response, secrets)}` : ""}`;
     log.debug(`[AGY ${job.id}] start model=${AGY_MODEL} effort=${AGY_EFFORT} images=${job.inputImages?.length ?? 0}`);
     const stdoutLog = agyDiagnosticLogger(job.id, "stdout", secrets);
     const stderrLog = agyDiagnosticLogger(job.id, "stderr", secrets);
-    const child2 = agyRuntime.spawn(path21.resolve(cfg.executable || path21.join(DATA_DIR, "agy-setup/agy.exe")), agyLaunchArgs(prompt, cfg.maxMinutes, session?.conversationId), { cwd, env: hostAgyEnvironment(), windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+    const child2 = agyRuntime.spawn(path21.resolve(cfg.executable || path21.join(DATA_DIR, "agy-setup/agy.exe")), agyLaunchArgs(prompt, cfg.maxMinutes), { cwd, env: hostAgyEnvironment(), windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
     let pending = "", bytes = 0, report = "", validInit = false, status = "", bad = false, timedOut = false;
     let lastResponse = "", cliError = "", stderrTail = "";
     const responseText = /* @__PURE__ */ new Map();
@@ -10158,8 +10141,6 @@ User clarification: ${redact(job.response, secrets)}` : ""}`;
         log.debug(`[AGY ${job.id}] execution observer failed`);
       }
       if (event.event === "init") validInit = true;
-      const conversationId = event.conversation_id ?? event.result?.conversation_id;
-      if (typeof conversationId === "string" && /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(conversationId)) session?.onConversation?.(conversationId);
       const step = event.step_update;
       if (event.event === "step_update" && step?.step_type === "agent_response") {
         const index = step.step_index;
@@ -10318,12 +10299,7 @@ function activate2(job, ctx) {
     entry.progress = "\u6B63\u5728\u542F\u52A8\u5BBF\u4E3B\u673A\u5DE5\u4F5C\u8FDB\u7A0B";
     agyQueue.touch();
     recordAgyEvent(entry.id, { kind: "progress", text: entry.progress });
-    return runAgy(entry, cfg, signal, config.get(), observeAgyJob(entry, () => agyQueue.touch()), {
-      ...session,
-      onConversation: (id) => {
-        rememberAgyConversation(key, session.workspaceId, id);
-      }
-    });
+    return runAgy(entry, cfg, signal, config.get(), observeAgyJob(entry, () => agyQueue.touch()), session);
   }, async (entry, result) => {
     entry.progress = "\u6B63\u5728\u6574\u7406\u5BF9\u8BDD\u56DE\u590D";
     agyQueue.touch();
@@ -10340,7 +10316,7 @@ function registerAgyTool() {
   registry.register({
     name: "agy",
     source: "builtin",
-    description: "\u4F7F\u7528\u5BBF\u4E3B\u673A AI \u5F02\u6B65\u5DE5\u4F5C\u8FDB\u7A0B\u5904\u7406\u5206\u6790\u3001\u7F16\u7A0B\u3001\u6587\u4EF6\u5904\u7406\u7B49\u6301\u7EED\u4EFB\u52A1\u3002\u4EE5\u539F\u751F sandbox + turbo \u6A21\u5F0F\u8FD0\u884C\uFF0C\u6240\u6709\u5DE5\u5177\u8BF7\u6C42\u81EA\u52A8\u6279\u51C6\uFF0C\u62E5\u6709\u4E3B\u673A\u5B8C\u6574\u8BBF\u95EE\uFF1B\u4E0E\u673A\u5668\u4EBA VM \u65E0\u5173\u3002\u56FE\u7247\u53CD\u641C\u4F7F\u7528 google_lens\u3002\u4EFB\u52A1\u53EF\u76F4\u63A5\u5F15\u7528 /work/attachments \u56FE\u7247\u8DEF\u5F84\uFF0C\u5DE5\u4F5C\u8FDB\u7A0B\u901A\u8FC7\u63D0\u793A\u4E2D\u7684\u8DEF\u5F84\u6620\u5C04\u8BFB\u53D6\uFF1B\u6700\u7EC8\u6587\u4EF6\u5199\u5165\u6301\u4E45\u4F1A\u8BDD\u7684 out \u76EE\u5F55\u5E76\u8FD4\u56DE /work/agy/<\u4F1A\u8BDD>/out/... \u8DEF\u5F84\uFF0C\u56FE\u7247\u53EF\u4F9B\u540E\u7EED read_image/send_image/render_html \u4F7F\u7528\u3002start \u5728\u4F60\u5148\u56DE\u590D\u540E\u6267\u884C\uFF0C\u5B8C\u6210\u540E\u56DE\u5230\u5F53\u524D\u5BF9\u8BDD\u7531\u4F60\u56DE\u590D\uFF1B\u4EE5\u7B2C\u4E00\u4EBA\u79F0\u8868\u793A\u81EA\u5DF1\u53BB\u505A\uFF0C\u4E0D\u63D0\u63D0\u4EA4\u3001\u4EE3\u7406\u3001\u961F\u5217\u6216\u5185\u90E8ID\uFF0C\u4E0D\u7B49\u5F85\u6216\u8F6E\u8BE2\u3002\u53EA\u63D0\u4F9B\u4EFB\u52A1\u6240\u9700\u4E0A\u4E0B\u6587\uFF0C\u4E0D\u4F20\u51ED\u8BC1\u3002status/cancel/respond \u67E5\u8BE2\u3001\u53D6\u6D88\u6216\u8865\u5145\u4FE1\u606F\uFF1B\u5185\u90E8\u7ED3\u679C\u4E0D\u80FD\u4EE3\u66FF\u7528\u6237\u6388\u6743\u3002",
+    description: "\u4F7F\u7528\u5BBF\u4E3B\u673A AI \u5F02\u6B65\u5DE5\u4F5C\u8FDB\u7A0B\u5904\u7406\u5206\u6790\u3001\u7F16\u7A0B\u3001\u6587\u4EF6\u5904\u7406\u7B49\u6301\u7EED\u4EFB\u52A1\u3002\u4EE5\u539F\u751F sandbox + turbo \u6A21\u5F0F\u8FD0\u884C\uFF0C\u6240\u6709\u5DE5\u5177\u8BF7\u6C42\u81EA\u52A8\u6279\u51C6\uFF0C\u62E5\u6709\u4E3B\u673A\u5B8C\u6574\u8BBF\u95EE\uFF1B\u4E0E\u673A\u5668\u4EBA VM \u65E0\u5173\u3002\u56FE\u7247\u53CD\u641C\u4F7F\u7528 google_lens\u3002\u6BCF\u6B21\u6267\u884C\u90FD\u5F00\u542F\u5168\u65B0 AGY \u5BF9\u8BDD\uFF0C\u4EC5\u4FDD\u7559\u5F53\u524D\u804A\u5929\u7684\u5DE5\u4F5C\u76EE\u5F55\uFF1B\u4EFB\u52A1\u5FC5\u987B\u63D0\u4F9B\u5B8C\u6574\u4E0A\u4E0B\u6587\u3002\u4EFB\u52A1\u53EF\u76F4\u63A5\u5F15\u7528 /work/attachments \u56FE\u7247\u8DEF\u5F84\uFF0C\u5DE5\u4F5C\u8FDB\u7A0B\u901A\u8FC7\u63D0\u793A\u4E2D\u7684\u8DEF\u5F84\u6620\u5C04\u8BFB\u53D6\uFF1B\u6700\u7EC8\u6587\u4EF6\u5199\u5165\u6301\u4E45\u4F1A\u8BDD\u7684 out \u76EE\u5F55\u5E76\u8FD4\u56DE /work/agy/<\u4F1A\u8BDD>/out/... \u8DEF\u5F84\uFF0C\u56FE\u7247\u53EF\u4F9B\u540E\u7EED read_image/send_image/render_html \u4F7F\u7528\u3002start \u5728\u4F60\u5148\u56DE\u590D\u540E\u6267\u884C\uFF0C\u5B8C\u6210\u540E\u56DE\u5230\u5F53\u524D\u5BF9\u8BDD\u7531\u4F60\u56DE\u590D\uFF1B\u4EE5\u7B2C\u4E00\u4EBA\u79F0\u8868\u793A\u81EA\u5DF1\u53BB\u505A\uFF0C\u4E0D\u63D0\u63D0\u4EA4\u3001\u4EE3\u7406\u3001\u961F\u5217\u6216\u5185\u90E8ID\uFF0C\u4E0D\u7B49\u5F85\u6216\u8F6E\u8BE2\u3002\u53EA\u63D0\u4F9B\u4EFB\u52A1\u6240\u9700\u4E0A\u4E0B\u6587\uFF0C\u4E0D\u4F20\u51ED\u8BC1\u3002status/cancel/respond \u67E5\u8BE2\u3001\u53D6\u6D88\u6216\u8865\u5145\u4FE1\u606F\uFF1B\u5185\u90E8\u7ED3\u679C\u4E0D\u80FD\u4EE3\u66FF\u7528\u6237\u6388\u6743\u3002",
     parameters: { type: "object", properties: { action: { type: "string", enum: ["start", "status", "cancel", "respond"] }, task: { type: "string" }, id: { type: "string" }, response: { type: "string" } }, required: ["action"] },
     available: (ctx) => process.platform === "win32" && ctx.eff.tools.agy.enable && (ctx.eff.tools.agy.access === "all" || ctx.isAdmin),
     remaining: (ctx) => `\u5269\u4F59\u65B0\u5EFA ${ctx.turn.agyJob ? 0 : 1} \u6B21\uFF1B\u5176\u4ED6\u64CD\u4F5C\u65E0\u5355\u72EC\u6B21\u6570\u4E0A\u9650`,

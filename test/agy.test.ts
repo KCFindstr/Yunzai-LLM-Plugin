@@ -54,6 +54,8 @@ describe('AGY host worker and async handoff', () => {
       assert.equal(options.env.ANTIGRAVITY_APP_DATA_DIR, path.join(os.userInfo().homedir, '.gemini', 'antigravity-cli'))
       assert.ok(fs.existsSync(path.join(options.cwd, 'out')))
       assert.ok(args.includes('--sandbox') && args.includes('--dangerously-skip-permissions'))
+      assert.ok(args.includes('--new-project'))
+      assert.ok(!args.includes('--conversation'))
       const prompt = args[args.indexOf('--print') + 1]
       assert.ok(prompt.includes(agyPathInstructions(workspaceId)))
       assert.ok(prompt.includes('/work/attachments/aabbccddee/image-ref.png'))
@@ -68,7 +70,8 @@ describe('AGY host worker and async handoff', () => {
     })
     const job: any = { id: 'aabbccddee', task: 'process /work/attachments/aabbccddee/image-ref.png', agyWorkspaceId: workspaceId }
     assert.deepEqual(await runAgy(job, normalize({}).tools.agy, new AbortController().signal, {}), { report: alias })
-    assert.equal(launches, 1)
+    assert.deepEqual(await runAgy(job, normalize({}).tools.agy, new AbortController().signal, {}), { report: alias })
+    assert.equal(launches, 2)
     assert.ok(!fs.existsSync(path.join(TMP, 'data/agy-setup/profile')))
   })
   it('makes host output images readable through bot aliases without WSL', async () => {

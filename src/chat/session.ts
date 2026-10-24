@@ -115,21 +115,12 @@ export function getAgySession(key: string, timeoutMin: number) {
   if (!session.agy) {
     session.agy = { workspaceId: randomBytes(5).toString('hex'), runtime: 'host-v1' }
     store.save()
-  } else if (session.agy.runtime !== 'host-v1') {
-    // Legacy conversations belong to the obsolete private profile and retain its policies/context.
+  } else if (session.agy.runtime !== 'host-v1' || session.agy.conversationId !== undefined) {
+    // Retain the workspace, but discard old conversation IDs: every worker launch is fresh.
     session.agy = { workspaceId: session.agy.workspaceId, runtime: 'host-v1' }
     store.save()
   }
   return session.agy
-}
-
-export function rememberAgyConversation(key: string, workspaceId: string, conversationId: string) {
-  const session = store.data[key]
-  if (session?.agy?.workspaceId !== workspaceId || !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(conversationId)) return false
-  if (session.agy.conversationId === conversationId) return true
-  session.agy.conversationId = conversationId
-  store.save()
-  return true
 }
 
 export function toStoredUser(m: UserMsg): UserMsg {
