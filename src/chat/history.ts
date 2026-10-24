@@ -55,8 +55,10 @@ export async function regenerateHistory(key: string, target: { kind: 'summary' }
     system = DAY_PROMPT
     source = `日期：${day.day}\n当天的聊天片段：\n${dayEntries.map(a => `- ${a.text}`).join('\n')}`
   } else if (entry) {
+    if (!entry.raw && !entry.sourceText?.trim())
+      throw historyError('这条旧档案没有保留聊天原文，无法重新生成；现有摘要不会被改写。请手动编辑或先恢复原文。')
     system = EPISODE_PROMPT
-    source = `日期：${entry.day ?? localDay(entry.at)}\n${entry.sourceText ?? entry.text}`
+    source = `日期：${entry.day ?? localDay(entry.at)}\n${entry.sourceText?.trim() ? entry.sourceText : entry.text}`
   } else throw historyError('没有这条档案', 404)
 
   const snapshot = historySnapshot(key)

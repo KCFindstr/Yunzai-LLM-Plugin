@@ -96,7 +96,7 @@ async function drawDetail(el, key, refresh) {
     : result.vectorStatus === 'pending' ? '已保存；向量更新将在后台重试'
       : result.vectorStatus === 'disabled' ? '已保存；配置向量模型后会自动向量化' : '已保存'
 
-  function historyButtons(title, url, text, { regenerate = true, allowEmpty = false, note = '档案和每日概要保存后自动更新向量。' } = {}) {
+  function historyButtons(title, url, text, { regenerate = true, regenerateEnabled = true, allowEmpty = false, note = '档案和每日概要保存后自动更新向量。' } = {}) {
     return [
       h('button', { class: 'btn sm ghost', onclick: async e => {
         const button = e.currentTarget
@@ -119,7 +119,7 @@ async function drawDetail(el, key, refresh) {
         ])
         if (saved && el.isConnected) await refresh()
       } }, '编辑'),
-      regenerate ? h('button', { class: 'btn sm ghost', onclick: async e => {
+      regenerate ? h('button', { class: 'btn sm ghost', disabled: !regenerateEnabled, title: regenerateEnabled ? '' : '这条旧档案未保留聊天原文，无法重新生成；仍可手动编辑。', onclick: async e => {
         const button = e.currentTarget
         button.disabled = true
         try {
@@ -171,8 +171,9 @@ async function drawDetail(el, key, refresh) {
           h('span', { class: 'muted' }, fmt.time(a.at)),
           a.chat ? badge('群聊', 'accent') : null,
           a.raw ? badge('原文·待整理', 'warn') : badge('摘要', 'ok'),
+          !a.raw ? badge(a.sourceAvailable ? '原文已保留' : '原文未保留', a.sourceAvailable ? '' : 'warn') : null,
           a.vector ? badge('已向量化', 'accent') : badge('无向量'),
-          h('span', { class: 'right row' }, historyButtons('旧聊天档案', `${base}/archive/${enc(a.id)}`, a.text, { note: '保存为已整理的档案，并自动更新向量；由它生成的每日概要将在后台刷新。' }),
+          h('span', { class: 'right row' }, historyButtons('旧聊天档案', `${base}/archive/${enc(a.id)}`, a.text, { regenerateEnabled: a.sourceAvailable, note: '保存为已整理的档案，并自动更新向量；由它生成的每日概要将在后台刷新。' }),
           h('button', { class: 'btn sm ghost danger', onclick: async () => {
             if (await confirmDanger('删除这段档案？')) act(() => del(`/api/sessions/${enc(key)}/archive/${enc(a.id)}`), '已删除').then(refresh)
           } }, '删除')),

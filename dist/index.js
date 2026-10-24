@@ -1389,7 +1389,7 @@ function updateArchiveEntry(key, id, text2) {
   s.contextRevision = (s.contextRevision ?? 0) + 1;
   const invalid = /* @__PURE__ */ new Set([id]);
   if (entry) {
-    s.archive = s.archive.map((a) => a === entry ? { ...a, text: text2, raw: void 0 } : a);
+    s.archive = s.archive.map((a) => a === entry ? { ...a, text: text2, sourceText: a.sourceText || (a.raw ? a.text : void 0), raw: void 0 } : a);
     if (embeddingContextual()) {
       for (const a of s.archive) if (dayOf(a) === dayOf(entry) && a.id) invalid.add(a.id);
     }
@@ -1670,7 +1670,7 @@ function listSessions() {
 }
 function archiveInfo(key) {
   const v = vectors.data[key]?.tag === embeddingTag() ? vectors.data[key].v : {};
-  return (store2.data[key]?.archive ?? []).map((entry) => ({ ...entry, vector: Boolean(entry.id && v[entry.id]) }));
+  return (store2.data[key]?.archive ?? []).map((entry) => ({ ...entry, vector: Boolean(entry.id && v[entry.id]), sourceAvailable: Boolean(entry.raw || entry.sourceText?.trim()) }));
 }
 function dayInfo(key) {
   const v = vectors.data[key]?.tag === embeddingTag() ? vectors.data[key].v : {};
@@ -11044,9 +11044,11 @@ async function regenerateHistory(key, target, model2) {
 \u5F53\u5929\u7684\u804A\u5929\u7247\u6BB5\uFF1A
 ${dayEntries.map((a) => `- ${a.text}`).join("\n")}`;
   } else if (entry) {
+    if (!entry.raw && !entry.sourceText?.trim())
+      throw historyError("\u8FD9\u6761\u65E7\u6863\u6848\u6CA1\u6709\u4FDD\u7559\u804A\u5929\u539F\u6587\uFF0C\u65E0\u6CD5\u91CD\u65B0\u751F\u6210\uFF1B\u73B0\u6709\u6458\u8981\u4E0D\u4F1A\u88AB\u6539\u5199\u3002\u8BF7\u624B\u52A8\u7F16\u8F91\u6216\u5148\u6062\u590D\u539F\u6587\u3002");
     system = EPISODE_PROMPT;
     source = `\u65E5\u671F\uFF1A${entry.day ?? localDay(entry.at)}
-${entry.sourceText ?? entry.text}`;
+${entry.sourceText?.trim() ? entry.sourceText : entry.text}`;
   } else throw historyError("\u6CA1\u6709\u8FD9\u6761\u6863\u6848", 404);
   const snapshot = historySnapshot(key);
   const result = await utilityChat({

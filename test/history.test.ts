@@ -143,6 +143,30 @@ describe('history edits and regeneration', () => {
     assert.ok(archiveInfo(key)[0].vector)
   })
 
+  it('refuses to rewrite a legacy summary without original source text', async () => {
+    const entry = peekSession(key)!.archive![0]
+    delete entry.sourceText
+    entry.text = '【群聊】2026-10-24，🐶会长(平台ID 2)、岛'
+    const original = entry.text
+    assert.equal(archiveInfo(key)[0].sourceAvailable, false)
+    await assert.rejects(() => call('POST', `${base}/archive/episode/regenerate`, { model: 'main' }), /没有保留聊天原文/)
+    assert.equal(archiveInfo(key)[0].text, original)
+    assert.equal(server.requests.length, 0)
+  })
+
+  it('preserves raw text before a manual edit so subsequent regeneration still has originals', async () => {
+    const entry = peekSession(key)!.archive![0]
+    delete entry.sourceText
+    entry.raw = true
+    entry.text = '原始对话：周日看猫展，下午两点见。'
+    await call('PUT', `${base}/archive/episode`, { text: '手动修改的摘要' })
+    assert.equal(archiveInfo(key)[0].sourceAvailable, true)
+    assert.equal(archiveInfo(key)[0].sourceText, '原始对话：周日看猫展，下午两点见。')
+    await call('POST', `${base}/archive/episode/regenerate`, { model: 'main' })
+    const request = server.requests.find(r => r.url.endsWith('/chat/completions'))!
+    assert.match(JSON.stringify(request.body.messages[1].content), /下午两点见/)
+  })
+
   it('edits and regenerates rolling context, clearing stale provider conversation state', async () => {
     await call('PUT', `${base}/summary`, { text: '修正的摘要' })
     assert.equal(peekSession(key)!.summary, '修正的摘要')

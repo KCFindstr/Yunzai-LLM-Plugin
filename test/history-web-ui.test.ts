@@ -39,7 +39,10 @@ memory:
   appendTurn(key, { role: 'user', content: [{ type: 'text', text: '周日去看猫展' }] }, { role: 'assistant', content: '好，周日见' })
   const s = peekSession(key)!
   s.summary = '已有的滚动摘要'
-  s.archive = [{ id: 'episode', day: yesterday, at: Date.now() - 86400000, text: '阿明和小红约好周日看猫展', sourceText: '原始聊天：阿明问周日看猫展，小红答应了。' }]
+  s.archive = [
+    { id: 'legacy', day: yesterday, at: Date.now() - 86460000, text: '旧版截断的档案，仅剩人物称呼' },
+    { id: 'episode', day: yesterday, at: Date.now() - 86400000, text: '阿明和小红约好周日看猫展', sourceText: '原始聊天：阿明问周日看猫展，小红答应了。' },
+  ]
   s.days = [{ id: 'digest', day: yesterday, at: Date.now(), sources: ['episode'], text: `${yesterday}，群内要事及闲聊如下：\n1.` }]
   const base = `http://127.0.0.1:${port}`
   let browser: any
@@ -61,6 +64,11 @@ memory:
     await page.type('input[type=password]', 'history-ui-password')
     await page.click('button[type=submit]')
     await page.waitForFunction(() => document.body.innerText.includes('摘要输出预算：8192'))
+    assert.equal(await page.evaluate(() => {
+      const entry = Array.from(document.querySelectorAll('.list-item')).find(el => el.textContent?.includes('旧版截断的档案，仅剩人物称呼'))
+      const regenerate = Array.from(entry?.querySelectorAll('button') ?? []).find(button => button.textContent === '重新生成')
+      return Boolean(entry?.textContent?.includes('原文未保留') && regenerate?.disabled && regenerate.title.includes('未保留聊天原文'))
+    }), true)
     const action = async (title: string, label: string) => {
       await page.evaluate((title: string, label: string) => {
         const card = Array.from(document.querySelectorAll('.card')).find(el => el.querySelector('h2')?.textContent?.includes(title))

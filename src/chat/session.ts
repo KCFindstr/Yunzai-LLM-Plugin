@@ -144,7 +144,7 @@ export function updateArchiveEntry(key: string, id: string, text: string): boole
   s.contextRevision = (s.contextRevision ?? 0) + 1
   const invalid = new Set([id])
   if (entry) {
-    s.archive = s.archive!.map(a => a === entry ? { ...a, text, raw: undefined } : a)
+    s.archive = s.archive!.map(a => a === entry ? { ...a, text, sourceText: a.sourceText || (a.raw ? a.text : undefined), raw: undefined } : a)
     // Contextual embeddings of neighbouring chunks depend on this text too.
     if (embeddingContextual()) for (const a of s.archive) if (dayOf(a) === dayOf(entry) && a.id) invalid.add(a.id)
     s.days = s.days?.map(d => d.day === dayOf(entry) ? { ...d, stale: true } : d)
@@ -505,7 +505,7 @@ export function listSessions() {
 /** Archive entries of one session with whether each has a vector in the current embedding space. */
 export function archiveInfo(key: string) {
   const v = vectors.data[key]?.tag === embeddingTag() ? vectors.data[key].v : {}
-  return (store.data[key]?.archive ?? []).map(entry => ({ ...entry, vector: Boolean(entry.id && v[entry.id]) }))
+  return (store.data[key]?.archive ?? []).map(entry => ({ ...entry, vector: Boolean(entry.id && v[entry.id]), sourceAvailable: Boolean(entry.raw || entry.sourceText?.trim()) }))
 }
 
 /** Daily digests of one session with whether each has a vector. */
