@@ -31,7 +31,7 @@ export async function render(root) {
     ),
     incomplete.size ? card('用量报告不完整', h('p', { class: 'small muted' }, `${[...incomplete].join('、')}：${usageNote}`)) : null,
     usageBreakdown([...Object.keys(u.totals), ...u.models.map(model => model.id)]),
-    h('div', { class: 'grid cols-2', style: { marginTop: '16px' } },
+    h('div', { class: 'grid cols-2', style: { marginTop: '16px', marginBottom: '18px' } },
       card('全局额度（按模型）',
         u.models.length ? h('div', { class: 'col', style: { gap: '14px' } }, u.models.map(m => h('div',
           h('div', { class: 'row' }, h('b', m.id), h('span', { class: 'right small muted' },
