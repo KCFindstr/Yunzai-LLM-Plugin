@@ -8,9 +8,9 @@ import type { EffectiveConfig, ThinkingLevel } from '../core/configTypes.ts'
 import { brief, log } from '../core/log.ts'
 import { Semaphore, sha1 } from '../core/util.ts'
 import { botNickname, senderName } from '../core/yunzai.ts'
-import { addUsage, chat, emptyUsage, LLMError, partsToText, usesServerState, type Msg, type ServerState, type UserMsg } from '../llm/index.ts'
+import { addUsage, chat, emptyUsage, LLMError, partsToText, usesServerState, type Msg, type ServerState, type UserMsg, type ToolSpec } from '../llm/index.ts'
 import { cleanupSandbox } from '../tools/exec.ts'
-import { registry, type ToolCtx, type TurnState } from '../tools/registry.ts'
+import { registry, type ToolCtx, type ToolDef, type TurnState } from '../tools/registry.ts'
 import type { ExtractedInput } from './message.ts'
 import { resolveThinkingDecision, type ThinkingDecision } from './thinking.ts'
 import { markHandled } from './groupLog.ts'
@@ -51,6 +51,16 @@ function featureToDrop(err: any, on: Record<Feature, boolean>): Feature | undefi
   return undefined
 }
 
+/** In-memory snapshot of the initiating request; completion appends to the same chat/cache prefix. */
+export interface SessionRequestConfig extends Picked {
+  system: string
+  tools: ToolSpec[]
+  nativeSearch: boolean
+  decision: ThinkingDecision
+  maxTokens: number
+  temperature: number | null
+}
+
 export interface TurnRequest {
   e: any
   eff: EffectiveConfig
@@ -60,6 +70,7 @@ export interface TurnRequest {
   modelId?: string
   computerResult?: { id: string; images: Buffer[] }
   asyncResult?: { kind: 'agy'; id: string }
+  sessionConfig?: SessionRequestConfig
 }
 
 export type TurnOutcome = (
@@ -114,7 +125,11 @@ export async function runTurn(req: TurnRequest): Promise<TurnOutcome> {
 async function runTurnInner(req: TurnRequest, ref: { turn?: TurnState; rolloutId: string }): Promise<TurnOutcome> {
   const { e, eff, input, isAdmin, convKey } = req
   const quotaCtx: QuotaCtx = { userId: e.user_id, groupId: e.group_id, isAdmin }
-  const { picked, block } = selectModel(eff, quotaCtx, req.modelId)
+  const saved = req.sessionConfig
+  const savedBlock = saved && checkQuota(saved.model, quotaCtx)
+  const { picked, block } = saved
+    ? savedBlock ? { block: { block: savedBlock, modelId: saved.model.id } } : { picked: saved }
+    : selectModel(eff, quotaCtx, req.modelId)
   if (!picked) {
     if (block) return { kind: 'quota', ...block }
     return { kind: 'error', unconfigured: true, message: '没有可用的模型，请检查模型与 API Key 配置（#llm模型列表 / #llm设置密钥）' }
@@ -123,22 +138,22 @@ async function runTurnInner(req: TurnRequest, ref: { turn?: TurnState; rolloutId
   updateRollout(ref.rolloutId, { model: model.id })
   const price = resolvePrice(model)
   const dropped = degraded.get(model.id) ?? new Set<Feature>()
-  const thinkingSetting = model.thinking ?? eff.chat.thinking
-  if (thinkingSetting === 'auto' && !dropped.has('thinking')) recordRolloutEvent(ref.rolloutId, { kind: 'progress', text: '正在判断思考强度' })
-  const decision: ThinkingDecision = dropped.has('thinking')
+  const thinkingSetting = saved?.decision.setting ?? model.thinking ?? eff.chat.thinking
+  if (!saved && thinkingSetting === 'auto' && !dropped.has('thinking')) recordRolloutEvent(ref.rolloutId, { kind: 'progress', text: '正在判断思考强度' })
+  const decision: ThinkingDecision = saved?.decision ?? (dropped.has('thinking')
     ? { setting: thinkingSetting, level: 'off', source: 'unsupported', ms: 0 }
     : await resolveThinkingDecision(
         thinkingSetting,
         eff.chat,
         { text: input.text.replaceAll('[at:you]', '').trim(), images: input.images.length, quoted: Boolean(input.quoted), quotedText: input.quoted?.text },
         quotaCtx,
-      )
+      ))
   let thinking = decision.level
   updateRollout(ref.rolloutId, { thinking, thinkingDecision: decision })
   recordRolloutEvent(ref.rolloutId, { kind: 'thinking', thinking,
     text: decision.source === 'unsupported' ? '接口不支持思考强度设置' : thinkingSetting === 'auto' ? '自动思考强度已确定' : '使用配置的思考强度' })
-  const temperature = model.temperature ?? eff.chat.temperature
-  const maxTokens = model.maxTokens ?? eff.chat.maxOutputTokens
+  const temperature = saved ? saved.temperature : model.temperature ?? eff.chat.temperature
+  const maxTokens = saved?.maxTokens ?? model.maxTokens ?? eff.chat.maxOutputTokens
 
   const turn: TurnState = { commands: 0, searches: 0, fetches: 0, images: [] }
   if (!req.computerResult && !req.asyncResult) turn.inputImages = input.images
@@ -150,22 +165,23 @@ async function runTurnInner(req: TurnRequest, ref: { turn?: TurnState; rolloutId
   const attachmentNote = turn.imageRefs.length ? '\n' + turn.imageRefs.map(imageLabel).join('\n') : ''
   ref.turn = turn
   const ctx: ToolCtx = { e, eff, isAdmin, model, turn }
-  let nativeSearch =
+  let nativeSearch = saved?.nativeSearch ?? (
     !dropped.has('nativeSearch') &&
     eff.tools.enable &&
     eff.tools.webSearch.enable &&
     eff.tools.webSearch.provider === 'native' &&
     NATIVE_SEARCH_TYPES.has(provider.type) &&
-    model.nativeSearch !== false
-  if (model.toolUse !== false && !dropped.has('tools') && !turn.asyncResult) await prepareRuntimeTools(eff, undefined, isAdmin)
-  let offered = model.toolUse === false || dropped.has('tools') ? [] : registry.forTurn(ctx)
-  let specs = registry.specs(offered, ctx)
+    model.nativeSearch !== false)
+  if (!saved && model.toolUse !== false && !dropped.has('tools')) await prepareRuntimeTools(eff, undefined, isAdmin)
+  let offered = saved ? saved.tools.map(tool => registry.get(tool.name)).filter((tool): tool is ToolDef => Boolean(tool))
+    : model.toolUse === false || dropped.has('tools') ? [] : registry.forTurn(ctx)
+  let specs = saved?.tools ?? registry.specs(offered, ctx)
   if (offered.some(tool => tool.name === 'run_bot_command')) await ensureCatalog()
 
   const botName = config.get().persona.botName || botNickname(e)
   const markdown = markdownEnabled(e, eff.reply)
   const makeSystem = () =>
-    buildSystemPrompt({ isGroup: Boolean(e.group_id), botName, eff, tools: offered.map(t => t.name), nativeSearch, markdown })
+    saved?.system ?? buildSystemPrompt({ isGroup: Boolean(e.group_id), botName, eff, tools: offered.map(t => t.name), nativeSearch, markdown })
   let system = makeSystem()
   const session = getSession(convKey, eff.chat.sessionTimeout)
   // Apply lowered limits and recover from skipped post-reply housekeeping before building a request.
@@ -233,6 +249,7 @@ async function runTurnInner(req: TurnRequest, ref: { turn?: TurnState; rolloutId
         if (msgs.length === prefix.length + session.messages.length + 1)
           recordRolloutContext(ref.rolloutId, { system, tools: specs, messages: msgs, nativeSearch, messageSources, current: { ...header.context, text },
             history: { turns: session.messages.length / 2, messages: session.messages.length, maxTurns: eff.chat.historyMaxTurns } })
+        turn.sessionConfig = { model, provider, system, tools: specs, nativeSearch, decision: { ...decision, level: thinking }, maxTokens, temperature }
         return await chat({ model, provider, system, messages: msgs, tools: specs, nativeSearch, thinking, maxTokens, temperature, cacheKey, state })
       } catch (err) {
         // server-side chain expired/unknown: resend the full transcript once

@@ -205,7 +205,6 @@ export interface ToolsSection {
 export interface AgyConfig {
   enable: boolean
   access: 'admin' | 'all'
-  distro: string
   executable: string
   maxMinutes: number
   maxQueue: number

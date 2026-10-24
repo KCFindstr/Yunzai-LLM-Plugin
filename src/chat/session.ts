@@ -28,7 +28,7 @@ export interface DayEntry { id: string; day: string; text: string; at: number; s
 
 export interface StoredSession {
   /** Separate AGY thread/workspace for this chat session; discarded with a session reset/timeout. */
-  agy?: { workspaceId: string; conversationId?: string }
+  agy?: { workspaceId: string; conversationId?: string; runtime?: 'host-v1' }
   messages: Msg[]
   summary?: string
   /** Older context: one entry per trimmed chunk; `raw` until compactSession replaces it with a summary. */
@@ -113,7 +113,11 @@ export function peekSession(key: string): StoredSession | undefined {
 export function getAgySession(key: string, timeoutMin: number) {
   const session = getSession(key, timeoutMin)
   if (!session.agy) {
-    session.agy = { workspaceId: randomBytes(5).toString('hex') }
+    session.agy = { workspaceId: randomBytes(5).toString('hex'), runtime: 'host-v1' }
+    store.save()
+  } else if (session.agy.runtime !== 'host-v1') {
+    // Legacy conversations belong to the obsolete private profile and retain its policies/context.
+    session.agy = { workspaceId: session.agy.workspaceId, runtime: 'host-v1' }
     store.save()
   }
   return session.agy

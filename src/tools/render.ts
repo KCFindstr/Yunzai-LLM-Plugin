@@ -15,7 +15,7 @@ const BROKEN_IMAGE = 'data:image/svg+xml;base64,' + Buffer.from(
 
 /**
  * Inline local image references so the bot's own browser can render them without file access. Each reference goes
- * through readLocalImage (this chat's image store folder or this reply's workspace only); unreadable ones become a
+ * through readLocalImage (this chat's image store, AGY output or this reply's workspace); unreadable ones become a
  * broken-image icon instead of failing the whole render.
  */
 export async function inlineLocalImages(html: string, ctx: ToolCtx): Promise<{ html: string; broken: string[] }> {
@@ -50,7 +50,7 @@ export function registerRenderTool() {
     source: 'builtin',
     description:
       '把图片明显更好读的内容用 HTML 排版成图片并返回保存路径：表格、多维对比、复杂结构或需要版式的内容。对方可能要复制的内容（代码、命令、配置、链接、原文）和普通长文直接发文字，不要用它。' +
-      '只写 <body> 里的内容即可（已带好中文字体和基础样式，也可以自带 <style>）；不能用 JavaScript；图片可以用公网 https 链接、data: URI，或本地图片（当前对话图片库 /work/attachments/… 或本次回复代码工作目录中的文件）。' +
+      '只写 <body> 里的内容即可（已带好中文字体和基础样式，也可以自带 <style>）；不能用 JavaScript；图片可以用公网 https 链接、data: URI，或本地图片（当前对话 /work/attachments/…、AGY 输出 /work/agy/<会话>/out/… 或本次回复代码目录中的文件）。' +
       '调用后在文字回复里只说一两句概括，不要把图片里的内容再重复一遍。普通闲聊不要用。',
     parameters: {
       type: 'object',

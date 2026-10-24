@@ -21,7 +21,7 @@ it('shares cached setup checks with tool offering, execution and dependent skill
   let installed = true, probes = 0
   t.mock.method(setupRuntime, 'exec', async (file: string) => {
     probes++
-    return { stdout: file === 'wsl.exe' ? JSON.stringify([installed, installed, installed]) : 'gemini-3.8-flash-medium', stderr: '' }
+    return { stdout: file === 'wsl.exe' ? JSON.stringify([installed, installed, installed]) : installed ? '--sandbox --dangerously-skip-permissions' : '', stderr: '' }
   })
   fs.mkdirSync(path.join(TMP, 'data/agy-setup'), { recursive: true })
   fs.writeFileSync(path.join(TMP, 'data/agy-setup/agy.exe'), '')
@@ -69,6 +69,29 @@ it('saves wizard changes atomically and keeps stored keys when omitted', async (
   await apply([{ path: 'providers.new', value: { type: 'openai', baseUrl: 'https://example.invalid/v1', apiKey: 'new-secret' } },
     { path: 'models.1', value: { id: 'second', provider: 'new', model: 'example-2' } }, { path: 'defaultModel', value: 'second' }])
   assert.equal(config.defaultModelId(), 'second')
+})
+
+it('offers the host AGY worker without WSL or account/permission probes', async t => {
+  const platform = Object.getOwnPropertyDescriptor(process, 'platform')!
+  Object.defineProperty(process, 'platform', { value: 'win32' })
+  t.after(() => Object.defineProperty(process, 'platform', platform))
+  const executable = path.join(TMP, 'host-agy.exe')
+  fs.writeFileSync(executable, '')
+  let probes = 0
+  t.mock.method(setupRuntime, 'exec', async (file: string, args: string[], options: any) => {
+    probes++
+    assert.equal(file, executable)
+    assert.deepEqual(args, ['--help'])
+    assert.equal(options.env, undefined)
+    return { stdout: '', stderr: '--sandbox --dangerously-skip-permissions' }
+  })
+  writeUserConfig(base + `tools:\n  agy: { enable: true, executable: '${executable.replaceAll('\\', '/')}' }\n`)
+  config.load()
+  const eff = config.effective(), state = await checkRuntime('agy', eff, true)
+  assert.equal(state.ready, true)
+  assert.equal(runtimeToolReady('agy', eff), true)
+  assert.equal(probes, 1)
+  assert.ok(state.checks.every(check => !/桥接|模型访问|隔离服务|桌面/.test(check.label)))
 })
 
 it('offers Lens without AGY installation, login or service', async t => {
@@ -223,9 +246,34 @@ it('walks existing configuration, saves embeddings, preserves keys and skips opt
         assert.ok(commands.some((command: string) => command.includes('lens-setup')))
         assert.ok(commands.every((command: string) => !command.includes('agy-setup')))
       }
+      if (step === 'agy') {
+        const commands = await page.$$eval('.setup-command code', (els: Element[]) => els.map(el => el.textContent))
+        assert.deepEqual(commands, ['npm run agy-setup'])
+        assert.ok(!(await page.$eval('.setup-form', (el: Element) => el.textContent!)).includes('WSL 发行版'))
+        assert.equal(await page.$eval('[data-agy-access-warning]', (el: HTMLElement) => el.hidden), true)
+        await page.select('[name=agyAccess]', 'all')
+        await page.waitForSelector('[data-agy-access-warning]', { visible: true })
+        const warning = await page.$eval('[data-agy-access-warning]', (el: HTMLElement) => el.innerText)
+        assert.match(warning, /完整访问这台机器/)
+        await submit()
+        assert.equal(config.get().tools.agy.access, 'all')
+        await page.waitForSelector('[data-agy-access-warning]', { visible: true })
+      }
     }
     await clickText('跳过此步骤'); await page.waitForFunction(() => location.hash === '#/config/basic')
     assert.equal(config.get().tools.exec.enable, false); assert.equal(config.get().tools.agy.enable, false)
+    await page.goto(origin + '/#/config/tools')
+    await page.waitForSelector('details.group')
+    await page.evaluate(() => { const group = Array.from(document.querySelectorAll<HTMLDetailsElement>('details.group')).find(el => el.querySelector('summary .mono')?.textContent === 'agy'); if (group) group.open = true })
+    await page.waitForSelector('[data-agy-access-warning]', { visible: true })
+    const access = '.ctl:has(> [data-agy-access-warning]) > select'
+    for (const value of ['admin', 'all']) {
+      const saved = page.waitForResponse((r: any) => r.url().endsWith('/api/config') && r.request().method() === 'PUT')
+      await page.select(access, value); await saved
+      await page.waitForFunction((value: string) => (document.querySelector('.ctl:has(> [data-agy-access-warning]) > select') as HTMLSelectElement)?.value === value
+        && (document.querySelector('[data-agy-access-warning]') as HTMLElement)?.hidden === (value !== 'all'), {}, value)
+      assert.equal(config.get().tools.agy.access, value)
+    }
     assert.deepEqual(errors, [])
   } finally { await browser?.close(); stopWeb() }
 })

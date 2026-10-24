@@ -1,7 +1,7 @@
 import './helpers.ts'
 import assert from 'node:assert/strict'
 import { it } from 'node:test'
-import { clearSession, getAgySession, peekSession, rememberAgyConversation } from '../src/chat/session.ts'
+import { clearSession, getSession, getAgySession, peekSession, rememberAgyConversation } from '../src/chat/session.ts'
 import { agyConversationFlags } from '../src/agy/runtime.ts'
 
 it('keeps one AGY thread/workspace per chat session and never shares another session thread', () => {
@@ -30,4 +30,14 @@ it('starts a new AGY conversation on chat reset/expiry and ignores late updates 
   const expired = getAgySession('bot:reset', 60)
   assert.notEqual(expired.workspaceId, fresh.workspaceId)
   assert.equal(expired.conversationId, undefined)
+})
+
+it('migrates a legacy private-profile conversation once while retaining its output folder', () => {
+  getSession('bot:legacy', 60).agy = { workspaceId: 'be7f12defe', conversationId: '12345678-1234-1234-1234-123456789abc' }
+  const migrated = getAgySession('bot:legacy', 60)
+  assert.equal(migrated.workspaceId, 'be7f12defe')
+  assert.equal(migrated.runtime, 'host-v1')
+  assert.equal(migrated.conversationId, undefined)
+  assert.equal(rememberAgyConversation('bot:legacy', migrated.workspaceId, '22345678-1234-1234-1234-123456789abc'), true)
+  assert.equal(getAgySession('bot:legacy', 60).conversationId, '22345678-1234-1234-1234-123456789abc')
 })

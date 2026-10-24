@@ -318,10 +318,9 @@ const tools = obj(
       distro: str('现有机器人 WSL 发行版', { pattern: /^[\w.-]+$/ }),
     }, 'Google Lens'),
     agy: obj({
-      enable: bool('异步代理 AGY（需先 agy-setup）'),
-      access: oneOf(['admin', 'all'], '谁可以使用 AGY'),
-      distro: str('现有机器人 WSL 发行版', { pattern: /^[\w.-]+$/ }),
-      executable: str('宿主机 AGY CLI 路径（留空使用私有副本）', { allowEmpty: true }),
+      enable: bool('宿主机异步工作进程 AGY（sandbox + turbo）'),
+      access: oneOf(['admin', 'all'], '谁可以使用 AGY（all 将向所有人开放主机完整访问）'),
+      executable: str('宿主机 AGY CLI 路径（留空使用 data/agy-setup/agy.exe）', { allowEmpty: true }),
       maxMinutes: int('任务最多分钟数', { min: 1, max: 30 }),
       maxQueue: int('排队上限', { min: 1, max: 50 }),
     }, '异步代理'),

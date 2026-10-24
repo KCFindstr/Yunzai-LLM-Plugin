@@ -79,6 +79,17 @@ describe('serialized persistent PC queue', () => {
     assert.equal(first.deliveryError, true)
     assert.equal(sends, 1)
   })
+  it('keeps a failed worker\'s partial report and terminal diagnostics for the final reply', async () => {
+    const queue = new ComputerQueue([])
+    const job = queue.submit('alice', 'generate a file', 2)
+    const report = 'CLI exit=1; status=SUCCESS\n' + 'Partial work retained. '.repeat(30) + '/work/agy/aabbccddee/out/image.jpg'
+    let delivered = ''
+    queue.activate(job, async () => { throw Object.assign(Error('terminal verification failed'), { report }) }, async (_job, result) => { delivered = result.report })
+    await pause()
+    assert.equal(job.status, 'failed')
+    assert.equal(job.report, report)
+    assert.equal(delivered, report)
+  })
 })
 
 describe('computer observations and worker limits', () => {

@@ -392,7 +392,6 @@ export function normalize(raw: any): PluginConfig {
   c.tools.agy = {
     enable: agy.enable === true,
     access: agy.access === 'all' ? 'all' : 'admin',
-    distro: typeof agy.distro === 'string' && /^[\w.-]+$/.test(agy.distro) ? agy.distro : 'yunzai-llm-sandbox',
     executable: typeof agy.executable === 'string' ? agy.executable : '',
     maxMinutes: bounded(agy.maxMinutes, 10, 1, 30),
     maxQueue: bounded(agy.maxQueue, 8, 1, 50),

@@ -91,7 +91,7 @@ models:
 # 默认模型 id。留空 = 自动选择第一个配置了 Key 的模型
 defaultModel: ''
 # 默认模型额度用完/不可用时依次尝试的模型
-fallbackModels: [haiku, flash, deepseek]
+fallbackModels: [deepseek]
 # 后台任务（对话摘要、表情识别）使用的便宜模型；留空 = 默认模型
 utilityModel: ''
 # 默认模型不支持图片时用于识图的模型（表情识别也会优先用它）
@@ -451,14 +451,12 @@ tools:
     access: admin
     # 安装了桌面及 Lens 浏览器依赖的 WSL 发行版
     distro: yunzai-llm-sandbox
-  # AGY 异步代理：需要 agy-setup 和本机已登录的 Antigravity 账号
+  # AGY 宿主机异步工作进程：原生 sandbox + turbo，无需 WSL 或机器人 VM
   agy:
-    # 是否启用 AGY 任务委托工具
+    # 需要 agy-setup 和本机已登录的 Antigravity 账号；自动批准所有工具请求
     enable: false
-    # admin=仅管理员；all=所有人
+    # admin=仅管理员；all=所有人（等同向所有可调用者开放主机完整访问）
     access: admin
-    # 安装了 AGY 桥接和隔离环境的 WSL 发行版
-    distro: yunzai-llm-sandbox
     # 留空使用 data/agy-setup/agy.exe
     executable: ''
     # 每个 AGY 任务最长运行时间，单位分钟

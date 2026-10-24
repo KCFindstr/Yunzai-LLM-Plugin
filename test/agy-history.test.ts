@@ -12,6 +12,7 @@ describe('AGY execution records', () => {
     const job: ComputerJob = { id: 'a123456789', owner: 'private-owner', task: 'Find the original image', status: 'running', createdAt: 1, updatedAt: 1, modelId: 'gemini-3.8-flash-medium' }
     let changed = 0
     const observe = observeAgyJob(job, () => changed++)
+    observe({ event: 'request_context', prompt: 'Path mapping: /work/attachments/<rest> = C:\\Users\\Alice\\images; /work/agy/a123456789/out/<rest> = out/<rest>', launch: { sandbox: true, turbo: true } })
     observe({ event: 'init', init: {} })
     observe({ event: 'diagnostic', text: 'PRIVATE_DIAGNOSTICS' })
     observe({ event: 'step_update', step_update: { step_index: 0, step_type: 'agent_thinking', state: 'DONE', text: 'PRIVATE_REASONING' } })
@@ -22,12 +23,16 @@ describe('AGY execution records', () => {
     const done = { event: 'step_update', step_update: { step_index: 2, step_type: 'tool', state: 'DONE', tool_name: 'read_file', tool_info: { output: 'Result alice@example.com C:\\Users\\Alice\\private.txt', parameters: { file: 'image.png' } } } }
     observe(done); observe(done)
     observe({ event: 'result', result: { status: 'SUCCESS', usage: { input_tokens: 150, output_tokens: 20, cache_read_tokens: 50 } } })
+    observe({ event: 'runtime_exit', success: false, detail: 'CLI exit=1; status=SUCCESS; output=100', error: 'shutdown failure' })
     const history = agyHistory(job.id)
+    assert.match(history.events.find(event => event.kind === 'context')!.text, /Path mapping: \/work\/attachments/)
+    assert.match(history.events.find(event => event.kind === 'context')!.text, /\/work\/agy\/a123456789\/out/)
     assert.equal(history.events.filter(event => event.kind === 'response').length, 1)
     assert.equal(history.events.find(event => event.kind === 'response')?.text, 'Opened the page')
     assert.equal(history.events.filter(event => event.kind === 'tool').length, 2)
     assert.equal(job.steps, 1); assert.equal(job.inputTokens, 150); assert.equal(job.outputTokens, 20); assert.equal(job.cacheReadTokens, 50)
     assert.ok(changed > 0)
+    assert.ok(history.events.some(event => event.kind === 'error' && event.text.includes('status=SUCCESS') && event.text.includes('shutdown failure')))
     flushAllStores()
     const raw = fs.readFileSync(path.join(TMP, 'data/agy-history', job.id, 'history.json'), 'utf8')
     for (const value of ['PRIVATE_DIAGNOSTICS', 'PRIVATE_REASONING', 'PRIVATE_TOKEN', 'PRIVATE_BINARY', 'alice@example.com', 'Alice', 'private-owner']) assert.ok(!raw.includes(value), value)

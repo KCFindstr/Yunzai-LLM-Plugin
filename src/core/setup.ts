@@ -5,7 +5,6 @@ import { promisify } from 'node:util'
 import { config, resolveKeys, deepseekToolKey } from './config.ts'
 import { DATA_DIR } from './paths.ts'
 import type { EffectiveConfig, ModelConfig } from './configTypes.ts'
-import { isolatedEnvironment } from '../agy/environment.ts'
 
 const exec = promisify(execFile)
 export const setupRuntime = { exec }
@@ -13,18 +12,17 @@ export type RuntimeKind = 'sandbox' | 'computer' | 'agy' | 'lens'
 export interface RuntimeState { ready: boolean; checks: { label: string; ok: boolean }[]; checkedAt: number }
 const names: Record<string, RuntimeKind> = { run_code: 'sandbox', computer_task: 'computer', agy: 'agy', google_lens: 'lens' }
 const cache = new Map<string, { until: number; state?: RuntimeState; pending?: Promise<RuntimeState> }>()
-const scripts: Record<RuntimeKind, string[]> = {
+const scripts = {
   sandbox: ['test -r /opt/llm-sandbox/runner.py && test -x /opt/llm-images/mount.sh', 'command -v bwrap >/dev/null && command -v node >/dev/null && id sbx >/dev/null 2>&1', 'systemctl is-active --quiet llm-sandbox-firewall.service'],
   computer: ['test -r /opt/llm-desktop/client.py && test -x /opt/llm-images/mount.sh', 'systemctl is-active --quiet llm-desktop.service'],
-  agy: ['test -r /opt/llm-agy/exec.py && test -r /opt/llm-agy/mount.sh && test -x /opt/llm-images/mount.sh', 'systemctl is-active --quiet llm-agy.service', 'systemctl is-active --quiet llm-desktop.service'],
   lens: ['test -r /opt/llm-agy/google-image-search.py && test -d /usr/local/lib/agy-browser/playwright && test -x /opt/llm-images/mount.sh', 'systemctl is-active --quiet llm-desktop.service'],
 }
-const labels: Record<RuntimeKind, string[]> = {
+const labels = {
   sandbox: ['代码运行器', '隔离环境与运行语言', '沙盒网络隔离服务'], computer: ['桌面客户端', '桌面服务'],
-  agy: ['AGY 沙盒桥接', 'AGY 隔离服务', '桌面与共享目录服务'], lens: ['图片搜索与浏览器依赖', '桌面服务'],
+  lens: ['图片搜索与浏览器依赖', '桌面服务'],
 }
 const settings = (kind: RuntimeKind, eff: EffectiveConfig) => eff.tools[kind === 'sandbox' ? 'exec' : kind === 'lens' ? 'googleLens' : kind]
-const keyFor = (kind: RuntimeKind, eff: EffectiveConfig) => `${kind}:${settings(kind, eff).distro}:${kind === 'agy' ? eff.tools.agy.executable : ''}`
+const keyFor = (kind: RuntimeKind, eff: EffectiveConfig) => kind === 'agy' ? `agy:${eff.tools.agy.executable}` : `${kind}:${eff.tools[kind === 'sandbox' ? 'exec' : kind === 'lens' ? 'googleLens' : kind].distro}`
 
 /** Cached, bounded, read-only checks. No setup script, model call, or installer is executed. */
 export async function checkRuntime(kind: RuntimeKind, eff: EffectiveConfig, force = false): Promise<RuntimeState> {
@@ -34,30 +32,33 @@ export async function checkRuntime(kind: RuntimeKind, eff: EffectiveConfig, forc
   const item: { until: number; state?: RuntimeState; pending?: Promise<RuntimeState> } = { until: 0 }
   cache.set(key, item)
   item.pending = (async () => {
-    const distro = settings(kind, eff).distro
-    const checks = [{ label: 'Windows / WSL 环境', ok: process.platform === 'win32' && /^[\w.-]+$/.test(distro) }]
-    if (checks[0].ok) {
-      const script = `import subprocess,json\ncommands=${JSON.stringify(scripts[kind])}\nprint(json.dumps([subprocess.run(['sh','-c',c],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=2).returncode==0 for c in commands]))`
-      let values: boolean[] = []
-      try {
-        const { stdout } = await setupRuntime.exec('wsl.exe', ['-d', distro, '-u', 'root', '-e', 'python3', '-c', script], { windowsHide: true, timeout: 8000, maxBuffer: 16384 })
-        const parsed = JSON.parse(stdout)
-        if (Array.isArray(parsed)) values = parsed
-      } catch { /* Missing/stopped/unprovisioned environments stay unavailable. */ }
-      checks.push(...labels[kind].map((label, i) => ({ label, ok: values[i] === true })))
+    const checks: RuntimeState['checks'] = []
+    if (kind !== 'agy') {
+      const distro = eff.tools[kind === 'sandbox' ? 'exec' : kind === 'lens' ? 'googleLens' : kind].distro
+      checks.push({ label: 'Windows / WSL 环境', ok: process.platform === 'win32' && /^[\w.-]+$/.test(distro) })
+      if (checks[0].ok) {
+        const script = `import subprocess,json\ncommands=${JSON.stringify(scripts[kind])}\nprint(json.dumps([subprocess.run(['sh','-c',c],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=2).returncode==0 for c in commands]))`
+        let values: boolean[] = []
+        try {
+          const { stdout } = await setupRuntime.exec('wsl.exe', ['-d', distro, '-u', 'root', '-e', 'python3', '-c', script], { windowsHide: true, timeout: 8000, maxBuffer: 16384 })
+          const parsed = JSON.parse(stdout)
+          if (Array.isArray(parsed)) values = parsed
+        } catch { /* Missing/stopped/unprovisioned environments stay unavailable. */ }
+        checks.push(...labels[kind].map((label, i) => ({ label, ok: values[i] === true })))
+      }
     }
     if (kind === 'agy') {
+      checks.push({ label: 'Windows 宿主机（无需 WSL）', ok: process.platform === 'win32' })
       const executable = path.resolve(eff.tools.agy.executable || path.join(DATA_DIR, 'agy-setup/agy.exe'))
       checks.push({ label: 'AGY CLI', ok: fs.existsSync(executable) })
-      let modelsAvailable = false
+      let cliAvailable = false
       if (checks.every(c => c.ok)) {
         try {
-          const { stdout } = await setupRuntime.exec(executable, ['models'], { windowsHide: true, timeout: 6000, maxBuffer: 32768,
-            env: isolatedEnvironment(path.join(DATA_DIR, 'agy-setup/profile')) })
-          modelsAvailable = /gemini/i.test(stdout)
-        } catch { /* No login or unavailable CLI: keep AGY hidden. Never expose CLI output. */ }
+          const { stdout, stderr } = await setupRuntime.exec(executable, ['--help'], { windowsHide: true, timeout: 6000, maxBuffer: 32768 })
+          cliAvailable = /--sandbox\b/.test(stdout + stderr) && /--dangerously-skip-permissions\b/.test(stdout + stderr)
+        } catch { /* Check CLI availability only; do not probe login, model access or permissions. */ }
       }
-      checks.push({ label: 'CLI 模型访问（需本机登录）', ok: modelsAvailable })
+      checks.push({ label: '宿主机 CLI 可运行（sandbox + turbo）', ok: cliAvailable })
     }
     const state = { ready: checks.every(c => c.ok), checks, checkedAt: Date.now() }
     item.state = state; item.until = Date.now() + 60_000; item.pending = undefined

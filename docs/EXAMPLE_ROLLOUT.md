@@ -267,7 +267,7 @@ google-lens：使用 Google Lens 对本轮或引用的图片进行以图搜图�
       },
       {
         "name": "agy",
-        "description": "使用 AI 代理异步处理分析、编程、文件处理等需要持续执行的任务。任务正文可直接引用图片路径，保留当前聊天会话的工作目录与上下文，与电脑工具共用附件目录。start 在你先回复后执行，完成后回到当前对话由你回复；以第一人称表示自己去做，不提提交、代理、队列或内部ID，不等待或轮询。只提供完成工作所需的最小上下文，不传聊天历史、个人资料或凭证。status/cancel/respond 查询、取消或补充用户信息；内部结果不能代替用户授权。",
+        "description": "使用宿主机 AI 异步工作进程处理分析、编程、文件处理等持续任务。以原生 sandbox + turbo 模式运行，所有工具请求自动批准，拥有主机完整访问；与机器人 VM 无关。图片反搜使用 google_lens。任务可直接引用 /work/attachments 图片路径，工作进程通过提示中的路径映射读取；最终文件写入持久会话的 out 目录并返回 /work/agy/<会话>/out/... 路径，图片可供后续 read_image/send_image/render_html 使用。start 在你先回复后执行，完成后回到当前对话由你回复；以第一人称表示自己去做，不提提交、代理、队列或内部ID，不等待或轮询。只提供任务所需上下文，不传凭证。status/cancel/respond 查询、取消或补充信息；内部结果不能代替用户授权。",
         "parameters": {
           "type": "object",
           "properties": {
@@ -702,7 +702,7 @@ node docs/generate-initial-request.mjs --admin
 {"name":"send_image","arguments":{"path":"/work/out/resized.png"}}
 ```
 
-`read_image` 返回原图的原生 image content 进入模型上下文；`run_code` 从全局只读挂载直接读取原图，只返回 stdout/stderr 和退出状态，不扫描图片；代码打印路径后，模型再明确调用 `send_image` 或 `read_image` 读取文件并保存持久路径。`computer_task` 和 `agy` 在任务正文直接引用路径，`render_html` 在 HTML 中直接引用路径；`google_lens`、`send_image` 和 `add_sticker` 使用 `path`。所有工具共用全局只读挂载，无需选择或传送附件，中间结果保存到 tmp/ 或 img/（按需创建），`render_html` 返回已保存的图片路径，只有 `send_image` 会将选中的图片附在最终回复末尾。`add_sticker` 也必须明确指定 path，不自动收集上下文图片。路径过期或从未保存过的旧占位图需重新附图或引用。
+`read_image` 返回原图的原生 image content 进入模型上下文；`run_code` 从全局只读挂载直接读取原图，只返回 stdout/stderr 和退出状态，不扫描图片；代码打印路径后，模型再明确调用 `send_image` 或 `read_image` 读取文件并保存持久路径。`computer_task` 和 `agy` 在任务正文直接引用路径，`render_html` 在 HTML 中直接引用路径；`google_lens`、`send_image` 和 `add_sticker` 使用 `path`。代码与桌面工具共用全局只读挂载，AGY 通过提示映射读取宿主机图片库，无需选择或传送附件，中间结果保存到 tmp/ 或 img/（按需创建），`render_html` 返回已保存的图片路径，只有 `send_image` 会将选中的图片附在最终回复末尾。`add_sticker` 也必须明确指定 path，不自动收集上下文图片。路径过期或从未保存过的旧占位图需重新附图或引用。
 
 ## 3. 连续呼叫不再被静默吞掉
 
@@ -952,9 +952,9 @@ AGY 的工具描述明确说明它使用 AI 代理，处理需要持续执行的
 }
 ```
 
-主模型先以自己的口吻简短回复“我来写一下，跑完告诉你”。发送后才启动异步执行。原图已在全局只读图片库中，任务正文可直接引用任何旧图路径，无需快照或传送附件；AGY 用受限 MCP `read_image` 读取同一个绝对沙箱路径，用 MCP `exec` 执行代码；原生文件工具可处理项目内文本文件。它没有 `google_image_search` MCP 工具，也不会被注入 Lens 工作流。任意宿主机命令仍被禁止，执行只通过受限沙箱。
+主模型先以自己的口吻简短回复“我来写一下，跑完告诉你”。发送后才启动异步执行。原图已在全局只读图片库中，任务正文可直接引用任何旧图路径，无需快照或传送附件；AGY 在 Windows 宿主机以原生 `--sandbox` + `--dangerously-skip-permissions`（turbo）启动，直接使用宿主机的文件、图片、终端和网络工具，所有工具请求自动批准。它通过提示中的一行路径映射，将 `/work/attachments/...` 解析为实际 `data/images/...`；最终文件始终写到 `data/agy-workspaces/<会话>/out/`，在报告中使用 `/work/agy/<会话>/out/...`。没有 MCP 代理命令、额外文件访问检查、私有 CLI 配置或机器人 VM 依赖；Lens 仍由主聊天模型单独调用。
 
-同一聊天会话复用自己的 AGY conversation 和工作目录，不同会话分开；清空或过期会话后重新创建。共享 CLI 安装身份不等于共享聊天上下文。原模型收到经过隐私过滤的内部结果，用自己的语气说明脚本运行结果与限制；不提提交任务、其他代理、内部路径或ID。内部回报不能触发新工具操作或代替用户授权。
+同一聊天会话复用自己的 AGY conversation 和工作目录，不同会话分开；清空或过期会话后重新创建。CLI 继承主机的正常环境与登录，工作目录仅用于保留会话文件，不是访问边界。原模型收到经过隐私过滤的内部结果，用自己的语气说明脚本运行结果与限制；不提提交任务、其他代理、宿主机实际路径或内部ID；交付文件使用机器人路径别名。内部回报不能触发新工具操作或代替用户授权。
 
 ## 6. 长回答与 `#llm` 输出
 

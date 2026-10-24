@@ -10,7 +10,7 @@ import { privateValues, redact } from './privacy.ts'
 export interface AgyEvent {
   seq: number
   at: number
-  kind: 'request' | 'progress' | 'response' | 'tool' | 'report' | 'reply' | 'error' | 'cancel'
+  kind: 'request' | 'context' | 'progress' | 'response' | 'tool' | 'report' | 'reply' | 'error' | 'cancel'
   text: string
   step?: number
   model?: string
@@ -54,7 +54,7 @@ function cleanEvent(event: AgyEvent): AgyEvent {
   // Whitelist metadata too; never spread arbitrary CLI objects into stored or served records.
   const secrets = privateValues(config.get())
   return {
-    seq: event.seq, at: event.at, kind: event.kind, text: agyHistoryText(event.text, secrets),
+    seq: event.seq, at: event.at, kind: event.kind, text: agyHistoryText(event.text, secrets, event.kind === 'context' ? 32000 : 12000),
     step: event.step, model: event.model ? agyHistoryText(event.model, secrets, 100) : undefined,
     tool: event.tool ? agyHistoryText(event.tool, secrets, 100) : undefined,
     args: event.args ? agyHistoryText(event.args, secrets) : undefined,
@@ -111,12 +111,17 @@ export function observeAgyJob(job: ComputerJob, changed: () => void) {
   const progress = (text: string) => { job.progress = text; job.updatedAt = Date.now(); changed() }
   const count = (value: any) => Number.isFinite(value) && value >= 0 ? Math.floor(value) : undefined
   return (event: any) => {
+    if (event.event === 'request_context') {
+      recordAgyEvent(job.id, { kind: 'context', text: event.prompt, args: agyHistoryText(event.launch) })
+      return
+    }
     if (event.event === 'init') {
       progress('模型已启动')
       recordAgyEvent(job.id, { kind: 'progress', text: '模型已启动', model: job.modelId })
       return
     }
     if (event.event === 'result') {
+      recordAgyEvent(job.id, { kind: 'progress', text: `CLI 终态：${String(event.result?.status ?? 'unknown')}${event.result?.error ? `\n${agyHistoryText(event.result.error)}` : ''}` })
       const usage = event.result?.usage
       if (usage) {
         job.inputTokens = count(usage.input_tokens)
@@ -124,6 +129,10 @@ export function observeAgyJob(job: ComputerJob, changed: () => void) {
         job.cacheReadTokens = count(usage.cache_read_tokens)
       }
       progress(event.result?.status === 'SUCCESS' ? '执行已结束，正在整理对话回复' : '执行未完成，正在整理结果')
+      return
+    }
+    if (event.event === 'runtime_exit') {
+      recordAgyEvent(job.id, { kind: event.success ? 'progress' : 'error', text: `${event.detail}${event.error ? `\n${event.error}` : ''}`, isError: !event.success })
       return
     }
     if (event.event !== 'step_update') return
@@ -137,7 +146,7 @@ export function observeAgyJob(job: ComputerJob, changed: () => void) {
       if (delta) texts.set(index, ((texts.get(index) ?? '') + delta).slice(0, 12000))
       if (step.state !== 'DONE') return
       finished.add(key)
-      const text = typeof step.text === 'string' ? step.text : texts.get(index) ?? ''
+      const text = typeof step.text === 'string' && step.text.trim() ? step.text : texts.get(index) ?? ''
       texts.delete(index)
       job.steps = (job.steps ?? 0) + 1
       progress(`已完成 ${job.steps} 轮处理`)
@@ -152,7 +161,7 @@ export function observeAgyJob(job: ComputerJob, changed: () => void) {
       finished.add(done ? key : activeKey)
       progress(done ? '工具已返回，继续处理' : `${agyHistoryText(tool, undefined, 100)} 执行中`)
       const isError = step.state !== 'DONE' && done
-      recordAgyEvent(job.id, { kind: 'tool', text: done ? agyHistoryText(step.tool_info?.output ?? (isError ? '工具执行失败' : '工具调用完成')) : '正在执行',
+      recordAgyEvent(job.id, { kind: 'tool', text: done ? agyHistoryText(step.tool_info?.output ?? step.tool_info?.error ?? step.error ?? (isError ? '工具执行失败' : '工具调用完成')) : '正在执行',
         tool, args: agyHistoryText(step.tool_info?.parameters), phase: done ? 'completed' : 'running', isError,
         ms: count(step.duration_seconds * 1000) })
     }

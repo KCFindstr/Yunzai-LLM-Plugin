@@ -2,6 +2,7 @@ import { api, del, get, put } from '../api.js'
 import { menuButton } from '../main.js'
 import { act, badge, card, combo, confirmDanger, empty, h, icon, modal, mount, promptFields, switchEl, tabs, toast } from '../ui.js'
 import { setupWizard } from '../setup-wizard.js'
+import { agyAccessWarning } from '../agy-access.js'
 
 /**
  * Schema-driven config editor. Every write goes through PUT /api/config (validated server-side with the same
@@ -218,13 +219,18 @@ function arrEditor(node, keys, value) {
 
 function leaf(node, keys, value, parent, title, extra) {
   const overridden = isOverridden(keys)
+  const agyAccess = keys.slice(-3).join('.') === 'tools.agy.access'
+  const warning = agyAccess ? agyAccessWarning() : null
+  if (warning) warning.hidden = value !== 'all'
+  const input = control(node, keys, value, parent)
+  if (warning) input.addEventListener('change', () => { warning.hidden = input.value !== 'all' })
   return h('div', { class: 'field' },
     h('div',
       h('div', { class: 'name' }, title ?? node.label ?? keys.at(-1), ' ', overridden ? badge('已修改', 'warn') : null),
       h('div', { class: 'key' }, pathOf(keys)),
       descFor(keys) ? h('div', { class: 'desc' }, descFor(keys)) : null,
     ),
-    h('div', { class: 'ctl' }, control(node, keys, value, parent), h('div', { class: 'row' },
+    h('div', { class: 'ctl' }, input, warning, h('div', { class: 'row' },
       overridden && !extra ? h('button', { class: 'btn sm ghost', onclick: () => reset(keys) }, '恢复默认') : null, extra)),
   )
 }

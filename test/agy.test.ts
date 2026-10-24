@@ -1,38 +1,139 @@
 import { TMP, fakeEvent } from './helpers.ts'
 import assert from 'node:assert/strict'
 import path from 'node:path'
+import fs from 'node:fs'
+import { EventEmitter } from 'node:events'
+import { PassThrough } from 'node:stream'
+import os from 'node:os'
 import { describe, it } from 'node:test'
 import { normalize } from '../src/core/config.ts'
 import { redact } from '../src/agy/privacy.ts'
-import { isolatedEnvironment, scopedSettings, AGY_MODEL, AGY_EFFORT } from '../src/agy/runtime.ts'
+import { agyLaunchArgs, agyRuntime, runAgy, hostAgyEnvironment, AGY_MODEL, AGY_EFFORT } from '../src/agy/runtime.ts'
+import { agyOutputFile, agyPathInstructions, agyWorkspace } from '../src/agy/paths.ts'
+import { readLocalImage } from '../src/tools/imageFiles.ts'
+import { getAgySession, sessionKey } from '../src/chat/session.ts'
 import { registerAgyTool, agyQueue, completeAgyJob } from '../src/tools/agy.ts'
 import { registry } from '../src/tools/registry.ts'
 import type { ToolCtx } from '../src/tools/registry.ts'
 import { agyHistory } from '../src/agy/history.ts'
 
 function context(admin = true): ToolCtx {
-  const eff = normalize({ tools: { agy: { enable: true } } }) as any
+  const eff = normalize({ tools: { enable: true, agy: { enable: true } } }) as any
   return { e: fakeEvent().e, eff, isAdmin: admin, model: { id: 'original-persona' } as any, turn: { commands: 0, searches: 0, fetches: 0, images: [] } }
 }
 registerAgyTool()
-describe('AGY isolation and async handoff', () => {
-  it('uses sandbox-only approvals and no inherited personal environment', () => {
-    const settings = scopedSettings('//wsl.localhost/vm/work/job', ['C:\\Users', 'D:\\Bot'])
-    assert.ok(settings.permissions.allow.includes('read_file(//wsl.localhost/vm/work/job)'))
-    assert.ok(settings.permissions.deny.includes('read_file(C:/Users)'))
-    for (const action of ['command', 'unsandboxed', 'read_url', 'execute_url']) assert.ok(settings.permissions.deny.includes(`${action}(*)`))
+describe('AGY host worker and async handoff', () => {
+  it('launches native sandbox + turbo without a permission policy', () => {
+    const flags = agyLaunchArgs('host task', 5)
+    assert.ok(flags.includes('--sandbox'))
+    assert.ok(flags.includes('--dangerously-skip-permissions'))
+    assert.ok(flags.includes('--new-project'))
     assert.equal(AGY_MODEL, 'gemini-3.8-flash-medium')
     assert.equal(AGY_EFFORT, 'medium')
-    process.env.AGY_TEST_API_KEY = 'SECRET_VALUE'
-    const env = isolatedEnvironment(path.join(TMP, 'private'))
-    assert.equal(env.AGY_TEST_API_KEY, undefined)
-    assert.equal(env.USERPROFILE, path.join(TMP, 'private'))
-    delete process.env.AGY_TEST_API_KEY
   })
+  it('uses the real host profile even when launched inside an old AGY terminal', () => {
+    const env = hostAgyEnvironment({ USERPROFILE: 'old-private-home', HOME: 'old-private-home', ANTIGRAVITY_APP_DATA_DIR: 'old-private-profile',
+      ANTIGRAVITY_CONFIG_REL_DIR: 'old-config', ANTIGRAVITY_LS_ADDRESS: 'old-backend', ANTIGRAVITY_PROJECT_ID: 'old-project',
+      PATH: 'normal-host-tools', TEST_API_KEY: 'host-key' }, 'C:\\Users\\Host')
+    assert.equal(env.USERPROFILE, 'C:\\Users\\Host')
+    assert.equal(env.ANTIGRAVITY_APP_DATA_DIR, path.join('C:\\Users\\Host', '.gemini', 'antigravity-cli'))
+    assert.equal(env.ANTIGRAVITY_LS_ADDRESS, undefined)
+    assert.equal(env.ANTIGRAVITY_CONFIG_REL_DIR, undefined)
+    assert.equal(env.ANTIGRAVITY_PROJECT_ID, undefined)
+    assert.equal(env.PATH, 'normal-host-tools')
+    assert.equal(env.TEST_API_KEY, 'host-key')
+  })
+  it('runs without a VM/private profile and accepts turbo init events', async t => {
+    let launches = 0
+    const workspaceId = 'aabbcc1234', alias = `/work/agy/${workspaceId}/out/result.png`
+    t.mock.method(agyRuntime, 'spawn', (file: string, args: string[], options: any) => {
+      launches++
+      assert.equal(file, path.join(TMP, 'data/agy-setup/agy.exe'))
+      assert.equal(options.cwd, agyWorkspace(workspaceId))
+      assert.equal(options.env.USERPROFILE, os.userInfo().homedir)
+      assert.equal(options.env.ANTIGRAVITY_APP_DATA_DIR, path.join(os.userInfo().homedir, '.gemini', 'antigravity-cli'))
+      assert.ok(fs.existsSync(path.join(options.cwd, 'out')))
+      assert.ok(args.includes('--sandbox') && args.includes('--dangerously-skip-permissions'))
+      const prompt = args[args.indexOf('--print') + 1]
+      assert.ok(prompt.includes(agyPathInstructions(workspaceId)))
+      assert.ok(prompt.includes('/work/attachments/aabbccddee/image-ref.png'))
+      assert.ok(!prompt.includes('agy-sandbox'))
+      const child = Object.assign(new EventEmitter(), { stdout: new PassThrough(), stderr: new PassThrough() })
+      queueMicrotask(() => {
+        child.stdout.write(JSON.stringify({ event: 'init', init: { permission_mode: 'turbo' } }) + '\n')
+        child.stdout.write(JSON.stringify({ event: 'result', result: { status: 'SUCCESS', response: alias } }) + '\n')
+        child.emit('close', 0)
+      })
+      return child as any
+    })
+    const job: any = { id: 'aabbccddee', task: 'process /work/attachments/aabbccddee/image-ref.png', agyWorkspaceId: workspaceId }
+    assert.deepEqual(await runAgy(job, normalize({}).tools.agy, new AbortController().signal, {}), { report: alias })
+    assert.equal(launches, 1)
+    assert.ok(!fs.existsSync(path.join(TMP, 'data/agy-setup/profile')))
+  })
+  it('makes host output images readable through bot aliases without WSL', async () => {
+    const ctx = context(), session = getAgySession(sessionKey(ctx.e, ctx.eff.chat.sessionScope), 60)
+    const out = path.join(agyWorkspace(session.workspaceId), 'out')
+    const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aL1sAAAAASUVORK5CYII=', 'base64')
+    fs.mkdirSync(path.join(out, 'nested'), { recursive: true })
+    fs.writeFileSync(path.join(out, 'nested', 'result.png'), png)
+    const alias = `/work/agy/${session.workspaceId}/out/nested/result.png`
+    const saved = await readLocalImage(alias, ctx)
+    assert.deepEqual(Buffer.from(saved.part.data!, 'base64'), png)
+    assert.ok(saved.image.path.startsWith('/work/attachments/'))
+    assert.throws(() => agyOutputFile(`/work/agy/${session.workspaceId}/out/../../secret.png`, session.workspaceId))
+    assert.throws(() => agyOutputFile('/work/agy/aabbccddee/out/result.png', session.workspaceId))
+    const other = context(); other.e.user_id = 777
+    await assert.rejects(readLocalImage(alias, other), /AGY/)
+    assert.equal(redact(alias), alias)
+    const numericAlias = '/work/agy/1234567890/out/result.png'
+    assert.equal(redact(numericAlias), numericAlias)
+    assert.ok(!redact('phone 1234567890').includes('1234567890'))
+  })
+  it('accepts a successful final record without a trailing newline or init banner and keeps streamed reply text', async t => {
+    const events: any[] = []
+    t.mock.method(agyRuntime, 'spawn', () => {
+      const child = Object.assign(new EventEmitter(), { stdout: new PassThrough(), stderr: new PassThrough() })
+      queueMicrotask(() => {
+        const data = [
+          { event: 'step_update', step_update: { step_type: 'agent_response', step_index: 1, state: 'ACTIVE', text_delta: 'Generated ' } },
+          { event: 'step_update', step_update: { step_type: 'agent_response', step_index: 1, state: 'DONE', text: '', text_delta: '/work/agy/aabbccddee/out/image.jpg' } },
+          { event: 'result', result: { status: 'SUCCESS', response: '' } },
+        ].map(value => JSON.stringify(value)).join('\n')
+        child.stdout.write(data.slice(0, 31)); child.stdout.write(data.slice(31))
+        child.emit('close', 0)
+      })
+      return child as any
+    })
+    const result = await runAgy({ id: 'aabbccddee', task: 'generate an image' } as any, normalize({}).tools.agy, new AbortController().signal, {}, event => events.push(event))
+    assert.equal(result.report, 'Generated /work/agy/aabbccddee/out/image.jpg')
+    assert.equal(events.at(-1).event, 'runtime_exit')
+    assert.equal(events.at(-1).success, true)
+  })
+  for (const scenario of [{ status: 'ERROR', code: 1 }, { status: 'SUCCESS', code: 1 }, { status: '', code: 0 }])
+    it(`preserves partial work and terminal diagnostics when status=${scenario.status || 'missing'} exit=${scenario.code}`, async t => {
+      const events: any[] = []
+      t.mock.method(agyRuntime, 'spawn', () => {
+        const child = Object.assign(new EventEmitter(), { stdout: new PassThrough(), stderr: new PassThrough() })
+        queueMicrotask(() => {
+          child.stdout.write(JSON.stringify({ event: 'step_update', step_update: { step_type: 'agent_response', step_index: 1, state: 'DONE', text: 'Output exists: /work/agy/aabbccddee/out/image.jpg' } }) + '\n')
+          if (scenario.status) child.stdout.write(JSON.stringify({ event: 'result', result: { status: scenario.status } }))
+          child.emit('close', scenario.code)
+        })
+        return child as any
+      })
+      await assert.rejects(runAgy({ id: 'aabbccddee', task: 'generate an image' } as any, normalize({}).tools.agy, new AbortController().signal, {}, event => events.push(event)), (error: any) => {
+        assert.match(error.message, new RegExp(`exit=${scenario.code}; status=${scenario.status || 'missing-result'}`))
+        assert.match(error.report, /Output exists:/)
+        assert.match(error.report, /不代表启动失败/)
+        return true
+      })
+      assert.equal(events.at(-1).success, false)
+    })
   it('defaults off and bounds configuration', () => {
     assert.equal(normalize({}).tools.agy.enable, false)
     const cfg = normalize({ tools: { agy: { enable: true, maxMinutes: 9999, maxQueue: -5, distro: '../escape' } } }).tools.agy
-    assert.equal(cfg.maxMinutes, 30); assert.equal(cfg.maxQueue, 1); assert.equal(cfg.distro, 'yunzai-llm-sandbox')
+    assert.equal(cfg.maxMinutes, 30); assert.equal(cfg.maxQueue, 1); assert.equal('distro' in cfg, false)
   })
   it('defers execution until after the acknowledgement, prevents duplicates and hides other owners', async () => {
     const ctx = context(), tool = registry.get('agy')!
@@ -52,6 +153,26 @@ describe('AGY isolation and async handoff', () => {
     assert.deepEqual(registry.forTurn(ctx), [])
     assert.equal((await registry.get('agy')!.run({ action: 'start', task: 'do it' }, ctx) as any).isError, true)
     assert.equal((await registry.get('agy')!.run({ action: 'start', task: 'do it' }, context(false)) as any).isError, true)
+  })
+  it('preserves normal declarations, blocks non-image completion actions and delivers images', async () => {
+    for (const name of ['read_image', 'send_image', 'run_code']) registry.register({ name, description: name, parameters: {}, budgetExempt: true, run: async () => 'ok' })
+    const ctx = context(); ctx.turn.asyncResult = { kind: 'agy', id: 'aabbccddee' }
+    const offered = registry.forTurn(ctx)
+    assert.deepEqual(offered.map(tool => tool.name), ['read_image', 'send_image'])
+    const disallowed = registry.get('run_code')!
+    assert.equal((await registry.execute([{ id: 'side-effect', name: 'run_code', args: {} }], ctx, [disallowed])).results[0].isError, true)
+    registry.unregisterWhere(tool => ['read_image', 'send_image', 'run_code'].includes(tool.name))
+    const image = Buffer.from('selected-image')
+    const job: any = { id: 'aabbccddee', task: 'draw a chart', status: 'completed' }
+    await completeAgyJob(job, { report: '/work/agy/aabbccddee/out/chart.png' }, ctx, {
+      runTurn: async request => {
+        assert.equal(request.eff, ctx.eff)
+        assert.equal(request.sessionConfig, ctx.turn.sessionConfig)
+        assert.ok(request.input.text.includes('/work/agy/aabbccddee/out/chart.png'))
+        return { kind: 'reply', text: 'Here is the chart', images: [image], cost: 0, modelId: 'original-persona', thinking: 'off' }
+      },
+      deliver: async (_event, _text, _eff, opts) => { assert.deepEqual(opts.images, [image]) },
+    })
   })
   it('filters secrets, identities and paths on both sides of the main-model summary', async () => {
     const ctx = context(); let delivered = ''

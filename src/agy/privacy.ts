@@ -28,7 +28,11 @@ export function redact(text: string, secrets: string[] = []): string {
     .replace(/\b(?:10|127)\.\d{1,3}\.\d{1,3}\.\d{1,3}\b|\b192\.168\.\d{1,3}\.\d{1,3}\b|\b172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}\b/g, '[private address]')
     .replace(/([?&](?:key|api_?key|token|password|auth|authorization|secret|signature|session|code)=)[^&#\s)]+/gi, '$1[redacted]')
     .replace(/["']?\b(?:password|api[_ -]?key|secret|access[_ -]?token|refresh[_ -]?token|session[_ -]?id|cookie|sid)["']?\s*[:=]\s*["']?[^\s,;"']+["']?/gi, '[redacted]')
-    .replace(/(?<!\w)(?:\+?\d[ -]?){9,16}(?!\w)/g, (value, offset, text) =>
+    .replace(/(?<!\w)(?:\+?\d[ -]?){9,16}(?!\w)/g, (value, offset, text) => {
+      const before = text.slice(0, offset)
+      // Random bot scope/workspace IDs may contain only digits; keep these file aliases usable.
+      if (value.length === 10 && text[offset + 10] === '/' && (before.endsWith('/work/agy/') || before.endsWith('/work/attachments/'))) return value
       // Public artwork IDs are evidence identifiers, not personal phone/account numbers.
-      /https?:\/\/(?:www\.)?pixiv\.net\/(?:[a-z]{2}\/)?artworks\/$/i.test(text.slice(0, offset)) ? value : '[private number]')
+      return /https?:\/\/(?:www\.)?pixiv\.net\/(?:[a-z]{2}\/)?artworks\/$/i.test(before) ? value : '[private number]'
+    })
 }

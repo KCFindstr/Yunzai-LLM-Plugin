@@ -1,8 +1,11 @@
-import { TMP, writeUserConfig } from './helpers.ts'
+import { PLUGIN_ROOT, TMP, writeUserConfig } from './helpers.ts'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { describe, it } from 'node:test'
+import YAML from 'yaml'
+// default_config.yaml is the source of truth for default values.
+const DEFAULTS = YAML.parse(fs.readFileSync(path.join(PLUGIN_ROOT, 'config', 'default_config.yaml'), 'utf8'))
 
 writeUserConfig(`# 用户注释必须保留
 defaultModel: haiku
@@ -31,7 +34,7 @@ describe('config', () => {
   it('merges user config over defaults', () => {
     const c = config.get()
     assert.equal(c.models.length, 2)
-    assert.equal(c.chat.historyMaxTurns, 20, 'default kept')
+    assert.equal(c.chat.historyMaxTurns, DEFAULTS.chat.historyMaxTurns, 'default kept')
     assert.equal(config.getModel('CHEAP')?.model, 'claude-haiku-5-5')
   })
 
@@ -60,7 +63,7 @@ describe('config', () => {
     config.set('groups.555.persona', '你是一只猫，说话句尾带喵，喜欢晒太阳和睡觉。')
     const eff = config.effective(555)
     assert.equal(eff.sticker.probability, 0.1)
-    assert.equal(eff.sticker.cooldown, 180)
+    assert.equal(eff.sticker.cooldown, DEFAULTS.sticker.cooldown)
     assert.match(eff.personaPrompt, /喵/)
   })
 })

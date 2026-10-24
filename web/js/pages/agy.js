@@ -22,8 +22,8 @@ function expandIndicator() {
 function timelineEntries(history) {
   const events = [], tools = new Map()
   for (const event of history.events) {
-    if (['request', 'report', 'reply'].includes(event.kind)) continue
-    if (event.kind === 'progress' && ['正在准备共享附件', '模型已启动'].includes(event.text)) continue
+    if (['request', 'context', 'report', 'reply'].includes(event.kind)) continue
+    if (event.kind === 'progress' && ['正在准备共享附件', '正在启动宿主机工作进程', '模型已启动'].includes(event.text)) continue
     const key = event.kind === 'tool' ? `${event.step ?? ''}:${event.tool ?? ''}` : undefined
     if (key && tools.has(key)) {
       const first = tools.get(key)
@@ -128,6 +128,7 @@ export async function render(root, [id]) {
     const opened = new Map([...detail.querySelectorAll('details[data-disclosure]')].map(el => [el.dataset.disclosure, el.open]))
     const [label, kind] = STATUS[job.status] ?? [job.status, '']
     const replies = history.events.filter(event => event.kind === 'reply')
+    const contexts = history.events.filter(event => event.kind === 'context')
     const execution = timelineEntries(history)
     const duration = (job.updatedAt && job.createdAt) ? Math.max(0, job.updatedAt - job.createdAt) : null
     const totalTokens = (job.inputTokens ?? 0) + (job.outputTokens ?? 0)
@@ -141,6 +142,12 @@ export async function render(root, [id]) {
           h('span', `更新 ${fmt.ago(job.updatedAt)}`)),
         job.requesterText && job.requesterText !== job.task ? h('details', { class: 'quiet-details', 'data-disclosure': 'requester-text', open: opened.get('requester-text') },
           h('summary', '原始用户请求'), h('pre', { class: 'small mono' }, job.requesterText)) : null,
+        h('details', { class: 'quiet-details', 'data-disclosure': 'agy-prompt', open: opened.get('agy-prompt') },
+          h('summary', '实际发送给 AGY 的提示（已脱敏）'),
+          contexts.length ? contexts.map((event, index) => h('div',
+            h('p', { class: 'small muted' }, `第 ${index + 1} 次启动 · ${fmt.time(event.at)} · sandbox + turbo`),
+            h('pre', { class: 'small mono', style: { whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' } }, event.text)))
+            : h('p', { class: 'small muted' }, '旧任务未保存完整提示；新任务或继续执行后可查看路径映射及完整工作指令。')),
         h('div', { class: 'run-metrics' },
           metric('模型', job.modelId ?? '—', 'models'),
           metric('耗时', duration != null ? fmt.dur(duration) : '—', 'clock'),
@@ -187,7 +194,7 @@ export async function render(root, [id]) {
   }
 
   mount(root, h('div', { class: 'page-head' }, menuButton(), h('h1', '异步代理'), h('span', { class: 'spacer' }), connection, refreshButton),
-    h('p', { class: 'small muted', role: 'note' }, '异步代理任务在后台执行，可在这里查看执行过程、对话回复与结果。'),
+    h('p', { class: 'small muted', role: 'note' }, 'AGY 在宿主机以 sandbox + turbo 模式异步执行分析、编程和文件处理，拥有主机完整访问，无需机器人 VM。这里可查看进度与结果；图片反搜使用独立的 Google Lens 工具。'),
     h('div', { class: 'split computer-split' }, list, detail))
   drawList()
   mount(detail, card(null, h('div', { class: 'empty loading' }, spinner(), '加载执行记录…')))

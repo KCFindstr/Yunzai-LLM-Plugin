@@ -1,7 +1,8 @@
 import { get, post, put } from './api.js'
 import { badge, combo, h, mount, toast } from './ui.js'
+import { agyAccessWarning } from './agy-access.js'
 
-const STEPS = [['models', '提供商与模型'], ['search', '联网与阅读'], ['embedding', '向量检索'], ['jev', '思考判断 / Jev'], ['budgets', '用量预算'], ['sandbox', '代码沙盒'], ['computer', '电脑操作'], ['lens', '图片反搜'], ['agy', 'AGY']]
+const STEPS = [['models', '提供商与模型'], ['search', '联网与阅读'], ['embedding', '向量检索'], ['jev', '思考判断 / Jev'], ['budgets', '用量预算'], ['sandbox', '代码沙盒'], ['computer', '电脑操作'], ['lens', '图片反搜'], ['agy', 'AGY 宿主机工作进程']]
 const change = (path, value) => ({ path, value })
 const keyValue = value => value.includes(',') ? value.split(',').map(s => s.trim()).filter(Boolean) : value
 
@@ -251,19 +252,26 @@ export function setupWizard(initialData, onChange) {
     const c = data.effective.tools[section], prefix = `tools.${section}`
     const distro = field('WSL 发行版', c.distro, { required: true, pattern: '[A-Za-z0-9_.\\-]+' })
     const access = field('允许使用的人', c.access, { options: [['admin', '仅管理员'], ['all', '所有人']] })
+    access.control.name = `${section}Access`
+    const warning = kind === 'agy' ? agyAccessWarning() : null
+    if (warning) {
+      const updateWarning = () => { warning.hidden = access.control.value !== 'all' }
+      access.control.addEventListener('change', updateWarning); updateWarning()
+    }
     const executable = field('AGY 可执行文件', c.executable || '', { placeholder: '留空使用插件安装的 CLI' })
     const model = field('电脑操作模型', c.model || '', { options: [['', '默认聊天模型（需要支持图片和工具）'], ...data.effective.models.filter(m => m.vision !== false && m.toolUse !== false).map(m => [m.id, m.id])] })
     const state = status?.[kind]
     const checks = state?.checks?.map(check => h('li', badge(check.ok ? '通过' : '待配置', check.ok ? 'ok' : 'warn'), check.label))
-    const commands = kind === 'sandbox' ? [h('p', '在机器人所在电脑的插件目录运行：'), command(`npm run exec-setup -- --install --distro ${c.distro}`)] : [
-      h('p', kind === 'agy' ? 'AGY 需要桌面环境和本机已登录的 Antigravity 账号。在插件目录依次运行：'
-        : kind === 'lens' ? '图片反搜只需要桌面浏览器，无需 AGY CLI、登录或 AGY 服务。在插件目录运行：' : '先完成代码沙盒的发行版安装，再在插件目录配置持久桌面：'),
-      command(`npm run computer-setup -- --distro ${c.distro}`), kind === 'agy' ? command(`npm run agy-setup -- ${c.distro}`) : kind === 'lens' ? command(`npm run lens-setup -- --distro ${c.distro}`) : null,
+    const commands = kind === 'agy' ? [h('p', 'AGY 直接使用宿主机的 Antigravity 登录、工具和环境，以 sandbox + turbo 模式运行，无需 WSL、桌面或桥接。在插件目录运行：'),
+      command('npm run agy-setup'), h('p', { class: 'small muted' }, '安装脚本仅准备宿主机 CLI。请使用运行机器人的同一 Windows 账号完成 Antigravity 登录。图片路径通过提示中的映射解析，最终文件写入会话 out 目录并返回机器人路径。')]
+      : kind === 'sandbox' ? [h('p', '在机器人所在电脑的插件目录运行：'), command(`npm run exec-setup -- --install --distro ${c.distro}`)] : [
+      h('p', kind === 'lens' ? '图片反搜只需要桌面浏览器，无需 AGY CLI、登录或 AGY 服务。在插件目录运行：' : '先完成代码沙盒的发行版安装，再在插件目录配置持久桌面：'),
+      command(`npm run computer-setup -- --distro ${c.distro}`), kind === 'lens' ? command(`npm run lens-setup -- --distro ${c.distro}`) : null,
       h('p', { class: 'small muted' }, '已有正常运行的环境可直接检查。安装命令可能需要几分钟，并会短暂重启桌面服务。'),
     ]
     return [h('p', { class: 'muted' }, '此步骤可跳过。环境未就绪时，对应工具和依赖它的技能不会提供给模型。'),
-      form(grid(distro.view, access.view, kind === 'agy' ? executable.view : null, kind === 'computer' ? model.view : null), () => save([
-        change(`${prefix}.distro`, distro.control.value.trim()), change(`${prefix}.access`, access.control.value),
+      form([grid(kind === 'agy' ? null : distro.view, access.view, kind === 'agy' ? executable.view : null, kind === 'computer' ? model.view : null), warning], () => save([
+        ...(kind === 'agy' ? [] : [change(`${prefix}.distro`, distro.control.value.trim())]), change(`${prefix}.access`, access.control.value),
         ...(kind === 'agy' ? [change(`${prefix}.executable`, executable.control.value.trim())] : []),
         ...(kind === 'computer' ? [change(`${prefix}.model`, model.control.value)] : []),
       ]), '保存设置并检查'),
@@ -271,7 +279,7 @@ export function setupWizard(initialData, onChange) {
       h('div', { class: 'row' }, button('重新检查环境', () => run(async () => { status = await get('/api/setup?refresh=1'); draw() })),
         h('button', { type: 'button', class: 'btn primary', disabled: !state?.ready || state?.enabled, onclick: () => run(() => save([change(`${prefix}.enable`, true)])) }, state?.enabled ? '已启用' : '启用'),
         state?.enabled ? button('停用', () => run(() => save([change(`${prefix}.enable`, false)])), 'ghost') : null),
-      kind === 'agy' ? h('p', { class: 'small muted' }, '环境检查不调用付费模型。要验证 CLI 登录和实际操作，可在本机运行 node cli/agy-verify.mjs（会使用 AGY 额度）。') : null]
+      kind === 'agy' ? h('p', { class: 'small muted' }, '检查仅验证宿主机 CLI 可运行，不检查账号、模型权限或文件访问，也不调用模型。node cli/agy-verify.mjs 可测试实际异步任务（会使用 AGY 额度）。') : null]
   }
 
   function draw() {

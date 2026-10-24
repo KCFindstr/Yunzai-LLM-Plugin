@@ -43,7 +43,6 @@ exec setpriv --reuid=pc --regid=pc --clear-groups --no-new-privs \
  --dir /mnt/wsl --ro-bind /usr/local/lib/llm-desktop/resolv.conf /mnt/wsl/resolv.conf --symlink usr/bin /bin --symlink usr/sbin /sbin \
  --symlink usr/lib /lib --symlink usr/lib64 /lib64 --proc /proc --dev /dev --tmpfs /tmp --tmpfs /run \
  --bind /var/lib/llm-desktop/disk/home /home/pc --bind /var/lib/llm-desktop/disk/work /work \
- --bind-try /var/lib/llm-desktop/agy-share /work/projects \
  --ro-bind /var/lib/llm-images /work/attachments \
  --bind /var/lib/llm-desktop/control /control --chdir /work --clearenv \
  --setenv PATH /usr/local/bin:/usr/bin:/bin --setenv HOME /home/pc --setenv USER pc \

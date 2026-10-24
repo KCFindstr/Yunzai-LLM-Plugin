@@ -24,6 +24,7 @@ it('renders AGY navigation, results, safe tool history, live refresh and cancell
   completed.report = '找到了图片来源：https://example.org/art'
   completed.inputTokens = 4200; completed.outputTokens = 200
   recordAgyEvent(completed.id, { kind: 'request', text: completed.task })
+  recordAgyEvent(completed.id, { kind: 'context', text: 'Path mapping: /work/attachments/<rest> = images/<rest>; /work/agy/aabbccddee/out/<rest> = out/<rest>. Copy brain/ artifacts to out/.' })
   recordAgyEvent(completed.id, { kind: 'response', text: '正在核对图片来源', step: 1 })
   recordAgyEvent(completed.id, { kind: 'tool', tool: 'search_web', phase: 'completed', text: '匹配到公开图片页面', args: '<script>window.__agy_xss=true</script> alice@example.com password=secret-password' })
   recordAgyEvent(completed.id, { kind: 'reply', text: '我找到了这张图的来源。', delivery: 'sent' })
@@ -64,6 +65,11 @@ it('renders AGY navigation, results, safe tool history, live refresh and cancell
     const body = await page.evaluate(() => document.body.innerText)
     assert.match(body, /执行结果/); assert.match(body, /我找到了这张图的来源/); assert.match(body, /已发送/)
     assert.ok(!body.includes('private-owner'))
+    await page.click('details[data-disclosure="agy-prompt"] > summary')
+    const prompt = await page.$eval('details[data-disclosure="agy-prompt"]', (el: Element) => el.textContent!)
+    assert.match(prompt, /Path mapping/)
+    assert.match(prompt, /\/work\/attachments/)
+    assert.match(prompt, /Copy brain/)
     await page.click('.tool-disclosure > summary')
     await page.click('.computer-arguments summary')
     const expanded = await page.evaluate(() => document.body.innerText)

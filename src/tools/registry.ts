@@ -26,6 +26,8 @@ export interface TurnState {
   agyJob?: string
   lensSearches?: number
   asyncResult?: { kind: 'agy'; id: string }
+  /** Exact initiating model request options, kept in memory for asynchronous completion. */
+  sessionConfig?: import('../chat/agent.ts').SessionRequestConfig
   /** Current/quoted image bytes already loaded for this turn; never persisted in the chat transcript. */
   inputImages?: ImagePart[]
   imageScope?: string
@@ -109,8 +111,6 @@ class Registry {
   /** Tools offered this turn, in deterministic order (stable tool list = stable prompt cache). */
   forTurn(ctx: ToolCtx, hide: Set<string> = new Set()): ToolDef[] {
     if (!ctx.eff.tools.enable || ctx.eff.chat?.maxToolRounds === 0) return []
-    // Worker data may only be summarized; it must never authorize side effects or bypass privacy filtering.
-    if (ctx.turn.asyncResult) return []
     const disabled = new Set(ctx.eff.tools.disabled ?? [])
     return this.all().filter(d => !disabled.has(d.name) && !hide.has(d.name) && (!d.budgetExempt || helperToolLimit(ctx, d.name) > 0) && (ctx.eff.chat?.maxToolCalls !== 0 || d.budgetExempt) && (d.available?.(ctx) ?? true) && runtimeToolReady(d.name, ctx.eff))
   }
@@ -137,6 +137,9 @@ class Registry {
         }
         // Reserve synchronously before awaiting: parallel calls cannot overrun the global allowance.
         const def = allowed.get(call.name)
+        // Keep declarations/system identical for prompt caching; enforce completion actions at execution.
+        if (ctx.turn.asyncResult && !['read_image', 'send_image'].includes(call.name))
+          return done({ id: call.id, name: call.name, content: '后台结果只能整理回复或读取/发送图片，不能授权其他工具操作', isError: true })
         const helper = this.tools.get(call.name)?.budgetExempt === true
         if (!helper && (ctx.turn.toolCalls ?? 0) >= maxCalls) return done({ id: call.id, name: call.name, content: '普通工具的全局调用次数已用完；仍可使用辅助工具，或直接给出最终回复', isError: true })
         if (helper && helperToolRemaining(ctx, call.name) === 0) return done({ id: call.id, name: call.name, content: '本次回复该工具调用次数已用完', isError: true })

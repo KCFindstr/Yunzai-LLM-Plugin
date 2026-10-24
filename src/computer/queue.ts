@@ -124,7 +124,7 @@ export class ComputerQueue {
       } catch (error: any) {
         if (job.status as JobStatus === 'cancelled' || this.stopped) return
         job.status = 'failed'
-        result = { report: `电脑任务未完成：${String(error?.message ?? error).slice(0, 300)}` }
+        result = { report: typeof error?.report === 'string' ? error.report.slice(0, 20000) : `电脑任务未完成：${String(error?.message ?? error).slice(0, 300)}` }
       }
       job.report = result.report
       job.updatedAt = Date.now()

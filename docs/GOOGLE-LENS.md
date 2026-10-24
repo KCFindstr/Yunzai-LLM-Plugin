@@ -4,7 +4,7 @@ Load the `google-lens` skill and call `google_lens(path="/work/attachments/<conv
 
 The model passes the exact stored path from a `[图片N:路径]` label (current, quoted or earlier images of this chat). No URL, command or browser script is accepted. Unknown, expired or other-chat paths fail before invoking the VM. Each reply permits two searches.
 
-Enable `tools.googleLens.enable`, set `access` (`admin` by default, or `all`) and `distro` (`yunzai-llm-sandbox` by default). These settings appear in the web configuration page independently of AGY and computer-use enablement. The existing VM shared-folder broker and Playwright must be installed (`npm run agy-setup` installs this shared infrastructure). That setup briefly restarts the desktop; routine Lens calls do not restart it or launch AGY.
+Enable `tools.googleLens.enable`, set `access` (`admin` by default, or `all`) and `distro` (`yunzai-llm-sandbox` by default). These settings appear in the web configuration page independently of AGY and computer-use enablement. Install the desktop first, then run `npm run lens-setup -- --distro <distro>` for the Lens browser dependencies. AGY setup only installs a host CLI and has no VM role. Routine Lens calls do not restart the desktop or launch AGY.
 
 The fixed-purpose broker opens only the requested file from the read-only image store, then uploads it through Google Images/Lens in the VM desktop browser. Its Google sign-in is the one established through RustDesk. Cookies, account information, raw HTML, other tabs and screenshots never enter the chatbot result. Public result text passes through the existing privacy filter before entering model context or debug logs.
 

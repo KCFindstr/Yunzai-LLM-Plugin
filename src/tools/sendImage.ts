@@ -54,7 +54,7 @@ export function registerSendImageTool(download = downloadPublicImage) {
   registry.register({
     name: 'send_image', budgetExempt: true, source: 'builtin',
     description: '将已保存 path 或公网直链 url 图片加入最终回复，发送原图而非网址。支持 PNG/JPEG/GIF/WebP；会下载并验证真实图片，拒绝网页、损坏图片及内网地址。仅在确实要给用户看图时调用；成功后图片随最终文字回复发送，不要声称已经送达。',
-    parameters: { type: 'object', properties: { path: { type: 'string', description: '图片路径（本对话图片标注中的 /work/attachments 路径，或本次回复代码工作目录中的文件）；与 url 二选一' }, url: { type: 'string', description: '公开服务器上图片的完整 http(s) 直链，不是网页链接；与 path 二选一' } }, additionalProperties: false },
+    parameters: { type: 'object', properties: { path: { type: 'string', description: '图片路径（本对话 /work/attachments、AGY 返回的 /work/agy/<会话>/out/...，或本次回复代码目录中的文件）；与 url 二选一' }, url: { type: 'string', description: '公开服务器上图片的完整 http(s) 直链，不是网页链接；与 path 二选一' } }, additionalProperties: false },
     limit: ctx => `最多请求 ${helperToolLimit(ctx, 'send_image')} 次，最多附加 ${MAX_IMAGES_PER_TURN} 张回复图片`,
     remaining: ctx => `共享图片余量 ${Math.max(0, MAX_IMAGES_PER_TURN - ctx.turn.images.length)} 张`,
     async run(args, ctx) {

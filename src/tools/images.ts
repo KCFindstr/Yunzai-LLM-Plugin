@@ -11,7 +11,7 @@ export function registerImageTools() {
   setInterval(pruneImages, 3600_000).unref()
   registry.register({
     name: 'read_image', budgetExempt: true, source: 'builtin',
-    description: '按图片的本地路径读取原图，作为原生图片加入视觉上下文；不会发送给用户。',
+    description: '按本对话图片库、AGY 输出（/work/agy/<会话>/out/...）或本次回复代码目录中的路径读取原图，作为原生图片加入视觉上下文；不会发送给用户。',
     parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'], additionalProperties: false },
     available: ctx => ctx.model.vision !== false,
     async run(args, ctx) {
