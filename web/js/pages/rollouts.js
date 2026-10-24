@@ -1,6 +1,6 @@
 import { enc, get } from '../api.js'
 import { menuButton } from '../main.js'
-import { badge, card, empty, fmt, h, icon, modal, mount, spinner, textBlock, mentionText } from '../ui.js'
+import { badge, card, empty, fmt, h, icon, modal, mount, pager, spinner, textBlock, mentionText } from '../ui.js'
 import { parseRolloutJson } from '../rollout-data.js'
 import { contextInspector } from '../context-inspector.js'
 import { initialPromptText } from '../context-view.js'
@@ -143,10 +143,12 @@ export async function render(root, [id]) {
   let selected = id ?? rollouts[0]?.id
   let stopped = false, busy = false, snapshot = '', listSnapshot = '', filter = ''
   const items = h('div')
+  const pages = pager(() => { listSnapshot = ''; drawList() }, { anchor: () => list })
+  pages.reveal(rollouts.findIndex(r => r.id === selected))
   const list = h('div', { class: 'pane-list computer-job-list rollout-list' },
     h('div', { class: 'section-heading' }, h('h2', '执行列表')),
     h('input', { type: 'search', placeholder: '筛选输入、会话或模型…', 'aria-label': '筛选执行记录', style: { width: '100%', marginBottom: '12px' }, oninput: e => {
-      filter = e.target.value.toLowerCase(); drawList()
+      filter = e.target.value.toLowerCase(); pages.reset(); drawList()
     } }), items)
   const detail = h('div', { class: 'computer-job-detail rollout-detail' })
   const connection = h('span', { class: 'small muted', role: 'status' }, '每 3 秒自动更新')
@@ -157,14 +159,14 @@ export async function render(root, [id]) {
     if (key === listSnapshot) return
     listSnapshot = key
     const visible = rollouts.filter(r => !filter || `${r.input} ${r.label} ${r.model ?? ''} ${r.id}`.toLowerCase().includes(filter))
-    mount(items, visible.length ? visible.map(r => {
+    mount(items, visible.length ? pages.slice(visible).map(r => {
       const [label, kind] = STATUS[r.status] ?? [r.status, '']
       return h('a', { class: `list-item computer-job ${r.id === selected ? 'sel' : ''}`, href: `#/rollouts/${enc(r.id)}`, 'aria-current': r.id === selected ? 'page' : undefined },
         h('div', { class: 'row' }, badge(label, kind), h('span', { class: 'small muted right' }, fmt.short(r.createdAt))),
         h('strong', { class: 'clamp' }, mentionText(r.input)),
         h('span', { class: 'small muted clamp' }, r.label),
         h('span', { class: 'small muted' }, [r.model, `${r.steps} 轮`, fmt.usd(r.cost)].filter(Boolean).join(' · ')))
-    }) : empty(filter ? '没有匹配的执行记录' : '还没有执行记录。新的聊天请求会自动记录。'))
+    }) : empty(filter ? '没有匹配的执行记录' : '还没有执行记录。新的聊天请求会自动记录。'), visible.length ? pages.el : null)
   }
 
   async function drawDetail() {

@@ -1,6 +1,6 @@
 import { del, enc, get, post, put } from '../api.js'
 import { menuButton } from '../main.js'
-import { act, badge, card, confirmDanger, empty, fmt, h, meter, mount, promptFields, stat, tabs } from '../ui.js'
+import { act, badge, card, confirmDanger, empty, fmt, h, meter, mount, pager, promptFields, stat, tabs } from '../ui.js'
 
 export async function render(root, [scopeArg, keyArg]) {
   const data = await get('/api/memory')
@@ -10,9 +10,11 @@ export async function render(root, [scopeArg, keyArg]) {
   let filter = ''
 
   const list = h('div', { class: 'pane-list' })
+  const pages = pager(() => drawList(), { anchor: () => list })
+  pages.reveal(owners.indexOf(selected))
   const drawList = () => mount(list,
-    h('input', { type: 'search', placeholder: scope === 'group' ? '筛选群…' : '筛选用户…', value: filter, style: { width: '100%', marginBottom: '8px' }, oninput: e => { filter = e.target.value; drawList(); list.querySelector('input').focus() } }),
-    owners.filter(o => !filter || `${o.name ?? ''} ${o.key} ${o.entries.map(e => e.text).join(' ')}`.toLowerCase().includes(filter.toLowerCase())).map(o => h('div', {
+    h('input', { type: 'search', placeholder: scope === 'group' ? '筛选群…' : '筛选用户…', value: filter, style: { width: '100%', marginBottom: '8px' }, oninput: e => { filter = e.target.value; pages.reset(); drawList(); list.querySelector('input').focus() } }),
+    pages.slice(owners.filter(o => !filter || `${o.name ?? ''} ${o.key} ${o.entries.map(e => e.text).join(' ')}`.toLowerCase().includes(filter.toLowerCase()))).map(o => h('div', {
       class: `list-item click ${o === selected ? 'sel' : ''}`,
       onclick: () => { location.hash = `#/memory/${scope}/${enc(o.key)}` },
     },
@@ -21,6 +23,7 @@ export async function render(root, [scopeArg, keyArg]) {
       h('div', { style: { marginTop: '6px' } }, meter(o.usage.chars, o.usage.maxChars)),
     )),
     owners.length ? null : empty(scope === 'group' ? '还没有群记忆' : '还没有用户记忆'),
+    pages.el,
   )
   drawList()
 

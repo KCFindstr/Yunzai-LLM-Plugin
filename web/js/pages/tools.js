@@ -1,6 +1,6 @@
 import { del, enc, get, post, put } from '../api.js'
 import { menuButton } from '../main.js'
-import { act, badge, card, confirmDanger, empty, fmt, h, modal, mount, promptFields, switchEl, tabs } from '../ui.js'
+import { act, badge, card, confirmDanger, empty, fmt, h, modal, mount, pager, promptFields, switchEl, tabs } from '../ui.js'
 
 export async function render(root, [sub]) {
   const mode = ['skills', 'commands'].includes(sub) ? sub : 'tools'
@@ -57,16 +57,16 @@ export async function render(root, [sub]) {
   const c = await get('/api/commands')
   let filter = ''
   const body = h('tbody')
-  const draw = () => mount(body, c.entries
-    .filter(e => !filter || `${e.cmd} ${e.desc} ${e.plugin ?? ''}`.toLowerCase().includes(filter.toLowerCase()))
-    .slice(0, 500)
+  const pages = pager(() => draw(), { size: 100 })
+  const draw = () => mount(body, pages.slice(c.entries
+    .filter(e => !filter || `${e.cmd} ${e.desc} ${e.plugin ?? ''}`.toLowerCase().includes(filter.toLowerCase())))
     .map(e => h('tr', h('td', { class: 'mono small' }, e.cmd), h('td', { class: 'small' }, e.desc), h('td', { class: 'small muted' }, e.plugin ?? ''), h('td', e.verified ? badge('已验证', 'ok') : badge('未验证')))))
   draw()
   mount(root, head, t,
     h('div', { class: 'row', style: { marginBottom: '12px' } },
       h('span', { class: 'small muted' }, `${c.info.verified}/${c.info.entries} 条已验证 · ${c.info.rules} 条规则${c.info.scannedAt ? ` · ${fmt.ago(c.info.scannedAt)}扫描` : ''}`),
-      h('input', { type: 'search', placeholder: '搜索指令…', class: 'right', oninput: e => { filter = e.target.value; draw() } }),
+      h('input', { type: 'search', placeholder: '搜索指令…', class: 'right', oninput: e => { filter = e.target.value; pages.reset(); draw() } }),
       h('button', { class: 'btn', onclick: () => act(() => post('/api/actions/scan-commands'), r => r.message).then(() => render(root, ['commands'])) }, '重新扫描')),
-    card(null, h('div', { class: 'table-wrap' }, h('table', h('thead', h('tr', h('th', '指令'), h('th', '说明'), h('th', '插件'), h('th', ''))), body))),
+    card(null, h('div', { class: 'table-wrap' }, h('table', h('thead', h('tr', h('th', '指令'), h('th', '说明'), h('th', '插件'), h('th', ''))), body)), pages.el),
   )
 }

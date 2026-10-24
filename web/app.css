@@ -278,6 +278,9 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .split > .pane-list { max-height: calc(100vh - 180px); overflow-y: auto; position: sticky; top: 20px; scrollbar-width: thin; }
 
 /* Stickers */
+.pager { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.pager-pos { display: inline-flex; align-items: center; gap: 6px; }
+.pager-pos select { padding: 3px 8px; font-size: 12px; }
 .sticker-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 160px), 1fr)); gap: 16px; }
 .sticker { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--panel); display: flex; flex-direction: column; }
 .sticker .img { aspect-ratio: 1; background: var(--panel-2); display: grid; place-items: center; overflow: hidden; }

@@ -1,6 +1,6 @@
 import { del, enc, get, post, put } from '../api.js'
 import { menuButton } from '../main.js'
-import { act, badge, card, confirmDanger, empty, fmt, h, modal, mount, toast } from '../ui.js'
+import { act, badge, card, confirmDanger, empty, fmt, h, modal, mount, pager, toast } from '../ui.js'
 
 const MAX_BYTES = 10 * 1024 * 1024
 const FILTERS = [['all', '全部'], ['unindexed', '未识别'], ['incomplete', '信息不完整'], ['image', '图片'], ['mface', '商城表情']]
@@ -12,6 +12,7 @@ export async function render(root) {
   let list = await get('/api/stickers')
   const selected = new Set()
   const grid = h('div', { class: 'sticker-grid' })
+  const pages = pager(() => draw(), { size: 60, anchor: () => grid })
   const queue = h('div', { class: 'col', style: { gap: '6px' } })
   const queueCard = card('上传进度', queue)
   queueCard.style.display = 'none'
@@ -41,7 +42,7 @@ export async function render(root) {
     fillBtn.textContent = `补全缺失信息（${incomplete}）`
     delSelBtn.disabled = !selected.size
     delSelBtn.textContent = selected.size ? `删除选中（${selected.size}）` : '删除选中'
-    mount(grid, items.length ? items.map(tile) : h('div', { style: { gridColumn: '1 / -1' } }, empty(list.length ? '没有匹配的表情' : '还没有表情包：把图片拖到这里，或点「上传」')))
+    mount(grid, items.length ? pages.slice(items).map(tile) : h('div', { style: { gridColumn: '1 / -1' } }, empty(list.length ? '没有匹配的表情' : '还没有表情包：把图片拖到这里，或点「上传」')))
   }
 
   function tile(s) {
@@ -230,14 +231,15 @@ export async function render(root) {
     dropZone,
     queueCard,
     h('div', { class: 'row', style: { margin: '16px 0 12px' } },
-      h('input', { type: 'search', placeholder: '搜索名称、描述、标签、图中文字…', value: view.q, style: { minWidth: '240px' }, oninput: e => { view.q = e.target.value; draw() } }),
-      h('select', { onchange: e => { view.filter = e.target.value; draw() } }, FILTERS.map(([v, l]) => h('option', { value: v, selected: v === view.filter }, l))),
-      h('select', { onchange: e => { view.sort = e.target.value; draw() } }, SORTS.map(([v, l]) => h('option', { value: v, selected: v === view.sort }, l))),
+      h('input', { type: 'search', placeholder: '搜索名称、描述、标签、图中文字…', value: view.q, style: { minWidth: '240px' }, oninput: e => { view.q = e.target.value; pages.reset(); draw() } }),
+      h('select', { onchange: e => { view.filter = e.target.value; pages.reset(); draw() } }, FILTERS.map(([v, l]) => h('option', { value: v, selected: v === view.filter }, l))),
+      h('select', { onchange: e => { view.sort = e.target.value; pages.reset(); draw() } }, SORTS.map(([v, l]) => h('option', { value: v, selected: v === view.sort }, l))),
       countEl,
       h('span', { class: 'spacer', style: { flex: 1 } }),
       h('button', { class: 'btn', onclick: () => { const items = visible(); const all = items.every(s => selected.has(s.id)); for (const s of items) all ? selected.delete(s.id) : selected.add(s.id); draw() } }, '全选/取消'),
       fillBtn, indexBtn, delSelBtn),
     grid,
+    pages.el,
   )
   draw()
 

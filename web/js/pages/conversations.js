@@ -1,13 +1,13 @@
 import { del, enc, get } from '../api.js'
 import { menuButton } from '../main.js'
-import { act, badge, card, confirmDanger, empty, fmt, h, icon, modal, mount, tabs, mentionText, responseText } from '../ui.js'
+import { act, badge, card, confirmDanger, empty, fmt, h, icon, modal, mount, paged, pager, tabs, mentionText, responseText } from '../ui.js'
 
 /** Recent turns table, shared with the overview page. */
 export function turnList(turns, { showConv = true } = {}) {
   if (!turns.length) return empty('还没有对话记录')
-  return h('div', { class: 'table-wrap' }, h('table',
+  return paged(turns, page => h('div', { class: 'table-wrap' }, h('table',
     h('thead', h('tr', h('th', '时间'), showConv ? h('th', '会话 / 发言人') : null, h('th', '内容'), h('th', '模型'), h('th', { class: 'num' }, '耗时'), h('th', { class: 'num' }, '花费'))),
-    h('tbody', turns.map(t => h('tr', { class: 'clickable-tr', onclick: () => showTurn(t) },
+    h('tbody', page.map(t => h('tr', { class: 'clickable-tr', onclick: () => showTurn(t) },
       h('td', { class: 'small muted', style: { whiteSpace: 'nowrap' } }, fmt.short(t.at)),
       showConv ? h('td', { class: 'small' }, h('a', { href: `#/conversations/${enc(t.conv)}`, onclick: e => e.stopPropagation() }, t.label ?? t.conv), h('div', { class: 'muted' }, t.userName ?? t.userId ?? '')) : null,
       h('td', { style: { maxWidth: '520px' } },
@@ -19,7 +19,7 @@ export function turnList(turns, { showConv = true } = {}) {
       h('td', { class: 'num small' }, fmt.dur(t.ms)),
       h('td', { class: 'num small', title: t.tokens?.inputIncomplete ? '历史输入与缓存用量可能缺失，花费可能偏低' : '' }, fmt.usd(t.cost), t.tokens?.inputIncomplete ? h('div', { class: 'small muted' }, '已报告') : null),
     ))),
-  ))
+  )))
 }
 
 function showTurn(t) {
@@ -54,10 +54,12 @@ export async function render(root, [sub]) {
   const items = h('div')
   let filter = ''
   let selectedKey = sub && sub !== 'turns' ? sub : sessions[0]?.key
+  const pages = pager(() => drawItems(selectedKey), { anchor: () => list })
+  pages.reveal(sessions.findIndex(s => s.key === selectedKey))
 
   function drawItems(selected) {
     const visible = sessions.filter(s => !filter || `${s.label} ${s.key} ${s.summary ?? ''}`.toLowerCase().includes(filter))
-    mount(items, visible.length ? visible.map(s => h('div', {
+    mount(items, visible.length ? pages.slice(visible).map(s => h('div', {
       class: `list-item computer-job click ${s.key === selected ? 'sel' : ''}`,
       onclick: () => { location.hash = `#/conversations/${enc(s.key)}` },
     },
@@ -69,7 +71,7 @@ export async function render(root, [sub]) {
         s.vectors ? badge(`向量 ${s.vectors}`, 'accent') : null),
       h('span', { class: 'small muted mono clamp' }, s.key),
       s.summary ? h('div', { class: 'small muted clamp', style: { marginTop: '2px' } }, s.summary) : null,
-    )) : empty(filter ? '没有匹配的会话' : '还没有会话'))
+    )) : empty(filter ? '没有匹配的会话' : '还没有会话'), visible.length ? pages.el : null)
   }
 
   const searchInput = h('input', {
@@ -77,7 +79,7 @@ export async function render(root, [sub]) {
     placeholder: '筛选会话或摘要…',
     'aria-label': '筛选会话',
     style: { width: '100%', marginBottom: '10px' },
-    oninput: e => { filter = e.target.value.toLowerCase(); drawItems(selectedKey) },
+    oninput: e => { filter = e.target.value.toLowerCase(); pages.reset(); drawItems(selectedKey) },
   })
   const list = h('div', { class: 'pane-list computer-job-list rollout-list' }, searchInput, items)
 
@@ -102,7 +104,7 @@ async function drawDetail(el, key, refresh) {
     card(h('span', { class: 'card-title' }, icon('memory'), '滚动摘要'),
       s.summary ? h('pre', { class: 'small' }, s.summary) : empty('还没有摘要（历史未超出上限时不生成）')),
     card(h('span', { class: 'card-title' }, icon('clock'), `每日概要（${s.days.length} 天）`),
-      s.days.length ? [...s.days].reverse().map(d => h('div', { class: 'list-item' },
+      s.days.length ? paged([...s.days].reverse(), page => page.map(d => h('div', { class: 'list-item' },
         h('div', { class: 'row small' },
           h('b', d.day),
           h('span', { class: 'muted' }, `由 ${d.sources.length} 段整理 · ${fmt.ago(d.at)}更新`),
@@ -112,9 +114,9 @@ async function drawDetail(el, key, refresh) {
           } }, '删除'),
         ),
         h('pre', { class: 'small', style: { marginTop: '6px' } }, d.text),
-      )) : empty('还没有每日概要：每天结束后，当天的档案会在后台整理成一条概要')),
+      )), { size: 10 }) : empty('还没有每日概要：每天结束后，当天的档案会在后台整理成一条概要')),
     card(h('span', { class: 'card-title' }, icon('layers'), `旧聊天档案（${s.archive.length} 段）`),
-      s.archive.length ? [...s.archive].reverse().map(a => h('div', { class: 'list-item' },
+      s.archive.length ? paged([...s.archive].reverse(), page => page.map(a => h('div', { class: 'list-item' },
         h('div', { class: 'row small' },
           h('span', { class: 'muted' }, fmt.time(a.at)),
           a.chat ? badge('群聊', 'accent') : null,
@@ -125,7 +127,7 @@ async function drawDetail(el, key, refresh) {
           } }, '删除'),
         ),
         h('pre', { class: 'small', style: { marginTop: '6px' } }, a.text),
-      )) : empty('还没有档案'),
+      )), { size: 10 }) : empty('还没有档案'),
     ),
     card(h('span', { class: 'card-title' }, icon('chat'), `当前上下文（${s.messages.length / 2} 轮）`),
       s.messages.length ? h('div', { class: 'chat' }, s.messages.map((m, i) => m.role === 'assistant' ? responseText(m.text, 'bubble assistant', `message:${i}`) : h('div', { class: `bubble ${m.role}` }, mentionText(m.text)))) : empty('当前没有上下文（空闲超时后会重新开始）'),

@@ -1,6 +1,6 @@
 import { enc, get, post } from '../api.js'
 import { menuButton } from '../main.js'
-import { act, badge, card, confirmDanger, empty, fmt, h, icon, modal, mount, spinner, textBlock, mentionText } from '../ui.js'
+import { act, badge, card, confirmDanger, empty, fmt, h, icon, modal, mount, pager, spinner, textBlock, mentionText } from '../ui.js'
 
 const STATUS = {
   queued: ['排队中', 'accent'], running: ['执行中', 'accent'], waiting: ['等待回复', 'warn'],
@@ -71,10 +71,12 @@ export async function render(root, [id]) {
   let selected = jobs.find(job => job.id === id) ?? jobs[0]
   let stopped = false, busy = false, snapshot = '', listSnapshot = '', filter = ''
   const items = h('div')
+  const pages = pager(() => { listSnapshot = ''; drawList() }, { anchor: () => list })
+  pages.reveal(jobs.indexOf(selected))
   const list = h('div', { class: 'pane-list computer-job-list rollout-list' },
     h('div', { class: 'section-heading' }, h('h2', '任务列表'), badge(`${jobs.length} 个`)),
     h('input', { type: 'search', placeholder: '筛选任务、模型或 ID…', 'aria-label': '筛选电脑任务', style: { width: '100%', marginBottom: '12px' }, oninput: e => {
-      filter = e.target.value.toLowerCase(); drawList()
+      filter = e.target.value.toLowerCase(); pages.reset(); drawList()
     } }), items)
   const detail = h('div', { class: 'computer-job-detail rollout-detail' })
   const connection = h('span', { class: 'small muted', role: 'status' }, '每 3 秒自动更新')
@@ -85,7 +87,7 @@ export async function render(root, [id]) {
     if (key === listSnapshot) return
     listSnapshot = key
     const visible = jobs.filter(job => !filter || `${job.task} ${job.id} ${job.modelId ?? ''} ${job.owner ?? ''}`.toLowerCase().includes(filter))
-    mount(items, visible.length ? visible.map(job => {
+    mount(items, visible.length ? pages.slice(visible).map(job => {
       const [label, kind] = STATUS[job.status] ?? [job.status, '']
       return h('a', { class: `list-item computer-job ${job.id === selected?.id ? 'sel' : ''}`, href: `#/computer/${enc(job.id)}`, 'aria-current': job.id === selected?.id ? 'page' : undefined },
         h('div', { class: 'row' }, badge(label, kind), h('span', { class: 'small muted right' }, fmt.short(job.createdAt))),
@@ -93,7 +95,7 @@ export async function render(root, [id]) {
         h('span', { class: 'small muted mono clamp' }, job.id),
         h('span', { class: 'small muted' }, [job.modelId, job.steps != null ? `${job.steps} 轮` : null, job.costUsd != null ? fmt.usd(job.costUsd) : null].filter(Boolean).join(' · ')),
       )
-    }) : empty(filter ? '没有匹配的电脑任务' : '还没有电脑任务'))
+    }) : empty(filter ? '没有匹配的电脑任务' : '还没有电脑任务'), visible.length ? pages.el : null)
   }
 
   async function drawDetail() {

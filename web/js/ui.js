@@ -269,6 +269,56 @@ export function switchEl(checked, onchange, label = '启用或停用') {
   return h('label', { class: 'switch' }, input, h('span'))
 }
 
+/**
+ * Client-side pagination for long lists. `slice(items)` clamps the page and returns the visible part; `el` is the
+ * nav (hidden when everything fits on one page). Page changes call `onchange` and bring `anchor` back to its top.
+ */
+export function pager(onchange, { size = 50, anchor } = {}) {
+  let page = 0, pages = 1, total = 0
+  const el = h('nav', { class: 'pager', 'aria-label': '分页' })
+  const go = p => {
+    page = Math.max(0, Math.min(pages - 1, p))
+    onchange()
+    const top = anchor?.() ?? el.parentElement
+    if (top?.scrollHeight > top?.clientHeight) top.scrollTop = 0
+    if (top?.getBoundingClientRect().top < 0) top.scrollIntoView({ block: 'start' })
+  }
+  const draw = () => {
+    el.hidden = pages <= 1
+    if (el.hidden) return el.replaceChildren()
+    mount(el,
+      h('button', { class: 'btn sm', disabled: page === 0, 'aria-label': '上一页', onclick: () => go(page - 1) }, '‹ 上一页'),
+      h('label', { class: 'small muted pager-pos' }, '第',
+        h('select', { 'aria-label': '页码', onchange: e => go(Number(e.target.value)) },
+          Array.from({ length: pages }, (_, i) => h('option', { value: i, selected: i === page }, i + 1))),
+        `/ ${pages} 页 · 共 ${fmt.num(total)} 条`),
+      h('button', { class: 'btn sm', disabled: page >= pages - 1, 'aria-label': '下一页', onclick: () => go(page + 1) }, '下一页 ›'))
+  }
+  return {
+    el,
+    slice(items) {
+      total = items.length
+      pages = Math.max(1, Math.ceil(total / size))
+      page = Math.min(page, pages - 1)
+      draw()
+      return items.slice(page * size, (page + 1) * size)
+    },
+    reset() { page = 0 },
+    /** Jump to the page holding `index` (e.g. the selected item); ignored when not found. */
+    reveal(index) { if (index >= 0) page = Math.floor(index / size) },
+  }
+}
+
+/** A self-contained paged list: `render(pageItems)` returns the content for one page. */
+export function paged(items, render, options) {
+  const body = h('div')
+  const p = pager(() => draw(), options)
+  const wrap = h('div', { class: 'paged' }, body, p.el)
+  const draw = () => mount(body, render(p.slice(items)))
+  draw()
+  return wrap
+}
+
 export function tabs(items, active, onpick) {
   return h('div', { class: 'tabs' }, items.map(([id, label]) => h('button', { class: id === active ? 'on' : '', onclick: () => onpick(id) }, label)))
 }

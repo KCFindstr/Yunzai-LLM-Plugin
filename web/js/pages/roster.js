@@ -1,6 +1,6 @@
 import { del, enc, get, put } from '../api.js'
 import { menuButton } from '../main.js'
-import { act, badge, card, empty, fmt, h, modal, mount, promptFields, toast } from '../ui.js'
+import { act, badge, card, empty, fmt, h, modal, mount, pager, promptFields, toast } from '../ui.js'
 
 /**
  * Names for platform IDs. Configured names (`names`, or `groups.<id>.names` for one group) override what the
@@ -32,6 +32,9 @@ async function showRecent(scope, p) {
 export async function render(root) {
   const scopes = await get('/api/roster')
   const body = h('div')
+  // one pager per scope, kept across redraws so saving a name doesn't jump back to page 1
+  const pagers = new Map()
+  const pagerFor = key => pagers.get(key) ?? pagers.set(key, pager(() => draw())).get(key)
 
   const row = (scope, p) => {
     const effective = p.group || p.global || p.observed
@@ -77,7 +80,7 @@ export async function render(root) {
       return card(h('span', scope.label, ' ', scope.groupId ? h('span', { class: 'small muted mono' }, scope.groupId) : null, ' ', badge(`${people.length} 人`)),
         h('div', { class: 'table-wrap' }, h('table',
           h('thead', h('tr', h('th', '平台ID'), h('th', '当前称呼'), h('th', '最近出现'), h('th', '设置称呼（选好生效范围后点保存）'))),
-          h('tbody', people.map(p => row(scope, p))))))
+          h('tbody', pagerFor(scope.key).slice(people).map(p => row(scope, p)))), pagerFor(scope.key).el))
     }).filter(Boolean)
     mount(body, cards.length ? cards : card(null, empty(scopes.length ? '没有匹配的群友' : '还没有记录到群友：有人在群里发言后会出现在这里')))
   }
@@ -94,8 +97,8 @@ export async function render(root) {
       '这里设置的称呼优先于适配器提供的昵称/群名片，用于对话中的发言人、最近群友、群聊记录和长期记忆。',
       '生效范围选「所有群和私聊」写入全局称呼；选「仅本群」只在该群使用，并覆盖全局称呼。不认识的ID可以点「最近发言」看看他说过什么。'),
     h('div', { class: 'row', style: { marginBottom: '12px' } },
-      h('input', { type: 'search', placeholder: '搜索ID或称呼…', value: filter, oninput: e => { filter = e.target.value; draw() } }),
-      h('label', { class: 'row small' }, h('input', { type: 'checkbox', checked: onlyUnknown, onchange: e => { onlyUnknown = e.target.checked; draw() } }), '只看称呼未知的')),
+      h('input', { type: 'search', placeholder: '搜索ID或称呼…', value: filter, oninput: e => { filter = e.target.value; for (const p of pagers.values()) p.reset(); draw() } }),
+      h('label', { class: 'row small' }, h('input', { type: 'checkbox', checked: onlyUnknown, onchange: e => { onlyUnknown = e.target.checked; for (const p of pagers.values()) p.reset(); draw() } }), '只看称呼未知的')),
     body,
   )
   draw()
