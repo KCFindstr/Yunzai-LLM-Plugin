@@ -280,7 +280,7 @@ export function registerWebTools() {
     remaining: ctx => `剩余 ${Math.max(0, (ctx.eff.tools.webSearch.maxPerTurn ?? 3) - ctx.turn.searches)} 次`,
     async run(args, ctx) {
       const q = String(args.query ?? '').trim()
-      if (!q) return { content: '缺少 query', isError: true }
+      if (!q) return { content: '缺少 query 参数，请提供搜索关键词', isError: true }
       const maxSearches = ctx.eff.tools.webSearch.maxPerTurn ?? 3
       if (ctx.turn.searches >= maxSearches) return { content: `本轮搜索次数已达上限（最多 ${maxSearches} 次），请根据已有信息回答`, isError: true }
       ctx.turn.searches++
@@ -308,7 +308,11 @@ export function registerWebTools() {
       const maxFetches = ctx.eff.tools.webFetch.maxPerTurn ?? 3
       if (ctx.turn.fetches >= maxFetches) return { content: `本轮打开网页次数已达上限（最多 ${maxFetches} 次）`, isError: true }
       ctx.turn.fetches++
-      return fetchPage(url, ctx)
+      try {
+        return await fetchPage(url, ctx)
+      } catch (err: any) {
+        return { content: `打开网页失败：${err?.message ?? err}`, isError: true }
+      }
     },
   })
 }

@@ -36,24 +36,41 @@ export function registerCommandTools() {
       const cmd = String(args.command ?? '')
         .replace(/[\r\n]+/g, ' ')
         .trim()
-      if (!cmd) return { content: '缺少 command', isError: true }
-      if (ctx.turn.commands >= MAX_COMMANDS_PER_TURN) return { content: '每轮只能执行一条指令', isError: true }
+      if (!cmd) return { content: '缺少 command 参数，请提供要执行的指令', isError: true }
+      if (ctx.turn.commands >= MAX_COMMANDS_PER_TURN) return { content: '每轮只能执行一条指令，本轮调用已达上限', isError: true }
       const bc = ctx.eff.tools.botCommand
-      if (blocked(cmd, bc.blacklist)) return { content: `指令「${cmd}」不允许通过对话执行`, isError: true }
+      if (blocked(cmd, bc.blacklist)) return { content: `指令「${cmd}」在黑名单中，不允许通过对话代为执行`, isError: true }
       const rule = await matchRule(cmd, ctx.e)
       if (!rule)
         return {
           content: `没有插件能处理「${cmd}」。请检查格式，或用 search_bot_commands 搜索、list_bot_commands 获取完整列表；如果确实没有对应功能就直接告诉用户。`,
           isError: true,
         }
+      // Same rules as Yunzai's filtPermission: the master passes everything; owner/admin only apply in groups.
+      const e = ctx.e
+      if (rule.permission && !e?.isMaster) {
+        if (rule.permission === 'master')
+          return { content: `权限不足：指令「${cmd}」仅限机器人主人使用。当前对话由其他用户触发，无权代为执行。请告知用户该指令需要机器人主人权限。`, isError: true }
+        if (e?.isGroup && rule.permission === 'owner' && !e.member?.is_owner)
+          return { content: `权限不足：指令「${cmd}」仅限群主使用。当前对话由普通群员触发，无权代为执行。请告知用户该指令需要群主权限。`, isError: true }
+        if (e?.isGroup && rule.permission === 'admin' && !e.member?.is_owner && !e.member?.is_admin)
+          return { content: `权限不足：指令「${cmd}」仅限群管理员使用。当前对话由普通群员触发，无权代为执行。请告知用户该指令需要管理员权限。`, isError: true }
+      }
       if (rule.permission === 'master' && !bc.allowMasterCommands)
-        return { content: `「${cmd}」是主人指令，不能通过对话执行，请让用户直接发送该指令`, isError: true }
+        return { content: `安全限制：指令「${cmd}」是主人指令，当前配置禁止通过对话代为执行，请主人直接在聊天中发送该指令。`, isError: true }
       ctx.turn.commands++
       ctx.turn.dispatched = cmd
-      const { replied } = await dispatchCommand(ctx.e, cmd)
-      return {
-        content: replied ? `已执行「${cmd}」，插件已把结果发给用户。` : `已执行「${cmd}」（插件暂未返回内容）。`,
-        terminal: true,
+      try {
+        const { replied } = await dispatchCommand(ctx.e, cmd)
+        return {
+          content: replied ? `已执行「${cmd}」，插件已把结果发给用户。` : `已执行「${cmd}」（插件暂未返回内容）。`,
+          terminal: true,
+        }
+      } catch (err: any) {
+        return {
+          content: `执行指令「${cmd}」失败：${err?.message ?? err}`,
+          isError: true,
+        }
       }
     },
   })
@@ -71,8 +88,10 @@ export function registerCommandTools() {
     },
     available: ctx => ctx.eff.tools.botCommand.enable,
     async run(args) {
+      const q = String(args.query ?? '').trim()
+      if (!q) return { content: '缺少 query 参数，请提供要搜索的功能关键词或指令片段', isError: true }
       await ensureCatalog()
-      const hits = searchCommands(String(args.query ?? ''), 12)
+      const hits = searchCommands(q, 12)
       return hits.length ? hits.join('\n') : '没有找到相关指令。可调用 list_bot_commands 查看完整指令列表。'
     },
   })

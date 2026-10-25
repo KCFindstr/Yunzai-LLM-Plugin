@@ -444,6 +444,8 @@ tools:
     thinking: 'off'
     # Claude 使用追加式上下文，定期检查点以保留缓存命中
     checkpointSteps: 8
+    # 后台结果回到对话后，模型最多可连续新建几次电脑任务（0 为禁止，防止任务无限串联）
+    maxChainDepth: 1
   # 主聊天模型直接调用 Google Lens，上传本轮/引用的原图；先 npm run lens-setup
   # 复用持久桌面浏览器，无需 AGY CLI、AGY 登录或 AGY 服务，也无需启用 computer 工具
   googleLens:
@@ -465,6 +467,8 @@ tools:
     maxMinutes: 10
     # 全局等待队列最多容纳的 AGY 任务数
     maxQueue: 8
+    # 后台结果回到对话后，模型最多可连续新建几次 AGY 任务（0 为禁止，防止任务无限串联）
+    maxChainDepth: 1
   # 禁用的工具名（#llm工具列表 查看）
   disabled: []
 

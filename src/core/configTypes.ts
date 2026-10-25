@@ -210,6 +210,8 @@ export interface AgyConfig {
   executable: string
   maxMinutes: number
   maxQueue: number
+  /** How many times in a row a background result turn may start another job (0 = never). */
+  maxChainDepth: number
 }
 
 export type ExecLanguage = 'python' | 'node' | 'bash'
@@ -228,6 +230,8 @@ export interface ComputerConfig {
   maxTokensPerStep: number
   thinking: ThinkingLevel
   checkpointSteps: number
+  /** How many times in a row a background result turn may start another job (0 = never). */
+  maxChainDepth: number
 }
 
 /** run_code: sandboxed execution in a dedicated WSL distro (see exec/ and cli/exec-setup.mjs) */

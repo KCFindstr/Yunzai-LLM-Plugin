@@ -26,16 +26,20 @@ export function registerStickerTools() {
     async run(args, ctx) {
       if (!ctx.isAdmin) {
         return {
-          content: '权限不足：当前只有机器人管理员有权限向表情包库添加或保存表情包。请礼貌告知对方需要管理员权限。',
+          content: '权限不足：当前只有机器人管理员有权限向表情包库添加或保存表情包。当前对话由普通用户触发，无法添加表情包。请礼貌告知对方需要管理员权限。',
           isError: true,
         }
       }
       // whatever the model read from the image; empty fields are filled by the vision indexer
       const hint = { name: args.name, desc: args.desc, use: args.use, tags: args.tags, text: args.text }
-      if (typeof args.path !== 'string' || !args.path.trim()) return { content: '请提供要保存的图片 path', isError: true }
-      const { part } = await readLocalImage(args.path, ctx)
-      const res = await addStickersFrom(ctx.e, hint, { reply: false, images: [{ buf: Buffer.from(part.data!, 'base64') }] })
-      return `表情包已处理完成：\n${res.lines.join('\n')}\n请在最终回复中简短口语化地告知用户已保存成功（可以提及保存的表情名称）。`
+      if (typeof args.path !== 'string' || !args.path.trim()) return { content: '缺少 path 参数，请提供要保存的图片 path', isError: true }
+      try {
+        const { part } = await readLocalImage(args.path, ctx)
+        const res = await addStickersFrom(ctx.e, hint, { reply: false, images: [{ buf: Buffer.from(part.data!, 'base64') }] })
+        return `表情包已处理完成：\n${res.lines.join('\n')}\n请在最终回复中简短口语化地告知用户已保存成功（可以提及保存的表情名称）。`
+      } catch (err: any) {
+        return { content: `添加表情包失败：${err?.message ?? err}`, isError: true }
+      }
     },
   })
 

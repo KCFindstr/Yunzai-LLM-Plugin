@@ -82,12 +82,20 @@ export function registerMemoryTool() {
     async run(args, ctx) {
       const scope: MemScope = args.scope === 'group' ? 'group' : 'user'
       const key = memoryKey(scope, ctx.e)
-      if (!key) return { content: '缺少对象', isError: true }
+      if (!key) return { content: scope === 'group' ? '当前不在群聊中，无法操作群记忆' : '无法获取当前用户标识，无法操作用户记忆', isError: true }
       if (args.action === 'read') return renderMemory(scope, key).join('\n') || '暂无记忆'
-      if (scope === 'group' && !groupWritable(ctx)) return { content: '当前不能修改群记忆', isError: true }
-      if (!['add', 'update', 'delete'].includes(args.action)) return { content: '未知记忆操作', isError: true }
+      if (scope === 'group' && !groupWritable(ctx)) {
+        const mode = config.get().memory.groupWrite
+        if (!ctx.e?.group_id) return { content: '当前不在群聊中，无法修改群记忆', isError: true }
+        if (mode === 'off') return { content: '群记忆修改功能已被禁用', isError: true }
+        if (mode === 'admin' && !ctx.isAdmin) {
+          return { content: '权限不足：当前群记忆仅允许机器人管理员修改，普通用户不能修改群记忆。请告知用户需要管理员权限。', isError: true }
+        }
+        return { content: '当前无法修改群记忆', isError: true }
+      }
+      if (!['add', 'update', 'delete'].includes(args.action)) return { content: `未知记忆操作「${args.action}」（支持：read, add, update, delete）`, isError: true }
       const max = config.get().memory.maxWritesPerTurn
-      if ((ctx.turn.memoryWrites ?? 0) >= max) return { content: `本轮最多修改 ${max} 次记忆`, isError: true }
+      if ((ctx.turn.memoryWrites ?? 0) >= max) return { content: `本轮最多修改 ${max} 次记忆，本次修改已达上限`, isError: true }
       ctx.turn.memoryWrites = (ctx.turn.memoryWrites ?? 0) + 1
       ctx.turn.memoryChanged = true
       const u = () => {
@@ -95,14 +103,14 @@ export function registerMemoryTool() {
         return `（${scope === 'user' ? '对方' : '本群'}记忆 ${s.entries}/${s.maxEntries} 条，${s.chars}/${s.maxChars} 字）`
       }
       if (args.action === 'delete') {
-        if (!args.id) return { content: '缺少 id', isError: true }
-        return deleteMemory(scope, key, String(args.id)) ? `已删除 ${args.id}${u()}` : { content: `没有 ${args.id}`, isError: true }
+        if (!args.id) return { content: '缺少 id 参数，请提供要删除的记忆编号（如 m1）', isError: true }
+        return deleteMemory(scope, key, String(args.id)) ? `已删除 ${args.id}${u()}` : { content: `未找到编号为 ${args.id} 的记忆条目`, isError: true }
       }
       const r: WriteResult =
         args.action === 'update'
           ? args.id
             ? updateMemory(scope, key, String(args.id), String(args.text ?? ''))
-            : { ok: false, reason: '缺少 id' }
+            : { ok: false, reason: '缺少 id 参数，请提供要修改的记忆编号（如 m1）' }
           : addMemory(scope, key, String(args.text ?? ''), String(ctx.e?.user_id ?? ''))
       if (!r.ok) {
         const list = r.full ? `\n当前记忆：\n${renderMemory(scope, key).join('\n')}` : ''

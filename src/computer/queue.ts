@@ -2,6 +2,10 @@ import { randomBytes } from 'node:crypto'
 import type { ComputerInputImage } from './attachments.ts'
 
 export type JobStatus = 'queued' | 'running' | 'waiting' | 'completed' | 'failed' | 'cancelled' | 'interrupted'
+/** Longest task / follow-up text a chat turn may hand to a background job. */
+export const MAX_TASK_CHARS = 12000
+export const MAX_RESPONSE_CHARS = 6000
+
 export interface ComputerJob {
   id: string
   owner: string
@@ -17,6 +21,10 @@ export interface ComputerJob {
   inputImages?: ComputerInputImage[]
   /** AGY workspace is stable per chat session; job IDs remain unique per operation. */
   agyWorkspaceId?: string
+  /** Rollout of the turn that started or last resumed this job; it receives the result turn. */
+  rolloutId?: string
+  /** Background results that led to the turn which started this job (0 = started by a user message). */
+  chainDepth?: number
   steps?: number
   inputTokens?: number
   outputTokens?: number
@@ -41,10 +49,13 @@ export class ComputerQueue {
   private runners = new Map<string, (job: ComputerJob, signal: AbortSignal) => Promise<JobResult>>()
   private notifiers = new Map<string, (job: ComputerJob, result: JobResult) => Promise<void>>()
   private stopped = false
+  private cancelled: (job: ComputerJob) => void
 
-  constructor(jobs: ComputerJob[], changed: () => void = () => {}) {
+  /** `cancelled` runs for every cancellation: a cancelled job is never reported back. */
+  constructor(jobs: ComputerJob[], changed: () => void = () => {}, cancelled: (job: ComputerJob) => void = () => {}) {
     this.jobs = jobs
     this.changed = changed
+    this.cancelled = cancelled
     for (const job of jobs) if (job.status === 'running' || job.status === 'queued') job.status = 'interrupted'
     changed()
   }
@@ -92,6 +103,7 @@ export class ComputerQueue {
     job.updatedAt = Date.now()
     if (this.active?.id === job.id) this.active.controller.abort()
     this.changed()
+    this.cancelled(job)
   }
 
   stop() {

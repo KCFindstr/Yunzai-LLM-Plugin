@@ -151,20 +151,24 @@ describe('AGY host worker and async handoff', () => {
     await tool.run({ action: 'cancel', id: job.id }, ctx)
     assert.equal(job.status, 'cancelled')
   })
-  it('does not allow worker results to trigger tools or bypass access checks', async () => {
-    const ctx = context(); ctx.turn.asyncResult = { kind: 'agy', id: 'aabbccddee' }
-    assert.deepEqual(registry.forTurn(ctx), [])
-    assert.equal((await registry.get('agy')!.run({ action: 'start', task: 'do it' }, ctx) as any).isError, true)
-    assert.equal((await registry.get('agy')!.run({ action: 'start', task: 'do it' }, context(false)) as any).isError, true)
+  it('allows worker results to invoke tools while maintaining access checks', async () => {
+    registry.register({ name: 'custom_tool', description: 'test', parameters: {}, budgetExempt: true, run: async () => 'ok' })
+    try {
+      const ctx = context(); ctx.turn.asyncResult = { kind: 'agy', id: 'aabbccddee' }
+      assert.ok(registry.forTurn(ctx).some(t => t.name === 'custom_tool'))
+      assert.equal((await registry.get('agy')!.run({ action: 'start', task: 'do it' }, context(false)) as any).isError, true)
+    } finally {
+      registry.unregisterWhere(t => t.name === 'custom_tool')
+    }
   })
-  it('preserves normal declarations, blocks non-image completion actions and delivers images', async () => {
-    for (const name of ['read_image', 'send_image', 'run_code']) registry.register({ name, description: name, parameters: {}, budgetExempt: true, run: async () => 'ok' })
+  it('preserves normal declarations, and delivers images', async () => {
+    for (const name of ['read_image', 'send_image', 'custom_tool']) registry.register({ name, description: name, parameters: {}, budgetExempt: true, run: async () => 'ok' })
     const ctx = context(); ctx.turn.asyncResult = { kind: 'agy', id: 'aabbccddee' }
     const offered = registry.forTurn(ctx)
-    assert.deepEqual(offered.map(tool => tool.name), ['read_image', 'send_image'])
-    const disallowed = registry.get('run_code')!
-    assert.equal((await registry.execute([{ id: 'side-effect', name: 'run_code', args: {} }], ctx, [disallowed])).results[0].isError, true)
-    registry.unregisterWhere(tool => ['read_image', 'send_image', 'run_code'].includes(tool.name))
+    assert.deepEqual(offered.map(tool => tool.name), ['custom_tool', 'read_image', 'send_image'])
+    const allowed = registry.get('custom_tool')!
+    assert.ok(!(await registry.execute([{ id: 'side-effect', name: 'custom_tool', args: {} }], ctx, [allowed])).results[0].isError)
+    registry.unregisterWhere(tool => ['read_image', 'send_image', 'custom_tool'].includes(tool.name))
     const image = Buffer.from('selected-image')
     const job: any = { id: 'aabbccddee', task: 'draw a chart', status: 'completed' }
     await completeAgyJob(job, { report: '/work/agy/aabbccddee/out/chart.png' }, ctx, {

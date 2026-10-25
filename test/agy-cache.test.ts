@@ -42,7 +42,7 @@ for (const protocol of ['openai', 'openai-responses'] as const) it(`reuses the i
         deliver: async (_event, text, _eff, opts) => { delivered = true; assert.equal(text, 'Here is the result'); assert.deepEqual(opts.images, [image]) },
       })
     assert.ok(delivered)
-    assert.equal(sideEffects, 0)
+    assert.equal(sideEffects, 1, 'worker completion can invoke tools')
     assert.equal(server.requests.length, 4, 'completion reuses resolved thinking instead of invoking another judge')
     const original = server.requests[1].body, completion = server.requests[2].body
     assert.deepEqual(completion.tools, original.tools)

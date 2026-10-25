@@ -21,7 +21,7 @@ import { memoryHash } from '../memory/store.ts'
 import { appendTurn, getSession, historySnapshot, peekSession, indexArchive, pendingArchive, recallSession, setEpisode, setServerState, setSummary, truncateIfNeeded } from './session.ts'
 import { pickModel, utilityCandidates, utilityChat, type Picked } from './utility.ts'
 import { recordTurn } from './turnLog.ts'
-import { recordRolloutContext, recordRolloutEvent, recordRolloutImages, startRollout, updateRollout } from './rollouts.ts'
+import { hasPendingJobs, recordRolloutContext, recordRolloutEvent, recordRolloutImages, releaseRolloutJob, rolloutExists, startRollout, updateRollout } from './rollouts.ts'
 import { agyHistoryText } from '../agy/history.ts'
 import { localDay, parseDateHints } from './dates.ts'
 import { maintainArchive } from './archiveJobs.ts'
@@ -71,6 +71,10 @@ export interface TurnRequest {
   computerResult?: { id: string; images: Buffer[] }
   asyncResult?: { kind: 'agy'; id: string }
   sessionConfig?: SessionRequestConfig
+  /** Rollout of the turn that started the background job being reported; its stored reply is replaced. */
+  rolloutId?: string
+  /** How many background results led to this turn (0 for a user message). */
+  chainDepth?: number
 }
 
 export type TurnOutcome = (
@@ -94,10 +98,17 @@ function selectModel(eff: EffectiveConfig, ctx: QuotaCtx, exact?: string): { pic
 
 export async function runTurn(req: TurnRequest): Promise<TurnOutcome> {
   semaphore.max = Math.max(1, req.eff.reply.concurrency || 3)
-  const rolloutId = startRollout({ conv: req.convKey, input: req.input.text || (req.input.images.length ? '（发了图片）' : '（只@了你，没说话）'),
+  const callbackJob = req.asyncResult?.id ?? req.computerResult?.id
+  const continued = Boolean(callbackJob && req.rolloutId && rolloutExists(req.rolloutId))
+  if (continued) {
+    releaseRolloutJob(req.rolloutId, callbackJob!)
+    // Marks where the result turn starts in the timeline of the rollout it continues.
+    recordRolloutEvent(req.rolloutId!, { kind: 'callback', text: req.input.text, job: { kind: req.asyncResult ? 'agy' : 'computer', id: callbackJob! } })
+  }
+  const rolloutId = continued ? req.rolloutId! : startRollout({ conv: req.convKey, input: req.input.text || (req.input.images.length ? '（发了图片）' : '（只@了你，没说话）'),
     inputImageCount: req.input.images.length, source: req.asyncResult?.kind ?? (req.computerResult ? 'computer' : 'chat'),
     jobId: req.asyncResult?.id ?? req.computerResult?.id })
-  const ref: { turn?: TurnState; rolloutId: string } = { rolloutId }
+  const ref: { turn?: TurnState; rolloutId: string; continued: boolean } = { rolloutId, continued }
   try {
     const result = await semaphore.run(() => {
       updateRollout(rolloutId, { status: 'running' })
@@ -106,7 +117,7 @@ export async function runTurn(req: TurnRequest): Promise<TurnOutcome> {
     if (result.kind === 'reply') {
       const text = result.text || (result.dispatched ? `（执行指令 ${result.dispatched}）` : '（无文字回复）')
       recordRolloutEvent(rolloutId, { kind: 'reply', text })
-      updateRollout(rolloutId, { status: 'completed', reply: text })
+      updateRollout(rolloutId, { status: hasPendingJobs(rolloutId) ? 'waiting_callback' : 'completed', reply: text })
     } else {
       recordRolloutEvent(rolloutId, { kind: 'error', text: result.kind === 'quota' ? '额度已用完，未调用模型' : result.message, isError: true })
       updateRollout(rolloutId, { status: result.kind === 'quota' ? 'blocked' : 'failed', ...(result.kind === 'quota' ? { model: result.modelId } : {}) })
@@ -122,7 +133,7 @@ export async function runTurn(req: TurnRequest): Promise<TurnOutcome> {
   }
 }
 
-async function runTurnInner(req: TurnRequest, ref: { turn?: TurnState; rolloutId: string }): Promise<TurnOutcome> {
+async function runTurnInner(req: TurnRequest, ref: { turn?: TurnState; rolloutId: string; continued: boolean }): Promise<TurnOutcome> {
   const { e, eff, input, isAdmin, convKey } = req
   const quotaCtx: QuotaCtx = { userId: e.user_id, groupId: e.group_id, isAdmin }
   const saved = req.sessionConfig
@@ -150,12 +161,14 @@ async function runTurnInner(req: TurnRequest, ref: { turn?: TurnState; rolloutId
       ))
   let thinking = decision.level
   updateRollout(ref.rolloutId, { thinking, thinkingDecision: decision })
-  recordRolloutEvent(ref.rolloutId, { kind: 'thinking', thinking,
-    text: decision.source === 'unsupported' ? '接口不支持思考强度设置' : thinkingSetting === 'auto' ? '自动思考强度已确定' : '使用配置的思考强度' })
+  // A result turn reusing the original decision would only repeat the rollout's first thinking entry.
+  if (!(ref.continued && saved))
+    recordRolloutEvent(ref.rolloutId, { kind: 'thinking', thinking,
+      text: decision.source === 'unsupported' ? '接口不支持思考强度设置' : thinkingSetting === 'auto' ? '自动思考强度已确定' : '使用配置的思考强度' })
   const temperature = saved ? saved.temperature : model.temperature ?? eff.chat.temperature
   const maxTokens = saved?.maxTokens ?? model.maxTokens ?? eff.chat.maxOutputTokens
 
-  const turn: TurnState = { commands: 0, searches: 0, fetches: 0, images: [] }
+  const turn: TurnState = { commands: 0, searches: 0, fetches: 0, images: [], rolloutId: ref.rolloutId, chainDepth: req.chainDepth ?? 0 }
   if (!req.computerResult && !req.asyncResult) turn.inputImages = input.images
   turn.asyncResult = req.asyncResult
   turn.computerResult = req.computerResult
@@ -249,7 +262,8 @@ async function runTurnInner(req: TurnRequest, ref: { turn?: TurnState; rolloutId
       try {
         if (msgs.length === prefix.length + session.messages.length + 1)
           recordRolloutContext(ref.rolloutId, { system, tools: specs, messages: msgs, nativeSearch, messageSources, current: { ...header.context, text },
-            history: { turns: session.messages.length / 2, messages: session.messages.length, maxTurns: eff.chat.historyMaxTurns } })
+            history: { turns: session.messages.length / 2, messages: session.messages.length, maxTurns: eff.chat.historyMaxTurns } },
+            ref.continued ? 'callbackContext' : 'context')
         turn.sessionConfig = { model, provider, system, tools: specs, nativeSearch, decision: { ...decision, level: thinking }, maxTokens, temperature }
         return await chat({ model, provider, system, messages: msgs, tools: specs, nativeSearch, thinking, maxTokens, temperature, cacheKey, state })
       } catch (err) {

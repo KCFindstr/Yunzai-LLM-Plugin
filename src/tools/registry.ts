@@ -33,6 +33,9 @@ export interface TurnState {
   imageScope?: string
   imageRefs?: import('../chat/images.ts').SavedImage[]
   computerResult?: { id: string; images: Buffer[] }
+  rolloutId?: string
+  /** Background results that led to this turn; jobs started now are one level deeper. */
+  chainDepth?: number
 }
 
 export interface ToolCtx {
@@ -84,6 +87,30 @@ export function helperToolRemaining(ctx: ToolCtx, name: string): number {
 }
 const MAX_RESULT_CHARS = 8000
 const TOOL_TIMEOUT_MS = 60_000
+
+const toolTimeout = Symbol('tool timeout')
+
+/**
+ * Why the tool's own gate (`available`) rejects this ctx. Admin-only tools say so to non-admins;
+ * a tool without `available` never fails this check.
+ */
+export function toolAccessError(name: string, ctx: ToolCtx): (ToolOutput & { adminOnly?: true }) | undefined {
+  const def = registry.get(name)
+  if (!def?.available || def.available(ctx)) return
+  if (!ctx.isAdmin && def.available({ ...ctx, isAdmin: true }))
+    return { content: `权限不足：工具「${name}」仅限管理员使用。当前对话由普通用户触发，无法调用此工具，请告知用户该操作需要管理员权限。`, isError: true, adminOnly: true }
+  return { content: `工具「${name}」当前未启用或不适用于本对话`, isError: true }
+}
+
+/** Why a tool cannot be called this turn; undefined when it can. */
+export function toolUnavailable(name: string, ctx: ToolCtx): (ToolOutput & { adminOnly?: true }) | undefined {
+  if (!registry.get(name)) return { content: `工具「${name}」不存在，请检查工具名称是否正确`, isError: true }
+  if (!ctx.eff.tools.enable) return { content: '工具功能已被全局禁用', isError: true }
+  if (ctx.eff.tools.disabled?.includes(name)) return { content: `工具「${name}」已被管理员在配置中禁用`, isError: true }
+  const denied = toolAccessError(name, ctx)
+  if (denied) return denied
+  if (!runtimeToolReady(name, ctx.eff)) return { content: `工具「${name}」未启用或运行环境未就绪，暂时无法使用`, isError: true }
+}
 
 class Registry {
   private tools = new Map<string, ToolDef>()
@@ -137,9 +164,6 @@ class Registry {
         }
         // Reserve synchronously before awaiting: parallel calls cannot overrun the global allowance.
         const def = allowed.get(call.name)
-        // Keep declarations/system identical for prompt caching; enforce completion actions at execution.
-        if (ctx.turn.asyncResult && !['read_image', 'send_image'].includes(call.name))
-          return done({ id: call.id, name: call.name, content: '后台结果只能整理回复或读取/发送图片，不能授权其他工具操作', isError: true })
         const helper = this.tools.get(call.name)?.budgetExempt === true
         if (!helper && (ctx.turn.toolCalls ?? 0) >= maxCalls) return done({ id: call.id, name: call.name, content: '普通工具的全局调用次数已用完；仍可使用辅助工具，或直接给出最终回复', isError: true })
         if (helper && helperToolRemaining(ctx, call.name) === 0) return done({ id: call.id, name: call.name, content: '本次回复该工具调用次数已用完', isError: true })
@@ -150,14 +174,15 @@ class Registry {
         else ctx.turn.toolCalls = (ctx.turn.toolCalls ?? 0) + 1
         if (!def || (def.available && !def.available(ctx)) || !runtimeToolReady(call.name, ctx.eff)) {
           log.warn(`模型调用了未提供的工具 ${call.name}(${brief(call.args ?? {})})`)
-          return done({ id: call.id, name: call.name, content: `工具 ${call.name} 不可用`, isError: true })
+          const content = toolUnavailable(call.name, ctx)?.content ?? `工具「${call.name}」本轮未提供`
+          return done({ id: call.id, name: call.name, content, isError: true })
         }
         if (call.args?._invalid_json)
-          return done({ id: call.id, name: call.name, content: '参数不是合法 JSON，请重试', isError: true })
+          return done({ id: call.id, name: call.name, content: '参数不是合法 JSON 格式，请检查参数语法后重试', isError: true })
         try {
           const out = await Promise.race([
             def.run(call.args ?? {}, ctx),
-            new Promise<never>((_, rej) => setTimeout(() => rej(new Error('工具执行超时')), TOOL_TIMEOUT_MS).unref?.()),
+            new Promise<never>((_, rej) => setTimeout(() => rej(toolTimeout), TOOL_TIMEOUT_MS).unref?.()),
           ])
           const o: ToolOutput = typeof out === 'string' ? { content: out } : out
           if (o.terminal) terminal = true
@@ -166,8 +191,12 @@ class Registry {
           return done({ id: call.id, name: call.name, content: truncate(o.content || '(无结果)', MAX_RESULT_CHARS), isError: o.isError,
             ...(o.images?.length ? { images: o.images } : {}) })
         } catch (err: any) {
-          log.warn(`工具 ${call.name}(${brief(call.args ?? {})}) 出错: ${err?.message ?? err}`)
-          return done({ id: call.id, name: call.name, content: `执行出错: ${err?.message ?? err}`, isError: true })
+          const rawMsg = err === toolTimeout ? '工具执行超时' : err?.message ?? String(err)
+          log.warn(`工具 ${call.name}(${brief(call.args ?? {})}) 出错: ${rawMsg}`)
+          const content = err === toolTimeout ? `工具「${call.name}」执行超时（超过 ${TOOL_TIMEOUT_MS / 1000} 秒未响应）`
+            : /fetch failed|ECONNREFUSED|ENOTFOUND|ETIMEDOUT/i.test(rawMsg) ? `工具「${call.name}」网络请求失败：无法连接到目标服务（${rawMsg}）`
+            : `执行出错: ${rawMsg}`
+          return done({ id: call.id, name: call.name, content, isError: true })
         }
       }),
     )

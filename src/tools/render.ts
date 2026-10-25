@@ -2,7 +2,7 @@ import { scopeForImages } from './images.ts'
 import { renderHtmlPages } from '../render/browser.ts'
 import { readLocalImage } from './imageFiles.ts'
 import type { ToolCtx } from './registry.ts'
-import { registry } from './registry.ts'
+import { registry, toolAccessError } from './registry.ts'
 import { saveImage, imageLabel } from '../chat/images.ts'
 
 const MAX_HTML = 200_000
@@ -62,17 +62,23 @@ export function registerRenderTool() {
     },
     available: ctx => ctx.eff.tools.renderHtml.enable,
     async run(args, ctx) {
+      const denied = toolAccessError('render_html', ctx)
+      if (denied) return denied
       const html = String(args.html ?? '')
-      if (!html.trim()) return { content: '缺少 html', isError: true }
-      if (html.length > MAX_HTML) return { content: `HTML 太长（${html.length} 字符），请精简到 ${MAX_HTML} 以内`, isError: true }
+      if (!html.trim()) return { content: '缺少 html 参数，请提供要渲染的 HTML 内容', isError: true }
+      if (html.length > MAX_HTML) return { content: `HTML 内容过长（${html.length} 字符），请精简到 ${MAX_HTML} 字符以内`, isError: true }
       const cfg = ctx.eff.tools.renderHtml
       const opts = { width: Number(args.width) || cfg.width, maxHeight: cfg.maxHeight, allowNetwork: cfg.allowNetwork }
-      const page = await inlineLocalImages(html, ctx)
-      const images = await renderHtmlPages(page.html, opts)
-      const saved = images.map(buffer => saveImage(scopeForImages(ctx), { type: 'image', data: buffer.toString('base64') }))
-      ;(ctx.turn.imageRefs ??= []).push(...saved)
-      const missing = page.broken.length ? `\n以下图片无法读取，已显示为损坏图标：${page.broken.join('、')}` : ''
-      return `已渲染为${images.length}张图片：\n` + saved.map(imageLabel).join('\n') + missing
+      try {
+        const page = await inlineLocalImages(html, ctx)
+        const images = await renderHtmlPages(page.html, opts)
+        const saved = images.map(buffer => saveImage(scopeForImages(ctx), { type: 'image', data: buffer.toString('base64') }))
+        ;(ctx.turn.imageRefs ??= []).push(...saved)
+        const missing = page.broken.length ? `\n以下图片无法读取，已显示为损坏图标：${page.broken.join('、')}` : ''
+        return `已渲染为${images.length}张图片：\n` + saved.map(imageLabel).join('\n') + missing
+      } catch (err: any) {
+        return { content: `HTML 渲染失败：${err?.message ?? err}`, isError: true }
+      }
     },
   })
 }

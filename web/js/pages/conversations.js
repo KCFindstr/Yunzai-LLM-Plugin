@@ -65,6 +65,7 @@ export async function render(root, [sub]) {
     },
       h('div', { class: 'row' }, h('b', { class: 'clamp' }, s.label), h('span', { class: 'right small muted' }, fmt.ago(s.updatedAt))),
       h('div', { class: 'row small muted', style: { gap: '6px' } },
+        s.waitingCallback ? badge('等待回调', 'accent') : null,
         badge(kindLabel[s.kind] ?? s.kind),
         badge(`${s.messages / 2} 轮`),
         s.archive ? badge(`档案 ${s.archive}`) : null,
@@ -137,7 +138,7 @@ async function drawDetail(el, key, refresh) {
     ]
   }
   mount(el,
-    card(h('span', { class: 'card-title' }, icon('chat'), s.label, ' ', badge(kindLabel[s.kind] ?? s.kind)),
+    card(h('span', { class: 'card-title' }, icon('chat'), s.label, ' ', badge(kindLabel[s.kind] ?? s.kind), s.waitingCallback ? [' ', badge('等待回调', 'accent')] : null),
       h('div', { class: 'row small muted' },
         h('span', { class: 'mono' }, s.key),
         h('span', `最后活跃 ${fmt.time(s.updatedAt)}`),

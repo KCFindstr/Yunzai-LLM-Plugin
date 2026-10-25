@@ -4,7 +4,9 @@ import { config } from '../core/config.ts'
 import { log } from '../core/log.ts'
 import { privateValues, redact } from '../agy/privacy.ts'
 import { lensBridge } from '../lens/runtime.ts'
-import { registry } from './registry.ts'
+import { registry, toolAccessError } from './registry.ts'
+
+const MAX_LENS_PER_TURN = 2
 
 export function registerGoogleLensTool(bridge: typeof lensBridge = lensBridge) {
   registry.register({
@@ -12,16 +14,23 @@ export function registerGoogleLensTool(bridge: typeof lensBridge = lensBridge) {
     description: '将本轮或引用的原图直接上传到 Google Lens 进行以图搜图与查图片出处，返回 Google AI Overview 识别总结（如有）、公开精确匹配链接（最多3条）与视觉匹配链接（最多20条）。使用已保存图片的确切 path，可查询历史图片。使用前加载 google-lens 技能。',
     parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'], additionalProperties: false },
     available: ctx => process.platform === 'win32' && ctx.eff.tools.googleLens.enable && (ctx.eff.tools.googleLens.access === 'all' || ctx.isAdmin),
-    limit: () => '最多调用 2 次',
-    remaining: ctx => `剩余 ${Math.max(0, 2 - (ctx.turn.lensSearches ?? 0))} 次`,
+    limit: () => `最多调用 ${MAX_LENS_PER_TURN} 次`,
+    remaining: ctx => `剩余 ${Math.max(0, MAX_LENS_PER_TURN - (ctx.turn.lensSearches ?? 0))} 次`,
     async run(args, ctx) {
       const cfg = ctx.eff.tools.googleLens
-      if (!cfg.enable || (cfg.access !== 'all' && !ctx.isAdmin) || ctx.turn.asyncResult || ctx.turn.computerResult) return { content: '此工具未启用或无使用权限', isError: true }
-      if ((ctx.turn.lensSearches ?? 0) >= 2) return { content: '本轮以图搜图次数已达上限', isError: true }
+      const denied = toolAccessError('google_lens', ctx)
+      if (denied) return denied
+      if ((ctx.turn.lensSearches ?? 0) >= MAX_LENS_PER_TURN) return { content: `本轮以图搜图次数已达上限（最多 ${MAX_LENS_PER_TURN} 次）`, isError: true }
+      if (typeof args.path !== 'string' || !args.path.trim()) return { content: '缺少 path 参数，请提供要搜索的图片路径', isError: true }
       const job = randomBytes(5).toString('hex')
       const signal = AbortSignal.any([AbortSignal.timeout(55_000), ...(ctx.signal ? [ctx.signal] : [])])
       try {
-        const { image } = readImage(args.path, ctx.turn.imageScope ?? chatImageScope(ctx.e))
+        let image: any
+        try {
+          image = readImage(args.path.trim(), ctx.turn.imageScope ?? chatImageScope(ctx.e)).image
+        } catch (err: any) {
+          return { content: `无法读取图片「${args.path}」：${err?.message ?? '图片不存在或路径无效'}，请确认图片路径`, isError: true }
+        }
         ctx.turn.lensSearches = (ctx.turn.lensSearches ?? 0) + 1
         const result = await bridge(cfg.distro, { op: 'google_image_search', job, path: image.path }, signal)
         // Only public evidence enters model context. Never send browser screenshots/account state to chat.
@@ -61,7 +70,7 @@ export function registerGoogleLensTool(bridge: typeof lensBridge = lensBridge) {
         log.debug(`[Google Lens] ${content}`)
         return { content, isError: result.status !== 'ok' || result.uploaded !== true }
       } catch (error) {
-        return { content: redact(error instanceof Error ? error.message : 'Google Lens 未完成', privateValues(config.get())), isError: true }
+        return { content: '以图搜图调用失败：' + redact(error instanceof Error ? error.message : '未知错误', privateValues(config.get())), isError: true }
       }
     },
   })

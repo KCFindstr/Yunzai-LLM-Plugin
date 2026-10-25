@@ -6,7 +6,7 @@ import { log } from '../core/log.ts'
 import { SKILLS_DIR } from '../core/paths.ts'
 import { truncate } from '../core/util.ts'
 import { registry } from './registry.ts'
-import type { ToolCtx } from './registry.ts'
+import { toolUnavailable, type ToolCtx } from './registry.ts'
 import { runtimeToolReady } from '../core/setup.ts'
 
 export interface Skill {
@@ -109,13 +109,29 @@ export function registerSkillTool() {
     },
     available: ctx => skillsForTurn(ctx).length > 0,
     async run(args, ctx) {
+      if (!args.name) return { content: '缺少 name 参数，请指定要加载的技能名', isError: true }
       const available = skillsForTurn(ctx)
       const s = available.find(x => x.name === args.name)
-      if (!s) return { content: `技能不可用。可用: ${available.map(x => x.name).join(', ')}`, isError: true }
+      if (!s) {
+        const target = listSkills().find(x => x.name === args.name)
+        if (target) {
+          const blocked = (target.requiresTools ?? bundledDependencies[target.name] ?? [])
+            .map(name => ({ name, why: toolUnavailable(name, ctx) })).filter(entry => entry.why)
+          const adminOnly = blocked.filter(entry => entry.why!.adminOnly)
+          if (adminOnly.length)
+            return { content: `权限不足：技能「${args.name}」依赖管理员专享工具（${adminOnly.map(entry => entry.name).join('、')}）。当前对话由普通用户触发，无法加载该技能。请告知用户该技能需要管理员权限。`, isError: true }
+          return { content: `技能「${args.name}」当前不可用：${blocked.map(entry => entry.why!.content).join('；') || '技能功能未启用'}`, isError: true }
+        }
+        return { content: `未找到技能「${args.name}」。当前可用技能: ${available.map(x => x.name).join(', ') || '无'}`, isError: true }
+      }
       if (args.file) {
         const f = path.resolve(s.dir, String(args.file))
-        if (!f.startsWith(s.dir + path.sep) || !fs.existsSync(f)) return { content: '文件不存在', isError: true }
-        return truncate(fs.readFileSync(f, 'utf8'), 12000)
+        if (!f.startsWith(s.dir + path.sep) || !fs.existsSync(f)) return { content: `技能附加文件「${args.file}」不存在`, isError: true }
+        try {
+          return truncate(fs.readFileSync(f, 'utf8'), 12000)
+        } catch (err: any) {
+          return { content: `读取技能附加文件失败：${err?.message ?? err}`, isError: true }
+        }
       }
       return truncate(s.body, 12000)
     },

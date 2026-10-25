@@ -6,11 +6,11 @@ import { contextInspector } from '../context-inspector.js'
 import { initialPromptText } from '../context-view.js'
 
 const STATUS = {
-  queued: ['排队中', 'accent'], running: ['执行中', 'accent'], completed: ['已完成', 'ok'],
+  queued: ['排队中', 'accent'], running: ['执行中', 'accent'], waiting_callback: ['等待回调', 'accent'], completed: ['已完成', 'ok'],
   failed: ['失败', 'bad'], blocked: ['额度不足', 'warn'], interrupted: ['已中断', 'warn'],
 }
 const EVENT = {
-  request: ['用户输入', 'chat'], progress: ['进度', 'clock'], response: ['模型响应', 'models'],
+  request: ['用户输入', 'chat'], callback: ['后台结果', 'logs'], progress: ['进度', 'clock'], response: ['模型响应', 'models'],
   thinking: ['思考强度', 'models'],
   tool: ['工具调用', 'tools'], reply: ['最终回复', 'check'], error: ['执行错误', 'alert'],
 }
@@ -95,7 +95,7 @@ function timelineEvent(event, opened, r) {
     event.phase ? badge(event.phase === 'running' ? '执行中' : event.phase === 'skipped' ? '未执行' : event.isError ? '失败' : '已返回', event.isError ? 'bad' : event.phase === 'running' ? 'accent' : '') : null,
     event.ms != null ? h('span', { class: 'small muted' }, fmt.dur(event.ms)) : null,
     h('time', { class: 'small muted', dateTime: new Date(event.at).toISOString() }, new Date(event.at).toLocaleTimeString('zh-CN', { hour12: false })))
-  const response = responseSection(event.text, { heading: title, key: `text:${event.seq}`, open: opened.get(`text:${event.seq}`), limit: 280, markdown: event.kind === 'response', className: event.isError ? 'small bad' : 'small' })
+  const response = responseSection(event.text, { heading: title, key: `text:${event.seq}`, open: opened.get(`text:${event.seq}`), limit: 280, markdown: ['response', 'callback'].includes(event.kind), className: event.isError ? 'small bad' : 'small' })
   const contents = [
     event.reasoning || event.reasoningTokens > 0 ? h('details', { class: 'quiet-details rollout-reasoning', 'data-disclosure': `reasoning:${event.seq}`, open: opened.get(`reasoning:${event.seq}`) ?? false },
       h('summary', '思考过程', event.reasoningTokens ? badge(`${fmt.num(event.reasoningTokens)} tokens`) : null),
@@ -107,6 +107,7 @@ function timelineEvent(event, opened, r) {
     })) : null,
     event.omittedImages ? h('p', { class: 'small warn' }, `${event.omittedImages} 张图片无法保存或超出图片保存上限。`) : null,
     response.body,
+    event.job ? h('a', { class: 'small', href: `#/${event.job.kind}/${enc(event.job.id)}` }, event.job.kind === 'agy' ? '查看 AGY 任务详情 →' : '查看电脑任务详情 →') : null,
     event.inputTokens != null ? h('div', { class: 'small muted' }, `输入 ${fmt.num(event.inputTokens)} / 输出 ${fmt.num(event.outputTokens)}${event.reasoningTokens ? ` / 思考 ${fmt.num(event.reasoningTokens)}` : ''}`) : null,
     event.callId ? h('div', { class: 'small muted mono' }, event.callId) : null,
     event.args ? h('details', { class: 'computer-arguments', 'data-disclosure': argsKey, open: opened.get(argsKey) },
@@ -125,18 +126,18 @@ function metric(label, value, ico) {
   return h('div', { class: 'run-metric' }, h('span', icon(ico, 14), label), h('strong', { title: String(value) }, value))
 }
 
-function requestDetails(r, opened) {
-  const context = r.context
-  const disclosure = (key, label, ico, count, content, action) => h('details', { class: 'request-disclosure', 'data-disclosure': key, open: opened.get(key) },
-    h('summary', icon(ico, 17), h('strong', label), badge(count), action, icon('chevron', 15)), h('div', { class: 'request-content' }, content))
+/** `scope` keeps the callback turn's disclosures apart from the original request's. */
+function requestDetails(context, opened, scope = '') {
+  const disclosure = (key, label, ico, count, content, action) => h('details', { class: 'request-disclosure', 'data-disclosure': scope + key, open: opened.get(scope + key) },
+    h('summary', icon(ico, 17), h('strong', scope ? `回调${label}` : label), badge(count), action, icon('chevron', 15)), h('div', { class: 'request-content' }, content))
   return h('div', { class: 'request-inspector' },
     disclosure('available-tools', '可用工具', 'tools', context ? `${context.tools.length}${context.omittedTools ? '+' : ''}` : '—',
       context ? [context.nativeSearch ? badge('原生搜索', 'accent') : null, context.tools.length ? h('div', { class: 'tool-catalog' }, context.tools.map((tool, index) =>
-        h('details', { class: 'quiet-details', 'data-disclosure': `tool-spec:${index}`, open: opened.get(`tool-spec:${index}`) },
+        h('details', { class: 'quiet-details', 'data-disclosure': `${scope}tool-spec:${index}`, open: opened.get(`${scope}tool-spec:${index}`) },
           h('summary', tool.name), h('p', { class: 'small' }, tool.description), h('pre', { class: 'small mono' }, (() => { try { return JSON.stringify(JSON.parse(tool.parameters), null, 2) } catch { return tool.parameters } })())))) : empty('本轮未提供函数工具。')]
         : empty('此记录未保存工具列表。')),
     disclosure('chat-context', '聊天上下文', 'memory', context ? `${context.messages.length}${context.omittedMessages ? '+' : ''} 条消息` : '—',
-      context ? contextInspector(context, opened)
+      context ? contextInspector(context, opened, scope)
         : empty('此记录未保存聊天上下文。'), context ? h('button', { class: 'btn sm', type: 'button', 'aria-label': '查看初始提示原文', onclick: event => {
           event.preventDefault(); event.stopPropagation()
           modal('初始提示原文', h('textarea', { class: 'code raw-prompt-text', readOnly: true, spellcheck: false, rows: 24, 'aria-label': '初始提示原文' }, initialPromptText(context)))
@@ -206,11 +207,12 @@ export async function render(root, [id]) {
         r.tokens ? h('div', { class: 'run-usage small muted' }, h('span', `输入 ${fmt.num(r.tokens.input)}`), h('span', `缓存 ${fmt.num(r.tokens.cacheRead)}`), h('span', `输出 ${fmt.num(r.tokens.output)}`)) : null,
         r.tokens?.inputIncomplete ? h('p', { class: 'small warn' }, '上游可能漏报历史输入与缓存用量，花费可能偏低。') : null,
         r.jobId ? h('a', { class: 'small', href: `#/${r.source === 'agy' ? 'agy' : 'computer'}/${enc(r.jobId)}` }, '查看来源任务 →') : null,
-        ['running', 'queued'].includes(r.status) ? h('div', { class: 'computer-progress small', role: 'status' }, spinner(),
-          r.status === 'queued' ? '等待处理' : progress?.kind === 'tool' ? `${progress.tool} ${progress.phase === 'running' ? '执行中' : '已返回'}` : progress?.text || '正在处理') : null),
+        ['running', 'queued', 'waiting_callback'].includes(r.status) ? h('div', { class: 'computer-progress small', role: 'status' }, spinner(),
+          r.status === 'queued' ? '等待处理' : r.status === 'waiting_callback' ? '后台任务运行中，等待回调…' : progress?.kind === 'tool' ? `${progress.tool} ${progress.phase === 'running' ? '执行中' : '已返回'}` : progress?.text || '正在处理') : null),
       card(reply.heading,
-        reply.body ?? empty(['queued', 'running'].includes(r.status) ? '执行结束后会显示最终回复。' : '本次执行没有生成最终回复。')),
-      requestDetails(r, opened),
+        reply.body ?? empty(['queued', 'running', 'waiting_callback'].includes(r.status) ? '执行结束后会显示最终回复。' : '本次执行没有生成最终回复。')),
+      requestDetails(r.context, opened),
+      r.callbackContext ? requestDetails(r.callbackContext, opened, 'callback:') : null,
       card(h('span', { class: 'card-title' }, icon('logs'), '执行记录', badge(`${execution.length} 条`)),
         r.dropped ? h('p', { class: 'small warn' }, `较早的 ${r.dropped} 条记录已超过保留上限，以下为最近记录。`) : null,
         execution.length ? h('div', { class: 'computer-timeline' }, execution.map(event => timelineEvent(event, opened, r))) : empty('尚无详细执行记录。')),

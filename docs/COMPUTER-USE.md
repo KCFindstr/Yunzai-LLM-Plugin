@@ -41,6 +41,7 @@ tools:
     maxTokensPerStep: 1200
     thinking: 'off'
     checkpointSteps: 8
+    maxChainDepth: 1 # result turns may start another task this many times in a row (0 = never)
 ```
 
 `model` is an existing model ID, separate from the chat model; empty uses the conversation's model. It must support images and function calling. All API calls use existing provider configuration and quota accounting. Input limits include cached tokens. A budget can be exceeded by the final in-flight API response; limits are checked before subsequent calls/actions. `chat.maxToolRounds` is unchanged. Per-step output and thinking are separately configurable (default 1200 tokens and off). The worker is instructed to emit tool calls only while working, and one final report via `finish`; tool arguments and any model reasoning are still billable output.

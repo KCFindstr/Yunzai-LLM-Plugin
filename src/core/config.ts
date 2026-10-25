@@ -382,6 +382,7 @@ export function normalize(raw: any): PluginConfig {
     maxTokensPerStep: bounded(pc.maxTokensPerStep, 1200, 128, 32768),
     thinking: ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'].includes(pc.thinking) ? pc.thinking : 'off',
     checkpointSteps: bounded(pc.checkpointSteps, 8, 2, 30),
+    maxChainDepth: bounded(pc.maxChainDepth, 1, 0, 10),
   }
   c.tools.disabled = asArray(c.tools.disabled)
   const lens = isPlainObject(c.tools.googleLens) ? c.tools.googleLens : {}
@@ -397,6 +398,7 @@ export function normalize(raw: any): PluginConfig {
     executable: typeof agy.executable === 'string' ? agy.executable : '',
     maxMinutes: bounded(agy.maxMinutes, 10, 1, 30),
     maxQueue: bounded(agy.maxQueue, 8, 1, 50),
+    maxChainDepth: bounded(agy.maxChainDepth, 1, 0, 10),
   }
   c.skills = isPlainObject(c.skills) ? c.skills : { enable: true }
   const m = isPlainObject(c.memory) ? c.memory : {}

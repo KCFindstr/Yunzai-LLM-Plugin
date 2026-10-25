@@ -1,11 +1,12 @@
 import { badge, h, textBlock, mentionText } from './ui.js'
 import { contextView } from './context-view.js'
 
-export function contextInspector(context, opened) {
+/** `scope` prefixes disclosure keys when one page shows several contexts. */
+export function contextInspector(context, opened, scope = '') {
   const view = contextView(context)
-  const disclosure = (key, label, count, children) => h('details', { class: 'context-section quiet-details', 'data-disclosure': key, open: opened.get(key) },
+  const disclosure = (key, label, count, children) => h('details', { class: 'context-section quiet-details', 'data-disclosure': scope + key, open: opened.get(scope + key) },
     h('summary', label, count != null ? badge(count) : null), h('div', { class: 'context-section-body' }, children))
-  const text = (value, key, limit = 400, formatted = false) => textBlock(value, { key, open: opened.get(key), limit, markdown: formatted })
+  const text = (value, key, limit = 400, formatted = false) => textBlock(value, { key: scope + key, open: opened.get(scope + key), limit, markdown: formatted })
   const roles = { user: '用户', assistant: '机器人', tool: '工具' }
   const message = (entry, i) => h('div', { class: `context-message ${entry.role}` },
     h('div', { class: 'row small muted' }, badge(roles[entry.role] ?? entry.role), entry.imageCount ? badge(`${entry.imageCount} 张图片`) : null),

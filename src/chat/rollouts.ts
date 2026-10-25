@@ -29,7 +29,7 @@ export interface RolloutEvent {
   omittedImages?: number
   seq: number
   at: number
-  kind: 'request' | 'progress' | 'thinking' | 'response' | 'tool' | 'reply' | 'error'
+  kind: 'request' | 'callback' | 'progress' | 'thinking' | 'response' | 'tool' | 'reply' | 'error'
   text: string
   step?: number
   tool?: string
@@ -43,13 +43,15 @@ export interface RolloutEvent {
   reasoningTokens?: number
   isError?: boolean
   thinking?: ThinkingLevel
+  /** Background job whose result this `callback` event carries. */
+  job?: { kind: 'agy' | 'computer'; id: string }
 }
 export interface Rollout {
   id: string
   conv: string
   createdAt: number
   updatedAt: number
-  status: 'queued' | 'running' | 'completed' | 'failed' | 'blocked' | 'interrupted'
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'blocked' | 'interrupted' | 'waiting_callback'
   source: 'chat' | 'agy' | 'computer'
   jobId?: string
   input: string
@@ -58,6 +60,10 @@ export interface Rollout {
   thinking?: ThinkingLevel
   thinkingDecision?: ThinkingDecision
   context?: RolloutContext
+  /** Request context of the latest background-result turn that continued this rollout. */
+  callbackContext?: RolloutContext
+  /** Background jobs started from this rollout whose result turn has not run yet. */
+  pendingJobs?: string[]
   steps: number
   cost: number
   ms: number
@@ -67,7 +73,7 @@ export interface Rollout {
   dropped: number
   events: RolloutEvent[]
 }
-const active = (rollout: Pick<Rollout, 'status'>) => ['queued', 'running'].includes(rollout.status)
+const active = (rollout: Pick<Rollout, 'status'>) => ['queued', 'running', 'waiting_callback'].includes(rollout.status)
 const store = new RolloutFileStore(path.join(DATA_DIR, 'rollouts'), indexSummary)
 export const ROLLOUT_RETENTION_MS = 30 * 86400_000
 const IMAGE_ROOT = path.join(DATA_DIR, 'rollout-images')
@@ -139,6 +145,7 @@ function cleanEvent(event: RolloutEvent): RolloutEvent {
     inputTokens: event.inputTokens, outputTokens: event.outputTokens, isError: event.isError, thinking: event.thinking,
     reasoning: event.reasoning ? agyHistoryText(event.reasoning) : undefined, reasoningTokens: event.reasoningTokens,
     images: event.images, omittedImages: event.omittedImages,
+    job: event.job && ['agy', 'computer'].includes(event.job.kind) && /^[a-f0-9]{10}$/.test(event.job.id) ? { kind: event.job.kind, id: event.job.id } : undefined,
   }
 }
 function cleanJudgeResponse(judge: JudgeResponse): string {
@@ -195,7 +202,7 @@ function cleanCurrent(current: TurnPromptContext & { text: string }) {
 }
 
 /** The logical initial request, without image bytes, provider-native state, or transport credentials. */
-export function recordRolloutContext(id: string, request: { system: string; tools: ToolSpec[]; messages: Msg[]; nativeSearch: boolean; messageSources?: RolloutContext['messages'][number]['source'][]; current?: RolloutContext['current']; history?: RolloutContext['history'] }) {
+export function recordRolloutContext(id: string, request: { system: string; tools: ToolSpec[]; messages: Msg[]; nativeSearch: boolean; messageSources?: RolloutContext['messages'][number]['source'][]; current?: RolloutContext['current']; history?: RolloutContext['history'] }, target: 'context' | 'callbackContext' = 'context') {
   const rollout = store.get(id)
   if (!rollout) return
   let truncated = false
@@ -234,7 +241,7 @@ export function recordRolloutContext(id: string, request: { system: string; tool
     while (tooLarge() && context.tools.length) { context.tools.pop(); context.omittedTools++ }
   }
   context.truncated = truncated || context.omittedMessages > 0 || context.omittedTools > 0
-  rollout.context = context
+  rollout[target] = context
   rollout.updatedAt = Date.now()
   save(rollout)
 }
@@ -271,7 +278,7 @@ export function recordRolloutEvent(id: string, event: Omit<RolloutEvent, 'seq' |
   rollout.ms = rollout.updatedAt - rollout.createdAt
   save(rollout)
 }
-function summary({ events, seq, dropped, context, ...rollout }: Rollout) {
+function summary({ events, seq, dropped, context, callbackContext, pendingJobs, ...rollout }: Rollout) {
   return { ...rollout, input: agyHistoryText(rollout.input), reply: rollout.reply && agyHistoryText(rollout.reply),
     model: rollout.model && agyHistoryText(rollout.model, undefined, 100),
     thinkingDecision: rollout.thinkingDecision && cleanThinking(rollout.thinkingDecision),
@@ -290,5 +297,44 @@ export function recentRollouts(conv?: string) {
 export function rolloutHistory(id: string) {
   pruneExpired()
   const rollout = store.get(id)
-  return rollout ? { ...summary(rollout), context: rollout.context && cleanContext(rollout.context), events: rollout.events.map(cleanEvent) } : undefined
+  return rollout ? { ...summary(rollout), context: rollout.context && cleanContext(rollout.context),
+    callbackContext: rollout.callbackContext && cleanContext(rollout.callbackContext), events: rollout.events.map(cleanEvent) } : undefined
+}
+export function rolloutExists(id: string) {
+  return Boolean(store.get(id))
+}
+/** A started or resumed background job now owes this rollout a result turn. */
+export function trackRolloutJob(id: string | undefined, jobId: string) {
+  const rollout = id ? store.get(id) : undefined
+  if (!rollout) return
+  rollout.pendingJobs = [...new Set([...rollout.pendingJobs ?? [], jobId])]
+  save(rollout)
+}
+/** The job's result turn is running, or the job ended without one (cancelled). */
+export function releaseRolloutJob(id: string | undefined, jobId: string, reason?: string) {
+  const rollout = id ? store.get(id) : undefined
+  if (!rollout?.pendingJobs?.includes(jobId)) return
+  rollout.pendingJobs = rollout.pendingJobs.filter(entry => entry !== jobId)
+  if (reason) recordRolloutEvent(rollout.id, { kind: 'progress', text: reason })
+  if (reason && rollout.status === 'waiting_callback' && !rollout.pendingJobs.length) {
+    rollout.status = 'interrupted'
+    rollout.updatedAt = Date.now()
+    rollout.ms = rollout.updatedAt - rollout.createdAt
+  }
+  save(rollout)
+}
+export function hasPendingJobs(id: string) {
+  return Boolean(store.get(id)?.pendingJobs?.length)
+}
+
+export function waitingCallbackConvs(): Set<string> {
+  const set = new Set<string>()
+  for (const r of store.list()) {
+    if (r.status === 'waiting_callback') set.add(r.conv)
+  }
+  return set
+}
+
+export function hasWaitingCallback(conv: string): boolean {
+  return store.list().some(r => r.conv === conv && r.status === 'waiting_callback')
 }

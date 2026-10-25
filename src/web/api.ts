@@ -15,7 +15,7 @@ import { deepMerge, detectImageMime, formatDuration, isPlainObject, maskSecret, 
 import { allVectors, archiveInfo, clearSession, dayInfo, deleteArchiveEntry, listSessions, peekSession, setSummary, updateArchiveEntry, updateHistoryMessage } from '../chat/session.ts'
 import { historyError, historyText, regenerateHistory, vectorizeHistory } from '../chat/history.ts'
 import { recentTurns } from '../chat/turnLog.ts'
-import { readRolloutImage, recentRollouts, rolloutHistory } from '../chat/rollouts.ts'
+import { hasWaitingCallback, readRolloutImage, recentRollouts, rolloutHistory, waitingCallbackConvs } from '../chat/rollouts.ts'
 import { configuredName, recentMessages, rosterSnapshot } from '../chat/roster.ts'
 import { utilityChat } from '../chat/utility.ts'
 import { partsToText } from '../llm/types.ts'
@@ -484,13 +484,17 @@ export const routes: Route[] = [
     config.delete(`persona.presets.${params[0]}`)
   }),
 
-  R('GET', '/api/sessions', () => listSessions().map(s => ({ ...s, ...sessionLabel(s.key), summary: s.summary && truncate(s.summary, 200) }))),
+  R('GET', '/api/sessions', () => {
+    const waiting = waitingCallbackConvs()
+    return listSessions().map(s => ({ ...s, ...sessionLabel(s.key), waitingCallback: waiting.has(s.key), summary: s.summary && truncate(s.summary, 200) }))
+  }),
   R('GET', '/api/sessions/:key', ({ params }) => {
     const s = peekSession(params[0])
     if (!s) throw fail('没有这个会话', 404)
     return {
       key: params[0],
       ...sessionLabel(params[0]),
+      waitingCallback: hasWaitingCallback(params[0]),
       updatedAt: s.updatedAt,
       summary: s.summary,
       summaryMaxTokens: config.effective(params[0].split(':')[1]?.match(/^g(.+)/)?.[1]).chat.summaryMaxTokens,

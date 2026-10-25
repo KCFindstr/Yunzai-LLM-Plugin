@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto'
 import type { ExecToolConfig } from '../core/configTypes.ts'
 import { log } from '../core/log.ts'
 import { truncate } from '../core/util.ts'
-import { registry, type ToolCtx } from './registry.ts'
+import { registry, toolAccessError, type ToolCtx } from './registry.ts'
 import { runtimeToolReady } from '../core/setup.ts'
 
 const MAX_CODE = 50_000
@@ -230,17 +230,24 @@ export function registerExecTool() {
     remaining: ctx => `剩余 ${Math.max(0, ctx.eff.tools.exec.maxRunsPerTurn - (ctx.turn.execRuns ?? 0))} 次`,
     async run(args, ctx) {
       const cfg = ctx.eff.tools.exec
+      const denied = toolAccessError('run_code', ctx)
+      if (denied) return denied
       const lang = String(args.language ?? '')
       const code = String(args.code ?? '')
-      if (!cfg.languages.includes(lang as any)) return { content: `不支持的语言：${lang}（可用：${cfg.languages.join('、')}）`, isError: true }
-      if (!code.trim()) return { content: '缺少 code', isError: true }
-      if (code.length > MAX_CODE) return { content: `代码太长（${code.length} 字符）`, isError: true }
+      if (!cfg.languages.includes(lang as any)) return { content: `不支持的编程语言「${lang}」（当前支持：${cfg.languages.join('、')}）`, isError: true }
+      if (!code.trim()) return { content: '缺少 code 参数，请提供要运行的代码', isError: true }
+      if (code.length > MAX_CODE) return { content: `代码长度（${code.length} 字符）超出上限（最多支持 ${MAX_CODE} 字符）`, isError: true }
       ctx.turn.execRuns = (ctx.turn.execRuns ?? 0) + 1
-      if (ctx.turn.execRuns > cfg.maxRunsPerTurn) return { content: `每轮最多运行 ${cfg.maxRunsPerTurn} 次代码`, isError: true }
+      if (ctx.turn.execRuns > cfg.maxRunsPerTurn) return { content: `本轮代码运行次数已达上限（每轮最多运行 ${cfg.maxRunsPerTurn} 次）`, isError: true }
 
-      const res = await runInSandbox(lang, code, cfg, { signal: ctx.signal, session: turnSession(ctx) })
-      log.info(`run_code ${lang} exit=${res.exitCode}${res.timedOut ? ' timeout' : ''}${res.killed ? ' killed' : ''} ${res.durationMs}ms`)
-      return { content: formatExecResult(res, cfg.maxOutput), isError: res.timedOut || res.killed }
+      try {
+        const res = await runInSandbox(lang, code, cfg, { signal: ctx.signal, session: turnSession(ctx) })
+        log.info(`run_code ${lang} exit=${res.exitCode}${res.timedOut ? ' timeout' : ''}${res.killed ? ' killed' : ''} ${res.durationMs}ms`)
+        return { content: formatExecResult(res, cfg.maxOutput), isError: res.timedOut || res.killed }
+      } catch (err: any) {
+        log.warn(`run_code 沙盒异常: ${err?.message ?? err}`)
+        return { content: `代码沙盒运行异常：${err?.message ?? err}`, isError: true }
+      }
     },
   })
 }

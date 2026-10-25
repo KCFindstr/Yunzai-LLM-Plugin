@@ -15,10 +15,17 @@ export function registerImageTools() {
     parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'], additionalProperties: false },
     available: ctx => ctx.model.vision !== false,
     async run(args, ctx) {
-      const { image, part } = await readLocalImage(args.path, ctx)
-      const refs = currentImages(ctx)
-      if (!refs.some(ref => ref.path === image.path)) refs.push(image)
-      return { content: imageLabel(image), images: [part] }
+      if (typeof args.path !== 'string' || !args.path.trim()) {
+        return { content: '缺少 path 参数，请提供要读取的图片路径', isError: true }
+      }
+      try {
+        const { image, part } = await readLocalImage(args.path.trim(), ctx)
+        const refs = currentImages(ctx)
+        if (!refs.some(ref => ref.path === image.path)) refs.push(image)
+        return { content: imageLabel(image), images: [part] }
+      } catch (err: any) {
+        return { content: `读取图片失败：${err?.message ?? err}`, isError: true }
+      }
     },
   })
 }
