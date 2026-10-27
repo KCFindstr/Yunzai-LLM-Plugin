@@ -1006,6 +1006,21 @@ const COMMANDS: Cmd[] = [
   },
 ]
 
+/**
+ * "@另一个机器人 #llm…" in a group is meant for that bot: the message opens with @mentions and none is this bot.
+ * @mentions after the command text are arguments (#llm记忆 @某人) and do not count.
+ */
+export function addressedElsewhere(e: any): boolean {
+  if (!e?.group_id) return false
+  const leading: any[] = []
+  for (const segment of e.message ?? []) {
+    if (segment?.type === 'reply' || (segment?.type === 'text' && !String(segment.text ?? '').trim())) continue
+    if (segment?.type !== 'at') break
+    leading.push(segment)
+  }
+  return leading.length > 0 && !leading.some(at => String(at.qq) === String(e.self_id) || at.qq === 'all')
+}
+
 const NAMES = COMMANDS.flatMap(c => c.names.map(n => [n.toLowerCase(), c] as const)).sort((a, b) => b[0].length - a[0].length)
 
 export class LLMAdmin extends BasePlugin {
@@ -1022,6 +1037,7 @@ export class LLMAdmin extends BasePlugin {
   }
 
   async dispatch(): Promise<boolean> {
+    if (addressedElsewhere(this.e)) return false
     const e = commandEvent(this.e, config.effective(this.e.group_id).reply, true)
     try { return await this.dispatchEvent(e) }
     finally { await flushCommand(e) }

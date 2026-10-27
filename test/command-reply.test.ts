@@ -28,6 +28,26 @@ describe('command reply formatting', () => {
     }
   })
 
+  it('leaves #llm commands addressed to another bot alone, but keeps @ arguments and @this-bot', async () => {
+    config.set('reply.markdown', false)
+    const run = async (message: any[]) => {
+      const { e, sent } = fakeEvent({ isMaster: true, msg: '#llm帮助', message })
+      const admin = new LLMAdmin()
+      admin.e = e
+      return { handled: await admin.dispatch(), sent, self: e.self_id }
+    }
+    const text = { type: 'text', text: ' #llm帮助' }
+    const other = await run([{ type: 'at', qq: 'other-bot' }, text])
+    assert.equal(other.handled, false)
+    assert.equal(other.sent.length, 0)
+    const { e } = fakeEvent({})
+    for (const message of [[{ type: 'at', qq: e.self_id }, text], [{ type: 'at', qq: 'other-bot' }, { type: 'at', qq: e.self_id }, text], [text], [{ type: 'text', text: '#llm记忆 ' }, { type: 'at', qq: 'someone' }]]) {
+      const result = await run(message)
+      assert.equal(result.handled, true, JSON.stringify(message))
+      assert.ok(result.sent.length > 0)
+    }
+  })
+
   it('preserves literal command syntax and dollar prices in short Markdown replies', () => {
     assert.match(commandMarkdown('【价格】\n#llm设置 <路径>\n$1/$2'), /` #llm设置 <路径> `/)
     assert.match(commandMarkdown('$1/$2'), /` \$1 `\/` \$2 `/)
