@@ -12,7 +12,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import YAML from 'yaml'
-import { configProblems, MODEL_ID, modelSuggestions, PRESET_PROVIDERS, PRICING_FIELDS, PROVIDER_TYPES, schemaAt, SCHEMA, suggestKeys, THINKING, validate, validatePath, valuesOf } from './schema.mjs'
+import { configProblems, dropRetired, MODEL_ID, modelSuggestions, PRESET_PROVIDERS, PRICING_FIELDS, PROVIDER_TYPES, schemaAt, SCHEMA, suggestKeys, THINKING, validate, validatePath, valuesOf } from './schema.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const CONFIG_DIR = process.env.YZ_LLM_CONFIG_DIR || path.resolve(here, '..', 'config')
@@ -30,7 +30,9 @@ const defaults = YAML.parse(fs.readFileSync(DEFAULT_FILE, 'utf8')) ?? {}
 const original = fs.existsSync(USER_FILE) ? fs.readFileSync(USER_FILE, 'utf8') : '# Yunzai-LLM-Plugin 用户配置（只写要覆盖的项）\n'
 const doc = YAML.parseDocument(original)
 if (!doc.contents) doc.contents = doc.createNode({})
-let dirty = false
+// removed with the next save, so a leftover setting never blocks validation
+const retired = dropRetired(doc)
+let dirty = retired.length > 0
 
 const isObj = v => v && typeof v === 'object' && !Array.isArray(v)
 function merge(a, b) {

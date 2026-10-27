@@ -11171,6 +11171,16 @@ function schemaAt(keys) {
   }
   return node;
 }
+var RETIRED_PATHS = [
+  ["tools", "agy", "distro"]
+  // AGY runs on the host since it stopped using the WSL sandbox
+];
+function dropRetired(doc) {
+  return RETIRED_PATHS.filter((keys) => doc.hasIn(keys)).map((keys) => {
+    doc.deleteIn(keys);
+    return keys.join(".");
+  });
+}
 function validatePath(keys) {
   let node = SCHEMA;
   for (let i = 0; i < keys.length; i++) {
@@ -11897,6 +11907,7 @@ var routes = [
   R("PUT", "/api/setup", ({ body }) => {
     if (!Array.isArray(body.changes) || !body.changes.length || body.changes.length > 30) throw fail("\u8BF7\u63D0\u4F9B\u6709\u6548\u7684\u8BBE\u7F6E\u9879");
     const doc = YAML5.parseDocument(config.readRaw());
+    dropRetired(doc);
     for (const change of body.changes) {
       const p = String(change.path ?? ""), keys = keysOf(p);
       if (!/^(providers\.|models\.|defaultModel$|utilityModel$|visionModel$|fallbackModels$|memory\.(enable$|embedding\.)|chat\.(thinking$|thinkingJudge\.)|tools\.(exec|agy|computer|googleLens|webSearch|webFetch)\.)/.test(p) || !schemaAt(keys)) throw fail("\u8BBE\u7F6E\u5411\u5BFC\u4E0D\u652F\u6301\u6B64\u914D\u7F6E\u9879");
@@ -11923,12 +11934,13 @@ var routes = [
     const text2 = String(body.text ?? "");
     const doc = YAML5.parseDocument(text2);
     if (doc.errors.length) throw fail(`YAML \u8BED\u6CD5\u9519\u8BEF\uFF1A${doc.errors[0].message}`);
+    const retired = dropRetired(doc).length > 0;
     const user = doc.toJS() ?? {};
     if (!isPlainObject(user)) throw fail("\u914D\u7F6E\u9876\u5C42\u5E94\u4E3A\u5BF9\u8C61");
     const merged = normalize(deepMerge(YAML5.parse(fs21.readFileSync(DEFAULT_CONFIG_FILE, "utf8")) ?? {}, structuredClone(user)));
     const err = validate(SCHEMA, user, merged, merged);
     if (err) throw fail(err);
-    config.writeRaw(text2);
+    config.writeRaw(retired ? String(doc) : text2);
   }),
   R("GET", "/api/models", () => {
     const c = config.get();

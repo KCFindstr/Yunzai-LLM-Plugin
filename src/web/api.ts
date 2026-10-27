@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import YAML from 'yaml'
 // shared with the terminal config editor, so both validate writes the same way
-import { configProblems, modelSuggestions, PRESET_PROVIDERS, PRICING_FIELDS, SCHEMA, schemaAt, THINKING, validate, validatePath, valuesOf } from '../../cli/schema.mjs'
+import { configProblems, dropRetired, modelSuggestions, PRESET_PROVIDERS, PRICING_FIELDS, SCHEMA, schemaAt, THINKING, validate, validatePath, valuesOf } from '../../cli/schema.mjs'
 import { queryBalance } from '../billing/balance.ts'
 import { queryUsageCalls } from '../billing/history.ts'
 import { daily, incompleteUsageModels, limitsFor, resetStats, resetUsage, summarize, topUsers, totals, WINDOW_5H, WINDOW_WEEK } from '../billing/ledger.ts'
@@ -380,6 +380,7 @@ export const routes: Route[] = [
   R('PUT', '/api/setup', ({ body }) => {
     if (!Array.isArray(body.changes) || !body.changes.length || body.changes.length > 30) throw fail('请提供有效的设置项')
     const doc = YAML.parseDocument(config.readRaw())
+    dropRetired(doc)
     for (const change of body.changes) {
       const p = String(change.path ?? ''), keys = keysOf(p)
       if (!/^(providers\.|models\.|defaultModel$|utilityModel$|visionModel$|fallbackModels$|memory\.(enable$|embedding\.)|chat\.(thinking$|thinkingJudge\.)|tools\.(exec|agy|computer|googleLens|webSearch|webFetch)\.)/.test(p) || !schemaAt(keys)) throw fail('设置向导不支持此配置项')
@@ -406,13 +407,14 @@ export const routes: Route[] = [
     const text = String(body.text ?? '')
     const doc = YAML.parseDocument(text)
     if (doc.errors.length) throw fail(`YAML 语法错误：${doc.errors[0].message}`)
+    const retired = dropRetired(doc).length > 0
     const user = doc.toJS() ?? {}
     if (!isPlainObject(user)) throw fail('配置顶层应为对象')
     // enum choices (model ids, presets) come from the config being written, not the current one
     const merged = normalize(deepMerge(YAML.parse(fs.readFileSync(DEFAULT_CONFIG_FILE, 'utf8')) ?? {}, structuredClone(user)))
     const err = validate(SCHEMA, user, merged, merged)
     if (err) throw fail(err)
-    config.writeRaw(text)
+    config.writeRaw(retired ? String(doc) : text)
   }),
 
   R('GET', '/api/models', () => {

@@ -101,6 +101,14 @@ describe('web panel', () => {
     assert.equal(config.defaultModelId(), 'other')
   })
 
+  it('drops retired settings from older config files instead of rejecting the save', async () => {
+    const text = `models:\n  - { id: other, provider: openai, model: fake }\ndefaultModel: other\nweb: { port: ${port}, password: hunter2-test }\ntools:\n  agy:\n    distro: yunzai-llm-sandbox\n    maxMinutes: 12\n`
+    assert.equal((await call('PUT', '/api/config/raw', { text })).status, 200)
+    assert.doesNotMatch(config.readRaw(), /distro/)
+    assert.match(config.readRaw(), /maxMinutes: 12/)
+    assert.equal((await call('PUT', '/api/config', { path: 'tools.agy.distro', value: 'x' })).status, 400, 'retired settings cannot be written back')
+  })
+
   it('lists sessions with archive details and edits memory', async () => {
     const key = '10000:p77001'
     clearSession(key)

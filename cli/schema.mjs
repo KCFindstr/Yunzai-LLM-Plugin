@@ -463,6 +463,16 @@ export function schemaAt(keys) {
   return node
 }
 
+/** Settings removed from the plugin. Older config.yaml files may still have them; they are dropped, not rejected. */
+export const RETIRED_PATHS = [
+  ['tools', 'agy', 'distro'], // AGY runs on the host since it stopped using the WSL sandbox
+]
+
+/** Remove retired settings from a YAML document in place. Returns the dotted paths that were removed. */
+export function dropRetired(doc) {
+  return RETIRED_PATHS.filter(keys => doc.hasIn(keys)).map(keys => { doc.deleteIn(keys); return keys.join('.') })
+}
+
 /** Check user-chosen keys along a path (map keys like group ids / provider names). Returns an error or undefined. */
 export function validatePath(keys) {
   let node = SCHEMA
