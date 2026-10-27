@@ -10692,6 +10692,7 @@ User clarification: ${redact(job.response, secrets)}` : ""}`;
     log.debug(`[AGY ${job.id}] start model=${AGY_MODEL} effort=${AGY_EFFORT} images=${job.inputImages?.length ?? 0}`);
     const stdoutLog = agyDiagnosticLogger(job.id, "stdout", secrets);
     const stderrLog = agyDiagnosticLogger(job.id, "stderr", secrets);
+    const started = Date.now();
     const child2 = agyRuntime.spawn(path21.resolve(cfg.executable || path21.join(DATA_DIR, "agy-setup/agy.exe")), agyLaunchArgs(prompt, cfg.maxMinutes), { cwd, env: hostAgyEnvironment(), windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
     let pending = "", bytes = 0, report = "", validInit = false, status = "", bad = false, timedOut = false;
     let lastResponse = "", cliError = "", stderrTail = "";
@@ -10768,8 +10769,9 @@ User clarification: ${redact(job.response, secrets)}` : ""}`;
       stdoutLog.flush();
       stderrLog.flush();
       const text2 = redact(report || lastResponse, secrets).slice(0, 16e3);
-      const success = !signal.aborted && !timedOut && code === 0 && !bad && status === "SUCCESS" && Boolean(text2.trim());
-      const detail = `CLI exit=${code ?? "signal"}; status=${status || "missing-result"}; initialized=${validInit}; output=${text2.length}; cancelled=${signal.aborted}; timeout=${timedOut}; outputLimit=${bad}`;
+      const limitReached = !timedOut && Date.now() - started >= cfg.maxMinutes * 6e4;
+      const success = !signal.aborted && !timedOut && !limitReached && code === 0 && !bad && status === "SUCCESS" && Boolean(text2.trim());
+      const detail = `CLI exit=${code ?? "signal"}; status=${status || "missing-result"}; initialized=${validInit}; output=${text2.length}; cancelled=${signal.aborted}; timeout=${timedOut}; timeLimit=${limitReached}; outputLimit=${bad}`;
       const errorText = cliError || (success ? "" : agyHistoryText(stderrTail, secrets, 1500));
       try {
         observe?.({ event: "runtime_exit", success, detail, error: errorText });
@@ -10777,7 +10779,7 @@ User clarification: ${redact(job.response, secrets)}` : ""}`;
       }
       log.debug(`[AGY ${job.id}] ${detail}`);
       if (!success) {
-        const reason = signal.aborted ? "\u64CD\u4F5C\u5DF2\u53D6\u6D88" : timedOut ? "AGY \u8FD0\u884C\u8D85\u65F6" : bad ? "AGY \u8F93\u51FA\u8D85\u8FC7\u5927\u5C0F\u4E0A\u9650" : status === "SUCCESS" ? "AGY \u5DF2\u8FD4\u56DE\u6210\u529F\u72B6\u6001\uFF0C\u4F46 CLI \u9000\u51FA\u6216\u56DE\u590D\u6821\u9A8C\u5F02\u5E38" : "AGY \u672A\u8FD4\u56DE\u6210\u529F\u7684\u7EC8\u6001";
+        const reason = signal.aborted ? "\u64CD\u4F5C\u5DF2\u53D6\u6D88" : timedOut ? "AGY \u8FD0\u884C\u8D85\u65F6" : bad ? "AGY \u8F93\u51FA\u8D85\u8FC7\u5927\u5C0F\u4E0A\u9650" : limitReached ? `AGY \u8FBE\u5230\u8FD0\u884C\u65F6\u957F\u4E0A\u9650\uFF08${cfg.maxMinutes} \u5206\u949F\uFF09\u88AB\u4E2D\u6B62\uFF0C\u6700\u7EC8\u56DE\u590D\u53EF\u80FD\u4E0D\u5B8C\u6574` : status === "SUCCESS" ? "AGY \u5DF2\u8FD4\u56DE\u6210\u529F\u72B6\u6001\uFF0C\u4F46 CLI \u9000\u51FA\u6216\u56DE\u590D\u6821\u9A8C\u5F02\u5E38" : "AGY \u672A\u8FD4\u56DE\u6210\u529F\u7684\u7EC8\u6001";
         const failure = `${reason}\u3002${detail}${errorText ? `
 CLI \u8BCA\u65AD\uFF1A${errorText}` : ""}`;
         reject(Object.assign(Error(failure), { report: `${failure}${text2 ? `

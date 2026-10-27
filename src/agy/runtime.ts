@@ -47,6 +47,7 @@ export async function runAgy(job: ComputerJob, cfg: AgyConfig, signal: AbortSign
     log.debug(`[AGY ${job.id}] start model=${AGY_MODEL} effort=${AGY_EFFORT} images=${job.inputImages?.length ?? 0}`)
     const stdoutLog = agyDiagnosticLogger(job.id, 'stdout', secrets)
     const stderrLog = agyDiagnosticLogger(job.id, 'stderr', secrets)
+    const started = Date.now()
     const child = agyRuntime.spawn(path.resolve(cfg.executable || path.join(DATA_DIR, 'agy-setup/agy.exe')), agyLaunchArgs(prompt, cfg.maxMinutes), { cwd, env: hostAgyEnvironment(), windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
     let pending = '', bytes = 0, report = '', validInit = false, status = '', bad = false, timedOut = false
     let lastResponse = '', cliError = '', stderrTail = ''
@@ -101,13 +102,16 @@ export async function runAgy(job: ComputerJob, cfg: AgyConfig, signal: AbortSign
       if (!bad) processLine(pending)
       stdoutLog.flush(); stderrLog.flush()
       const text = redact(report || lastResponse, secrets).slice(0, 16000)
-      const success = !signal.aborted && !timedOut && code === 0 && !bad && status === 'SUCCESS' && Boolean(text.trim())
-      const detail = `CLI exit=${code ?? 'signal'}; status=${status || 'missing-result'}; initialized=${validInit}; output=${text.length}; cancelled=${signal.aborted}; timeout=${timedOut}; outputLimit=${bad}`
+      // At --print-timeout the CLI stops mid-response yet still reports SUCCESS; a run that lasted the whole limit was cut off.
+      const limitReached = !timedOut && Date.now() - started >= cfg.maxMinutes * 60000
+      const success = !signal.aborted && !timedOut && !limitReached && code === 0 && !bad && status === 'SUCCESS' && Boolean(text.trim())
+      const detail = `CLI exit=${code ?? 'signal'}; status=${status || 'missing-result'}; initialized=${validInit}; output=${text.length}; cancelled=${signal.aborted}; timeout=${timedOut}; timeLimit=${limitReached}; outputLimit=${bad}`
       const errorText = cliError || (success ? '' : agyHistoryText(stderrTail, secrets, 1500))
       try { observe?.({ event: 'runtime_exit', success, detail, error: errorText }) } catch { /* best effort */ }
       log.debug(`[AGY ${job.id}] ${detail}`)
       if (!success) {
         const reason = signal.aborted ? '操作已取消' : timedOut ? 'AGY 运行超时' : bad ? 'AGY 输出超过大小上限'
+          : limitReached ? `AGY 达到运行时长上限（${cfg.maxMinutes} 分钟）被中止，最终回复可能不完整`
           : status === 'SUCCESS' ? 'AGY 已返回成功状态，但 CLI 退出或回复校验异常' : 'AGY 未返回成功的终态'
         const failure = `${reason}。${detail}${errorText ? `\nCLI 诊断：${errorText}` : ''}`
         reject(Object.assign(Error(failure), { report: `${failure}${text ? `\n\n已收到的工作结果（终态未确认，不代表启动失败）：\n${text}` : ''}` }))

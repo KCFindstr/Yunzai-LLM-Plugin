@@ -113,6 +113,27 @@ describe('AGY host worker and async handoff', () => {
     assert.equal(events.at(-1).event, 'runtime_exit')
     assert.equal(events.at(-1).success, true)
   })
+  it('reports a run cut off at the CLI time limit as incomplete even when the CLI says SUCCESS', async t => {
+    const cfg = normalize({}).tools.agy
+    let now = 1_000_000
+    t.mock.method(Date, 'now', () => now)
+    t.mock.method(agyRuntime, 'spawn', () => {
+      const child = Object.assign(new EventEmitter(), { stdout: new PassThrough(), stderr: new PassThrough() })
+      queueMicrotask(() => {
+        child.stdout.write(JSON.stringify({ event: 'step_update', step_update: { step_type: 'agent_response', step_index: 1, state: 'DONE', text: '### 完成情况\n改为坏笑（' } }) + '\n')
+        now += cfg.maxMinutes * 60000 + 500
+        child.stdout.write(JSON.stringify({ event: 'result', result: { status: 'SUCCESS', response: '' } }))
+        child.emit('close', 0)
+      })
+      return child as any
+    })
+    await assert.rejects(runAgy({ id: 'aabbccddee', task: 'edit an image' } as any, cfg, new AbortController().signal, {}), (error: any) => {
+      assert.match(error.message, new RegExp(`运行时长上限（${cfg.maxMinutes} 分钟）`))
+      assert.match(error.message, /timeLimit=true/)
+      assert.match(error.report, /改为坏笑（/)
+      return true
+    })
+  })
   for (const scenario of [{ status: 'ERROR', code: 1 }, { status: 'SUCCESS', code: 1 }, { status: '', code: 0 }])
     it(`preserves partial work and terminal diagnostics when status=${scenario.status || 'missing'} exit=${scenario.code}`, async t => {
       const events: any[] = []
