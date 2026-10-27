@@ -32,7 +32,7 @@ it('skips vague automatic queries before calling an embedding provider, while pr
   config.get().memory.embedding.apiKey = 'fixture-key'
   let calls = 0
   t.mock.method(globalThis, 'fetch', async () => { calls++; throw Error('unexpected embedding request') })
-  for (const text of ['[at:you] 你来回答一下', '[at:you] [图片]', '继续', '这是谁？']) {
+  for (const text of ['[at:you] 你来回答一下', '[at:you] [图片]', '继续', '这是谁？', '[at:7] [at:you] 看懂了吗', '[图片]\n懂了没', '你看得懂吗？']) {
     assert.equal(automaticRecallQuery(text), '')
     assert.deepEqual(await recallSession(key, text, 2, { automatic: true }), [])
   }

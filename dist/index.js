@@ -1313,7 +1313,7 @@ function recallText(text2) {
 function automaticRecallQuery(text2) {
   const query = recallText(text2);
   const plain = query.replace(/[\s\p{P}\p{S}]/gu, "");
-  if (!plain || /^(?:请|麻烦)?(?:你来|你|帮我|给我)?(?:回答|回复|说|看|看看|看下|分析|识别)(?:一?下|一下这个|这个|这张图|图片|吧|呢|啊|呀|呗)*$/u.test(plain) || /^(?:继续|继续说|然后呢|你觉得呢|你怎么看|这是什么|这是谁|这个呢|在吗|你好|hello|hi)$/iu.test(plain)) return "";
+  if (!plain || /^(?:请|麻烦)?(?:你来|你|帮我|给我)?(?:回答|回复|说|看|看看|看下|分析|识别)(?:一?下|一下这个|这个|这张图|图片|吧|呢|啊|呀|呗)*$/u.test(plain) || /^(?:继续|继续说|然后呢|你觉得呢|你怎么看|这是什么|这是谁|这个呢|在吗|你好|hello|hi)$/iu.test(plain) || /^(?:你)?(?:能|看得|听得)?(?:看|听)?(?:懂|明白)(?:了)?(?:吗|么|没|没有|不)?$/u.test(plain)) return "";
   return query;
 }
 var init_recallText = __esm({
@@ -3451,7 +3451,9 @@ function recordGroupMessage(e) {
   if (list2.length > MAX_LINES) list2.splice(0, list2.length - MAX_LINES);
   logs.set(key, list2);
   const cfg = config.get(), eff = config.effective(e.group_id);
-  if (cfg.enable && eff.enable && eff.chat.includeImages && !cfg.trigger.groupBlacklist.map(String).includes(String(e.group_id)) && (!cfg.trigger.groupWhitelist.length || cfg.trigger.groupWhitelist.map(String).includes(String(e.group_id)))) {
+  const images = cfg.enable && eff.enable && eff.chat.includeImages && !cfg.trigger.groupBlacklist.map(String).includes(String(e.group_id)) && (!cfg.trigger.groupWhitelist.length || cfg.trigger.groupWhitelist.map(String).includes(String(e.group_id)));
+  attachQuote(e, list2, list2.at(-1), images);
+  if (images) {
     const line = list2.at(-1);
     e._llmImageCapture ??= captureImageSegments(e.message ?? [], chatImageScope(e));
     void e._llmImageCapture.then((stored) => {
@@ -3462,6 +3464,42 @@ function recordGroupMessage(e) {
     }).catch(() => {
     });
   }
+}
+function attachQuote(e, list2, line, images) {
+  const reply2 = (e.message ?? []).find((segment) => segment?.type === "reply");
+  if (!reply2) return;
+  const replyId = e.reply_id ?? reply2.data?.id ?? reply2.id ?? reply2.data?.message_id ?? reply2.message_id;
+  const cached = replyId != null ? list2.find((l) => l.mid === String(replyId)) : void 0;
+  if (cached) {
+    line.quote = {
+      label: `\u3010\u5F15\u7528 ${cached.bot ? `\u4F60(\u5E73\u53F0ID ${cached.uid})` : cached.name}\u3011`,
+      text: cached.text.replace(IMAGE_LABEL, ""),
+      labels: cached.text.match(IMAGE_LABEL)?.map((label) => label.trim()) ?? []
+    };
+    return;
+  }
+  void getQuoted(e).then(async (q) => {
+    if (!q) return;
+    line.quote = { label: quoteLabel(q), text: truncate((q.text || "[\u975E\u6587\u672C\u6D88\u606F]").replace(/\s+/g, " "), 200), labels: [] };
+    if (!images || !q.imageUrls.length) return;
+    const stored = await captureImageSegments(q.imageUrls.map((url) => ({ type: "image", url })), chatImageScope(e));
+    const uid = q.senderId ? void 0 : imageSender(e, stored.savedImages.map((image) => image.path));
+    if (uid) line.quote.label = quoteLabel({ senderId: uid, fromBot: false, name: knownName(e, uid) || q.name });
+    line.quote.labels = stored.savedImages.map(imageLabel);
+  }).catch(() => {
+  });
+}
+function renderLine(l, maxChars) {
+  if (!l.quote) return truncateImageText(l.text, maxChars);
+  const room = maxChars - l.text.replace(IMAGE_LABEL, "").trim().length;
+  const quoted = room >= 4 ? quoteBody(truncate(l.quote.text, room), l.quote.labels) : ["\u2026", ...l.quote.labels].join(" ");
+  return `${l.quote.label}${quoted}
+${truncateImageText(l.text, maxChars)}`;
+}
+function imageSender(e, paths) {
+  if (!e?.group_id || !paths.length) return void 0;
+  const senders = new Set((logs.get(keyOf(e)) ?? []).filter((l) => paths.some((p) => l.text.includes(`:${p}]`))).map((l) => l.uid));
+  return senders.size === 1 ? [...senders][0] : void 0;
 }
 function recordBotMessage(e, text2, conv) {
   if (!e?.group_id || !text2) return;
@@ -3489,7 +3527,7 @@ function recentLines(e, n, maxChars, conv, withinMs = 30 * 6e4) {
     const l = list2[i];
     if (l.t < cutoff) break;
     if (mid && l.mid === mid) continue;
-    out.push(`[${formatNow(new Date(l.t))}] ${l.name}: ${truncateImageText(l.text, maxChars)}`);
+    out.push(`[${formatNow(new Date(l.t))}] ${l.name}: ${renderLine(l, maxChars)}`);
   }
   return out.reverse().map((line, index) => `${index + 1}. ${line}`);
 }
@@ -3504,7 +3542,7 @@ function cachedMessageSender(e, messageId) {
   if (!e?.group_id || messageId == null) return void 0;
   return logs.get(keyOf(e))?.find((line) => line.mid === String(messageId))?.uid;
 }
-var MAX_LINES, logs, keyOf;
+var MAX_LINES, logs, keyOf, IMAGE_LABEL;
 var init_groupLog = __esm({
   "src/chat/groupLog.ts"() {
     "use strict";
@@ -3517,10 +3555,20 @@ var init_groupLog = __esm({
     MAX_LINES = 200;
     logs = /* @__PURE__ */ new Map();
     keyOf = (e) => `${e?.self_id}:${e?.group_id}`;
+    IMAGE_LABEL = /\n?\[图片\d+:\/work\/attachments\/[^\]\r\n]+\]/g;
   }
 });
 
 // src/chat/message.ts
+function quoteLabel(q) {
+  if (!q.senderId) return `\u3010\u5F15\u7528\uFF5C\u53D1\u9001\u8005ID\u672A\u77E5${q.name !== "\u67D0\u4EBA" ? `\uFF5C${q.name}` : ""}\u3011`;
+  return `\u3010\u5F15\u7528 ${q.fromBot ? "\u4F60" : q.name}(\u5E73\u53F0ID ${q.senderId})\u3011`;
+}
+function quoteBody(text2, labels2) {
+  const rest = [...labels2];
+  const body = text2.replace(/\[(?:图片|表情包)\]/g, (placeholder) => rest.shift() ?? placeholder);
+  return [body === "[\u975E\u6587\u672C\u6D88\u606F]" && labels2.length ? "" : body, ...rest].filter(Boolean).join(" ");
+}
 function isStickerSegment(s) {
   return s?.type === "mface" || s?.type === "image" && (s.sub_type == 1 || /表情/.test(s.summary ?? ""));
 }
@@ -3585,15 +3633,20 @@ function imageUrl(segment) {
   if (!["image", "mface"].includes(segment?.type)) return void 0;
   return [segment.url, segment.file].find((value) => typeof value === "string" && /^https?:\/\//.test(value));
 }
-async function getQuoted(e) {
-  if (e._llmQuoted !== void 0) return e._llmQuoted || void 0;
+function getQuoted(e) {
+  if (e._llmQuoted !== void 0) return Promise.resolve(e._llmQuoted || void 0);
+  return e._llmQuoting ??= resolveQuoted(e);
+}
+async function resolveQuoted(e) {
   const reply2 = (e.message ?? []).find((segment) => segment?.type === "reply");
   const metadata = reply2?.data ?? reply2;
   const replyId = e.reply_id ?? metadata?.id ?? metadata?.message_id ?? e.source?.message_id;
   let response;
-  if (replyId != null && typeof e.getReply === "function") {
+  const target = e.group?.getMsg ? e.group : e.friend?.getMsg ? e.friend : void 0;
+  const fetchReply = typeof e.getReply === "function" ? () => e.getReply() : target ? () => target.getMsg(replyId) : void 0;
+  if (replyId != null && fetchReply) {
     try {
-      response = await e.getReply();
+      response = await fetchReply();
     } catch {
     }
   }
@@ -3657,8 +3710,12 @@ async function extractInput(e, opts) {
     savedImages.push(image);
     parts.push(batch.parts[index]);
   }
+  if (quoted && !quoted.senderId) {
+    const uid = imageSender(e, quotes.savedImages.map((image) => image.path));
+    if (uid) Object.assign(quoted, { senderId: uid, fromBot: false, name: knownName(e, uid) || quoted.name });
+  }
   const images = opts.vision ? parts.slice(0, Math.max(0, Math.floor(opts.maxImages))) : [];
-  return { text: text2, images, savedImages, quoted, imageSegments };
+  return { text: text2, images, savedImages, quoted, quotedImageStart: quoted ? stored.savedImages.length : void 0, imageSegments };
 }
 var MAX_IMAGE_BYTES2;
 var init_message = __esm({
@@ -5743,7 +5800,6 @@ function obvious(t, input) {
   const photos = photoCount(`${t}${input.quotedText ?? ""}`, input.images);
   if (!t.replace(/\[(图片|表情包)\]/g, "").trim()) return photos ? "question" : "casual";
   if (t.length <= 4 && !/[?？]/.test(t) && !input.quoted && !photos) return "casual";
-  if (t.length > 300) return "complex";
   return void 0;
 }
 function formatProbabilities(probs) {
@@ -5952,28 +6008,26 @@ function buildHeader(e, eff, input, isAdmin, opts = {}) {
   observeUsers(e);
   const who = `${senderName(e)}(\u5E73\u53F0ID ${e.user_id})${isAdmin ? "\uFF3B\u7BA1\u7406\u5458\uFF3D" : ""}`;
   const head = e.group_id ? `\u3010\u6D88\u606F\uFF5C${formatNow()}\uFF5C\u7FA4\u300C${truncate(String(e.group_name ?? e.group_id), 20)}\u300D\uFF5C\u53D1\u8A00\u4EBA ${who}\u3011` : `\u3010\u6D88\u606F\uFF5C${formatNow()}\uFF5C\u79C1\u804A\uFF5C\u5BF9\u65B9 ${who}\u3011`;
-  const ambient = [];
+  const roster = [], recent2 = [];
   const context = { heading: head, roster: [], recent: [], memory: opts.memory ?? "", quote: "" };
   if (e.group_id) {
-    const roster = rosterLines(e, eff.chat.rosterSize);
-    context.roster = roster;
-    if (roster.length) ambient.push("\u3010\u6700\u8FD1\u7FA4\u53CB\xB7\u4EC5\u8EAB\u4EFD\u53C2\u8003\u3011", ...roster);
-    const recent2 = recentLines(e, eff.chat.groupContext, eff.chat.groupContextMaxChars, opts.conv);
-    context.recent = recent2;
-    if (recent2.length) ambient.push("\u3010\u6700\u8FD1\u7FA4\u804A\u3011", "\u4EE5\u4E0B\u6309\u7FA4\u5185\u5B9E\u9645\u5148\u540E\u6392\u5217\uFF0C\u53EF\u80FD\u4E0E\u524D\u9762\u7684\u5BF9\u8BDD\u5386\u53F2\u91CD\u53E0\uFF1B\u91CD\u53E0\u5185\u5BB9\u662F\u540C\u4E00\u6B21\u53D1\u8A00\uFF0C\u5E76\u975E\u518D\u6B21\u53D1\u751F\u3002\u7528\u6B64\u5904\u5224\u65AD\u7FA4\u804A\u987A\u5E8F\uFF0C\u53EA\u56DE\u5E94\u672B\u5C3E\u6D88\u606F\u6BB5\u4E2D\u7684\u5F53\u524D\u8BF7\u6C42\u3002", ...recent2);
+    context.roster = rosterLines(e, eff.chat.rosterSize);
+    if (context.roster.length) roster.push("\u3010\u6700\u8FD1\u7FA4\u53CB\xB7\u4EC5\u8EAB\u4EFD\u53C2\u8003\u3011", ...context.roster);
+    context.recent = recentLines(e, eff.chat.groupContext, eff.chat.groupContextMaxChars, opts.conv);
+    if (context.recent.length) recent2.push("\u3010\u6700\u8FD1\u7FA4\u804A\u3011", "\u4EE5\u4E0B\u6309\u7FA4\u5185\u5B9E\u9645\u5148\u540E\u6392\u5217\uFF0C\u53EF\u80FD\u4E0E\u524D\u9762\u7684\u5BF9\u8BDD\u5386\u53F2\u91CD\u53E0\uFF1B\u91CD\u53E0\u5185\u5BB9\u662F\u540C\u4E00\u6B21\u53D1\u8A00\uFF0C\u5E76\u975E\u518D\u6B21\u53D1\u751F\u3002\u7528\u6B64\u5904\u5224\u65AD\u7FA4\u804A\u987A\u5E8F\uFF0C\u53EA\u56DE\u5E94\u672B\u5C3E\u6D88\u606F\u6BB5\u4E2D\u7684\u5F53\u524D\u8BF7\u6C42\u3002", ...context.recent);
   }
   const quote = [];
   if (input.quoted) {
-    const id = input.quoted.senderId ? `(\u5E73\u53F0ID ${input.quoted.senderId})` : "";
-    const src = input.quoted.fromBot ? `\u4F60${id}\u4E4B\u524D\u53D1\u7684` : `${input.quoted.name}${id} \u7684`;
-    const label = input.quoted.senderId ? `\u5F15\u7528${src}\u6D88\u606F` : `\u5F15\u7528\u6D88\u606F\uFF5C\u53D1\u9001\u8005ID\u672A\u77E5${input.quoted.name !== "\u67D0\u4EBA" ? `\uFF5C${input.quoted.name}` : ""}`;
-    quote.push(`\u3010${label}\u3011${truncate(input.quoted.text || "[\u975E\u6587\u672C\u6D88\u606F]", 300)}`);
+    const saved = input.savedImages ?? [];
+    const start = input.quotedImageStart ?? saved.length;
+    const labels2 = saved.slice(start).map((image, index) => imageLabel(image, start + index));
+    quote.push(quoteLabel(input.quoted) + quoteBody(truncate(input.quoted.text || "[\u975E\u6587\u672C\u6D88\u606F]", 300), labels2));
   }
   const render2 = (lines) => `${[...lines, head].join("\n")}
 `;
   const memory2 = opts.memory ? [opts.memory] : [];
   context.quote = quote.join("\n");
-  return { sent: render2([...ambient, ...memory2, ...quote]), stored: render2(quote), context };
+  return { sent: render2([...roster, ...memory2, ...recent2, ...quote]), stored: render2(quote), context };
 }
 function buildMemoryBlock(e, opts) {
   const lines = [];
@@ -6001,6 +6055,8 @@ var init_prompt = __esm({
     init_store2();
     init_groupLog();
     init_roster();
+    init_message();
+    init_images();
     SUMMARY_PROMPT = [
       "\u4F60\u4F1A\u6536\u5230\u5DF2\u6709\u6458\u8981\u548C\u4E00\u6BB5\u65B0\u804A\u5929\u8BB0\u5F55\u3002\u4E25\u683C\u6309\u4E24\u6BB5\u8F93\u51FA\uFF0C\u4E0D\u8981\u5176\u4ED6\u5185\u5BB9\uFF1A",
       "\u7247\u6BB5\uFF1A\u53EA\u6982\u62EC\u8FD9\u6BB5\u65B0\u804A\u5929\u2014\u2014\u8C01\u3001\u804A\u4E86\u4EC0\u4E48\u3001\u5F97\u51FA\u7684\u4E8B\u5B9E/\u7ED3\u8BBA/\u7EA6\u5B9A\uFF08\u5E26\u65F6\u95F4\u7EBF\u7D22\uFF09\uFF0C\u4FDD\u7559\u79F0\u547C\u4E0E\u5E73\u53F0ID\u548C\u5173\u952E\u8BCD\uFF0C\u4FBF\u4E8E\u4EE5\u540E\u68C0\u7D22\u3002150\u5B57\u5185\u3002",
@@ -6419,7 +6475,9 @@ async function runTurnInner(req, ref) {
   turn.computerJob = req.computerResult?.id;
   turn.imageScope = chatImageScope(e);
   turn.imageRefs = input.savedImages ?? input.images.map((part) => saveImage(turn.imageScope, part));
-  const attachmentNote = turn.imageRefs.length ? "\n" + turn.imageRefs.map(imageLabel).join("\n") : "";
+  const quoteStart = input.quotedImageStart ?? turn.imageRefs.length;
+  const ownImages = turn.imageRefs.slice(0, quoteStart);
+  const attachmentNote = ownImages.length ? "\n" + ownImages.map(imageLabel).join("\n") : "";
   ref.turn = turn;
   const ctx = { e, eff, isAdmin, model: model2, turn };
   let nativeSearch = saved?.nativeSearch ?? (!dropped.has("nativeSearch") && eff.tools.enable && eff.tools.webSearch.enable && eff.tools.webSearch.provider === "native" && NATIVE_SEARCH_TYPES.has(provider2.type) && model2.nativeSearch !== false);
@@ -6442,7 +6500,8 @@ async function runTurnInner(req, ref) {
   const memTurn = memOn && shared ? buildMemoryBlock(e, { user: true, group: false, nudge }) : "";
   const range = parseDateHints(input.text);
   const dated = range && !(range.from === localDay() && range.to === localDay()) ? range : void 0;
-  const recalled = (await recallSession(convKey, input.text, dated ? 3 : 2, {
+  const recallQuery = [input.quoted?.text, input.text].filter(Boolean).join("\n");
+  const recalled = (await recallSession(convKey, recallQuery, dated ? 3 : 2, {
     automatic: true,
     range: dated,
     extra: recallSources(e, eff.chat.sessionScope),
@@ -6452,7 +6511,7 @@ async function runTurnInner(req, ref) {
 ${recalled.join("\n")}` : ""].filter(Boolean).join("\n");
   const header = buildHeader(e, eff, input, isAdmin, { conv: convKey, memory: context });
   if (!req.computerResult && !req.asyncResult) markHandled(e, convKey);
-  const userMsg = { role: "user", content: [{ type: "text", text: header.sent + text2 }, ...input.images.flatMap((part, index) => [{ type: "text", text: imageLabel(turn.imageRefs[index], index) }, part]), ...turn.imageRefs.slice(input.images.length).map((image, index) => ({ type: "text", text: imageLabel(image, input.images.length + index) }))] };
+  const userMsg = { role: "user", content: [{ type: "text", text: header.sent + text2 }, ...input.images.flatMap((part, index) => index < quoteStart ? [{ type: "text", text: imageLabel(turn.imageRefs[index], index) }, part] : [part]), ...ownImages.slice(input.images.length).map((image, index) => ({ type: "text", text: imageLabel(image, input.images.length + index) }))] };
   const storedUser = {
     role: "user",
     content: [{ type: "text", text: header.stored + text2 + attachmentNote }]

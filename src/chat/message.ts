@@ -2,7 +2,7 @@ import { chatImageScope, saveImage, type SavedImage } from './images.ts'
 import { detectImageMime, fetchBuffer, truncate } from '../core/util.ts'
 import type { ImagePart } from '../llm/types.ts'
 import { knownName } from './roster.ts'
-import { cachedMessageSender } from './groupLog.ts'
+import { cachedMessageSender, imageSender } from './groupLog.ts'
 
 /** Max raw bytes per image so base64 stays under common 5MB provider limits. */
 const MAX_IMAGE_BYTES = 3_700_000
@@ -20,8 +20,23 @@ export interface ExtractedInput {
   images: ImagePart[]
   savedImages?: SavedImage[]
   quoted?: QuotedMessage
+  /** Index in `savedImages` where the quoted message's images begin; they are labelled inside the quote. */
+  quotedImageStart?: number
   /** Raw segments that were images/stickers (for sticker-adding flows). */
   imageSegments: any[]
+}
+
+/** `【引用 名字(平台ID x)】`, shared by the current message and the recent group chat lines. */
+export function quoteLabel(q: Pick<QuotedMessage, 'senderId' | 'fromBot' | 'name'>): string {
+  if (!q.senderId) return `【引用｜发送者ID未知${q.name !== '某人' ? `｜${q.name}` : ''}】`
+  return `【引用 ${q.fromBot ? '你' : q.name}(平台ID ${q.senderId})】`
+}
+
+/** Put saved image labels where the quote's image placeholders were; any left over go at the end. */
+export function quoteBody(text: string, labels: string[]): string {
+  const rest = [...labels]
+  const body = text.replace(/\[(?:图片|表情包)\]/g, placeholder => rest.shift() ?? placeholder)
+  return [body === '[非文本消息]' && labels.length ? '' : body, ...rest].filter(Boolean).join(' ')
 }
 
 export function isStickerSegment(s: any): boolean {
@@ -92,14 +107,22 @@ function imageUrl(segment: any): string | undefined {
   return [segment.url, segment.file].find(value => typeof value === 'string' && /^https?:\/\//.test(value))
 }
 
-export async function getQuoted(e: any): Promise<QuotedMessage | undefined> {
-  if (e._llmQuoted !== undefined) return e._llmQuoted || undefined
+/** The group log and the reply path both ask for the quote; share one lookup per event. */
+export function getQuoted(e: any): Promise<QuotedMessage | undefined> {
+  if (e._llmQuoted !== undefined) return Promise.resolve(e._llmQuoted || undefined)
+  return e._llmQuoting ??= resolveQuoted(e)
+}
+
+async function resolveQuoted(e: any): Promise<QuotedMessage | undefined> {
   const reply = (e.message ?? []).find((segment: any) => segment?.type === 'reply')
   const metadata = reply?.data ?? reply
   const replyId = e.reply_id ?? metadata?.id ?? metadata?.message_id ?? e.source?.message_id
   let response: any
-  if (replyId != null && typeof e.getReply === 'function') {
-    try { response = await e.getReply() } catch { /* Source metadata and the exact group-log entry may still identify it. */ }
+  // The group log sees the raw event before the loader attaches getReply, so fall back to the same lookup.
+  const target = e.group?.getMsg ? e.group : e.friend?.getMsg ? e.friend : undefined
+  const fetchReply = typeof e.getReply === 'function' ? () => e.getReply() : target ? () => target.getMsg(replyId) : undefined
+  if (replyId != null && fetchReply) {
+    try { response = await fetchReply() } catch { /* Source metadata and the exact group-log entry may still identify it. */ }
   }
   // OneBot returns the message directly; other adapters return {data:{message:{sender_id,segments}}}.
   const envelope = response?.data && typeof response.data === 'object' ? response.data : response
@@ -157,6 +180,10 @@ export async function extractInput(
   for (const batch of [stored, quotes]) for (const [index, image] of batch.savedImages.entries()) {
     savedImages.push(image); parts.push(batch.parts[index])
   }
+  if (quoted && !quoted.senderId) {
+    const uid = imageSender(e, quotes.savedImages.map(image => image.path))
+    if (uid) Object.assign(quoted, { senderId: uid, fromBot: false, name: knownName(e, uid) || quoted.name })
+  }
   const images = opts.vision ? parts.slice(0, Math.max(0, Math.floor(opts.maxImages))) : []
-  return { text, images, savedImages, quoted, imageSegments }
+  return { text, images, savedImages, quoted, quotedImageStart: quoted ? stored.savedImages.length : undefined, imageSegments }
 }

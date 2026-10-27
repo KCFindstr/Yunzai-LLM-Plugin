@@ -1,5 +1,5 @@
 import { config } from '../core/config.ts'
-import { captureImageSegments } from './message.ts'
+import { captureImageSegments, getQuoted, quoteBody, quoteLabel } from './message.ts'
 import { chatImageScope, imageLabel, truncateImageText } from './images.ts'
 import { formatNow, truncate } from '../core/util.ts'
 import { observeUsers, knownName, rememberMessage } from './roster.ts'
@@ -10,6 +10,8 @@ interface Line {
   uid: string
   name: string
   text: string
+  /** quoted (replied-to) message; its text shares the line's character budget */
+  quote?: { label: string; text: string; labels: string[] }
   mid?: string
   bot?: boolean
   /** conversation (session key) whose history already contains this line */
@@ -83,7 +85,9 @@ export function recordGroupMessage(e: any) {
   if (list.length > MAX_LINES) list.splice(0, list.length - MAX_LINES)
   logs.set(key, list)
   const cfg = config.get(), eff = config.effective(e.group_id)
-  if (cfg.enable && eff.enable && eff.chat.includeImages && !cfg.trigger.groupBlacklist.map(String).includes(String(e.group_id)) && (!cfg.trigger.groupWhitelist.length || cfg.trigger.groupWhitelist.map(String).includes(String(e.group_id)))) {
+  const images = cfg.enable && eff.enable && eff.chat.includeImages && !cfg.trigger.groupBlacklist.map(String).includes(String(e.group_id)) && (!cfg.trigger.groupWhitelist.length || cfg.trigger.groupWhitelist.map(String).includes(String(e.group_id)))
+  attachQuote(e, list, list.at(-1)!, images)
+  if (images) {
     const line = list.at(-1)!
     e._llmImageCapture ??= captureImageSegments(e.message ?? [], chatImageScope(e))
     void e._llmImageCapture.then((stored: Awaited<ReturnType<typeof captureImageSegments>>) => {
@@ -93,6 +97,54 @@ export function recordGroupMessage(e: any) {
       updateChatterImages(e, labels)
     }).catch(() => {})
   }
+}
+
+const IMAGE_LABEL = /\n?\[图片\d+:\/work\/attachments\/[^\]\r\n]+\]/g
+
+/** A reply's quoted message: from this log when it is recent, otherwise fetched from the adapter. */
+function attachQuote(e: any, list: Line[], line: Line, images: boolean) {
+  const reply = (e.message ?? []).find((segment: any) => segment?.type === 'reply')
+  if (!reply) return
+  const replyId = e.reply_id ?? reply.data?.id ?? reply.id ?? reply.data?.message_id ?? reply.message_id
+  const cached = replyId != null ? list.find(l => l.mid === String(replyId)) : undefined
+  if (cached) {
+    line.quote = {
+      label: `【引用 ${cached.bot ? `你(平台ID ${cached.uid})` : cached.name}】`,
+      text: cached.text.replace(IMAGE_LABEL, ''),
+      labels: cached.text.match(IMAGE_LABEL)?.map(label => label.trim()) ?? [],
+    }
+    return
+  }
+  void getQuoted(e).then(async q => {
+    if (!q) return
+    line.quote = { label: quoteLabel(q), text: truncate((q.text || '[非文本消息]').replace(/\s+/g, ' '), 200), labels: [] }
+    if (!images || !q.imageUrls.length) return
+    const stored = await captureImageSegments(q.imageUrls.map(url => ({ type: 'image', url })), chatImageScope(e))
+    const uid = q.senderId ? undefined : imageSender(e, stored.savedImages.map(image => image.path))
+    if (uid) line.quote.label = quoteLabel({ senderId: uid, fromBot: false, name: knownName(e, uid) || q.name })
+    line.quote.labels = stored.savedImages.map(imageLabel)
+  }).catch(() => {})
+}
+
+/**
+ * Laid out like the current message: the quote, then the message on the next line. The message keeps its
+ * text and the quoted text gets what is left of `maxChars`; image labels are not counted.
+ */
+function renderLine(l: Line, maxChars: number): string {
+  if (!l.quote) return truncateImageText(l.text, maxChars)
+  const room = maxChars - l.text.replace(IMAGE_LABEL, '').trim().length
+  const quoted = room >= 4 ? quoteBody(truncate(l.quote.text, room), l.quote.labels) : ['…', ...l.quote.labels].join(' ')
+  return `${l.quote.label}${quoted}\n${truncateImageText(l.text, maxChars)}`
+}
+
+/**
+ * Sender of a quoted image whose author the platform omitted: the one person in this bot/group's log who
+ * posted those exact bytes (saved paths are content hashes). Unknown when nobody or several people did.
+ */
+export function imageSender(e: any, paths: string[]): string | undefined {
+  if (!e?.group_id || !paths.length) return undefined
+  const senders = new Set((logs.get(keyOf(e)) ?? []).filter(l => paths.some(p => l.text.includes(`:${p}]`))).map(l => l.uid))
+  return senders.size === 1 ? [...senders][0] : undefined
 }
 
 export function recordBotMessage(e: any, text: string, conv?: string) {
@@ -126,7 +178,7 @@ export function recentLines(e: any, n: number, maxChars: number, conv?: string, 
     const l = list[i]
     if (l.t < cutoff) break
     if (mid && l.mid === mid) continue
-    out.push(`[${formatNow(new Date(l.t))}] ${l.name}: ${truncateImageText(l.text, maxChars)}`)
+    out.push(`[${formatNow(new Date(l.t))}] ${l.name}: ${renderLine(l, maxChars)}`)
   }
   return out.reverse().map((line, index) => `${index + 1}. ${line}`)
 }

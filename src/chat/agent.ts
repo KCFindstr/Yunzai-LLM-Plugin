@@ -175,7 +175,10 @@ async function runTurnInner(req: TurnRequest, ref: { turn?: TurnState; rolloutId
   turn.computerJob = req.computerResult?.id
   turn.imageScope = chatImageScope(e)
   turn.imageRefs = input.savedImages ?? input.images.map(part => saveImage(turn.imageScope!, part))
-  const attachmentNote = turn.imageRefs.length ? '\n' + turn.imageRefs.map(imageLabel).join('\n') : ''
+  // the quoted message's images are labelled inside the quote, not after the message
+  const quoteStart = input.quotedImageStart ?? turn.imageRefs.length
+  const ownImages = turn.imageRefs.slice(0, quoteStart)
+  const attachmentNote = ownImages.length ? '\n' + ownImages.map(imageLabel).join('\n') : ''
   ref.turn = turn
   const ctx: ToolCtx = { e, eff, isAdmin, model, turn }
   let nativeSearch = saved?.nativeSearch ?? (
@@ -213,7 +216,9 @@ async function runTurnInner(req: TurnRequest, ref: { turn?: TurnState; rolloutId
   // a date in the message ("昨天…", "上周六…") narrows recall to those days; today's chat is already in context
   const range = parseDateHints(input.text)
   const dated = range && !(range.from === localDay() && range.to === localDay()) ? range : undefined
-  const recalled = (await recallSession(convKey, input.text, dated ? 3 : 2, {
+  // a reply is about what it quotes: "看懂了吗" alone says nothing, its quoted text does
+  const recallQuery = [input.quoted?.text, input.text].filter(Boolean).join('\n')
+  const recalled = (await recallSession(convKey, recallQuery, dated ? 3 : 2, {
     automatic: true,
     range: dated,
     extra: recallSources(e, eff.chat.sessionScope),
@@ -224,7 +229,7 @@ async function runTurnInner(req: TurnRequest, ref: { turn?: TurnState; rolloutId
   // Mark for background archiving; the ordered group window still includes overlapping exchanges.
   if (!req.computerResult && !req.asyncResult) markHandled(e, convKey)
 
-  const userMsg: UserMsg = { role: 'user', content: [{ type: 'text', text: header.sent + text }, ...input.images.flatMap((part, index) => [{ type: 'text' as const, text: imageLabel(turn.imageRefs![index], index) }, part]), ...turn.imageRefs.slice(input.images.length).map((image, index) => ({ type: 'text' as const, text: imageLabel(image, input.images.length + index) }))] }
+  const userMsg: UserMsg = { role: 'user', content: [{ type: 'text', text: header.sent + text }, ...input.images.flatMap((part, index) => index < quoteStart ? [{ type: 'text' as const, text: imageLabel(turn.imageRefs![index], index) }, part] : [part]), ...ownImages.slice(input.images.length).map((image, index) => ({ type: 'text' as const, text: imageLabel(image, input.images.length + index) }))] }
   const storedUser: UserMsg = {
     role: 'user',
     content: [{ type: 'text', text: header.stored + text + attachmentNote }],
