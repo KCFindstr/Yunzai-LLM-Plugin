@@ -8615,6 +8615,7 @@ ${truncate(text2, 6e3)}`);
   {
     names: ["\u6DFB\u52A0\u7BA1\u7406\u5458", "\u5220\u9664\u7BA1\u7406\u5458"],
     level: "master",
+    atArgument: true,
     async run({ e, args, self }) {
       const qq = (args.match(/\d{5,}/) ?? [])[0] ?? (e.at ? String(e.at) : "");
       if (!qq) return e.reply("\u8BF7\u63D0\u4F9B QQ \u53F7");
@@ -9270,15 +9271,16 @@ ${md}
     }
   }
 ];
-function addressedElsewhere(e) {
+function addressedElsewhere(e, atArgument = false) {
   if (!e?.group_id) return false;
-  const leading = [];
+  const ats = [];
   for (const segment of e.message ?? []) {
     if (segment?.type === "reply" || segment?.type === "text" && !String(segment.text ?? "").trim()) continue;
-    if (segment?.type !== "at") break;
-    leading.push(segment);
+    if (segment?.type === "at") ats.push(segment);
+    else if (atArgument) break;
   }
-  return leading.length > 0 && !leading.some((at) => String(at.qq) === String(e.self_id) || at.qq === "all");
+  const others = ats.filter((at) => at.qq !== "all");
+  return others.length > 0 && !others.some((at) => String(at.qq) === String(e.self_id));
 }
 var NAMES = COMMANDS.flatMap((c) => c.names.map((n) => [n.toLowerCase(), c])).sort((a, b) => b[0].length - a[0].length);
 var LLMAdmin = class extends BasePlugin {
@@ -9293,7 +9295,6 @@ var LLMAdmin = class extends BasePlugin {
     });
   }
   async dispatch() {
-    if (addressedElsewhere(this.e)) return false;
     const e = commandEvent(this.e, config.effective(this.e.group_id).reply, true);
     try {
       return await this.dispatchEvent(e);
@@ -9305,6 +9306,7 @@ var LLMAdmin = class extends BasePlugin {
     const text2 = String(e.msg ?? "").replace(/^#\s*llm/i, "").trim();
     const lower = text2.toLowerCase();
     const hit = NAMES.find(([n]) => n === "" ? lower === "" : lower.startsWith(n));
+    if (addressedElsewhere(this.e, Boolean(hit?.[1].atArgument))) return false;
     if (!hit) {
       await e.reply("\u6CA1\u6709\u8FD9\u4E2A\u6307\u4EE4\uFF0C\u53D1\u9001 #llm\u5E2E\u52A9 \u67E5\u770B\u5168\u90E8\u6307\u4EE4");
       return true;

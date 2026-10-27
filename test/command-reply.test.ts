@@ -31,17 +31,20 @@ describe('command reply formatting', () => {
   it('leaves #llm commands addressed to another bot alone, but keeps @ arguments and @this-bot', async () => {
     config.set('reply.markdown', false)
     const run = async (message: any[]) => {
-      const { e, sent } = fakeEvent({ isMaster: true, msg: '#llm帮助', message })
+      const msg = message.filter(segment => segment.type === 'text').map(segment => segment.text).join('').trim()
+      const { e, sent } = fakeEvent({ isMaster: true, msg, message })
       const admin = new LLMAdmin()
       admin.e = e
       return { handled: await admin.dispatch(), sent, self: e.self_id }
     }
     const text = { type: 'text', text: ' #llm帮助' }
-    const other = await run([{ type: 'at', qq: 'other-bot' }, text])
-    assert.equal(other.handled, false)
-    assert.equal(other.sent.length, 0)
+    for (const message of [[{ type: 'at', qq: 'other-bot' }, text], [{ type: 'text', text: '#llm状态' }, { type: 'at', qq: 'other-bot' }]]) {
+      const other = await run(message)
+      assert.equal(other.handled, false, JSON.stringify(message))
+      assert.equal(other.sent.length, 0)
+    }
     const { e } = fakeEvent({})
-    for (const message of [[{ type: 'at', qq: e.self_id }, text], [{ type: 'at', qq: 'other-bot' }, { type: 'at', qq: e.self_id }, text], [text], [{ type: 'text', text: '#llm记忆 ' }, { type: 'at', qq: 'someone' }]]) {
+    for (const message of [[{ type: 'at', qq: e.self_id }, text], [{ type: 'at', qq: 'other-bot' }, { type: 'at', qq: e.self_id }, text], [text], [{ type: 'text', text: '#llm删除管理员 ' }, { type: 'at', qq: 'someone' }]]) {
       const result = await run(message)
       assert.equal(result.handled, true, JSON.stringify(message))
       assert.ok(result.sent.length > 0)

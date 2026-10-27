@@ -46,6 +46,8 @@ interface Ctx {
 interface Cmd {
   names: string[]
   level: 'user' | 'admin' | 'master'
+  /** takes an @mention after the command text as its target user */
+  atArgument?: boolean
   run: (c: Ctx) => Promise<any>
 }
 
@@ -377,6 +379,7 @@ const COMMANDS: Cmd[] = [
   {
     names: ['添加管理员', '删除管理员'],
     level: 'master',
+    atArgument: true,
     async run({ e, args, self }) {
       const qq = (args.match(/\d{5,}/) ?? [])[0] ?? (e.at ? String(e.at) : '')
       if (!qq) return e.reply('请提供 QQ 号')
@@ -1007,18 +1010,20 @@ const COMMANDS: Cmd[] = [
 ]
 
 /**
- * "@另一个机器人 #llm…" in a group is meant for that bot: the message opens with @mentions and none is this bot.
- * @mentions after the command text are arguments (#llm记忆 @某人) and do not count.
+ * A group command that @mentions another account but not this bot is meant for that account's bot
+ * ("@岛风 #llm状态", "#llm状态@岛风"). For a command that takes an @ target after its text (#llm添加管理员 @某人),
+ * only @mentions before the command text address a bot.
  */
-export function addressedElsewhere(e: any): boolean {
+export function addressedElsewhere(e: any, atArgument = false): boolean {
   if (!e?.group_id) return false
-  const leading: any[] = []
+  const ats: any[] = []
   for (const segment of e.message ?? []) {
     if (segment?.type === 'reply' || (segment?.type === 'text' && !String(segment.text ?? '').trim())) continue
-    if (segment?.type !== 'at') break
-    leading.push(segment)
+    if (segment?.type === 'at') ats.push(segment)
+    else if (atArgument) break
   }
-  return leading.length > 0 && !leading.some(at => String(at.qq) === String(e.self_id) || at.qq === 'all')
+  const others = ats.filter(at => at.qq !== 'all')
+  return others.length > 0 && !others.some(at => String(at.qq) === String(e.self_id))
 }
 
 const NAMES = COMMANDS.flatMap(c => c.names.map(n => [n.toLowerCase(), c] as const)).sort((a, b) => b[0].length - a[0].length)
@@ -1037,7 +1042,6 @@ export class LLMAdmin extends BasePlugin {
   }
 
   async dispatch(): Promise<boolean> {
-    if (addressedElsewhere(this.e)) return false
     const e = commandEvent(this.e, config.effective(this.e.group_id).reply, true)
     try { return await this.dispatchEvent(e) }
     finally { await flushCommand(e) }
@@ -1047,6 +1051,7 @@ export class LLMAdmin extends BasePlugin {
     const text = String(e.msg ?? '').replace(/^#\s*llm/i, '').trim()
     const lower = text.toLowerCase()
     const hit = NAMES.find(([n]) => (n === '' ? lower === '' : lower.startsWith(n)))
+    if (addressedElsewhere(this.e, Boolean(hit?.[1].atArgument))) return false
     if (!hit) {
       await e.reply('没有这个指令，发送 #llm帮助 查看全部指令')
       return true
