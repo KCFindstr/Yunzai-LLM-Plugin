@@ -59,7 +59,6 @@ describe('thinking judge', () => {
     const n = llm.requests.length
     assert.equal((await judgeMessage({ text: '哈哈' }, cfg(), q)).source, 'obvious')
     assert.equal((await judgeMessage({ text: '' }, cfg(), q)).kind, 'casual')
-    assert.equal((await judgeMessage({ text: 'x'.repeat(400) }, cfg(), q)).kind, 'complex')
     assert.equal(llm.requests.length, n)
   })
 

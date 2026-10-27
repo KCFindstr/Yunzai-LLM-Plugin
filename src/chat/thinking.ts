@@ -97,13 +97,12 @@ export interface ThinkingDecision extends Omit<Judgement, 'kind' | 'source'> {
   source: Judgement['source'] | 'fixed' | 'uniform' | 'unsupported'
 }
 
-/** Cases not worth a judge call: nothing to read, a few characters of chit-chat, or a wall of text. */
+/** Cases not worth a judge call: nothing to read or a few characters of chit-chat. */
 function obvious(t: string, input: JudgeInput): MessageKind | undefined {
   const photos = photoCount(`${t}${input.quotedText ?? ''}`, input.images)
   // a bare picture is something to look at; a bare sticker is chit-chat
   if (!t.replace(/\[(图片|表情包)\]/g, '').trim()) return photos ? 'question' : 'casual'
   if (t.length <= 4 && !/[?？]/.test(t) && !input.quoted && !photos) return 'casual'
-  if (t.length > 300) return 'complex'
   return undefined
 }
 
