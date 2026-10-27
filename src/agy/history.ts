@@ -279,7 +279,7 @@ export function resolveAgyHistory(job: ComputerJob, brain = agyHostPaths()[1]) {
       pair(run.filter(event => event.tool === 'invoke_subagent' && !event.subagent && (event.index != null || event.phase === 'running')),
         own.filter(entry => createdSubagent(entry)), (entry, event) => {
           const subagent = createdSubagent(entry)
-          return subagent && { subagent, ...event.phase === 'running' ? { phase: 'completed' as const, text: '已创建子代理' } : {} }
+          return subagent ? { subagent, ...event.phase === 'running' ? { phase: 'completed' as const, text: '已创建子代理' } : {} } : undefined
         })
     })
     if (updates.size) patchAgyEvents(job.id, event => updates.get(event.seq))

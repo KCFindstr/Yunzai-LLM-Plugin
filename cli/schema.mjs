@@ -323,7 +323,7 @@ const tools = obj(
       enable: bool('宿主机异步工作进程 AGY（sandbox + turbo）'),
       access: oneOf(['admin', 'all'], '谁可以使用 AGY（all 将向所有人开放主机完整访问）'),
       executable: str('宿主机 AGY CLI 路径（留空使用 data/agy-setup/agy.exe）', { allowEmpty: true }),
-      maxMinutes: int('任务最多分钟数', { min: 1, max: 30 }),
+      maxMinutes: int('任务最多分钟数', { min: 1, max: 1440 }),
       maxQueue: int('排队上限', { min: 1, max: 50 }),
       maxChainDepth: int('后台结果回复中可连续新建任务的次数（0 为禁止）', { min: 0, max: 10 }),
     }, '异步代理'),

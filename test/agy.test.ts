@@ -157,7 +157,7 @@ describe('AGY host worker and async handoff', () => {
   it('defaults off and bounds configuration', () => {
     assert.equal(normalize({}).tools.agy.enable, false)
     const cfg = normalize({ tools: { agy: { enable: true, maxMinutes: 9999, maxQueue: -5, distro: '../escape' } } }).tools.agy
-    assert.equal(cfg.maxMinutes, 30); assert.equal(cfg.maxQueue, 1); assert.equal('distro' in cfg, false)
+    assert.equal(cfg.maxMinutes, 1440); assert.equal(cfg.maxQueue, 1); assert.equal('distro' in cfg, false)
   })
   it('defers execution until after the acknowledgement, prevents duplicates and hides other owners', async () => {
     const ctx = context(), tool = registry.get('agy')!

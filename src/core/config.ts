@@ -396,7 +396,7 @@ export function normalize(raw: any): PluginConfig {
     enable: agy.enable === true,
     access: agy.access === 'all' ? 'all' : 'admin',
     executable: typeof agy.executable === 'string' ? agy.executable : '',
-    maxMinutes: bounded(agy.maxMinutes, 10, 1, 30),
+    maxMinutes: bounded(agy.maxMinutes, 10, 1, 1440),
     maxQueue: bounded(agy.maxQueue, 8, 1, 50),
     maxChainDepth: bounded(agy.maxChainDepth, 1, 0, 10),
   }

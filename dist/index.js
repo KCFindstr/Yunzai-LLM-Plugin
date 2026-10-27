@@ -592,7 +592,7 @@ function normalize(raw) {
     enable: agy.enable === true,
     access: agy.access === "all" ? "all" : "admin",
     executable: typeof agy.executable === "string" ? agy.executable : "",
-    maxMinutes: bounded(agy.maxMinutes, 10, 1, 30),
+    maxMinutes: bounded(agy.maxMinutes, 10, 1, 1440),
     maxQueue: bounded(agy.maxQueue, 8, 1, 50),
     maxChainDepth: bounded(agy.maxChainDepth, 1, 0, 10)
   };
@@ -5518,7 +5518,7 @@ function resolveAgyHistory(job, brain = agyHostPaths()[1]) {
         own.filter((entry) => createdSubagent(entry)),
         (entry, event) => {
           const subagent = createdSubagent(entry);
-          return subagent && { subagent, ...event.phase === "running" ? { phase: "completed", text: "\u5DF2\u521B\u5EFA\u5B50\u4EE3\u7406" } : {} };
+          return subagent ? { subagent, ...event.phase === "running" ? { phase: "completed", text: "\u5DF2\u521B\u5EFA\u5B50\u4EE3\u7406" } : {} } : void 0;
         }
       );
     });
@@ -11295,7 +11295,7 @@ var tools = obj(
       enable: bool("\u5BBF\u4E3B\u673A\u5F02\u6B65\u5DE5\u4F5C\u8FDB\u7A0B AGY\uFF08sandbox + turbo\uFF09"),
       access: oneOf(["admin", "all"], "\u8C01\u53EF\u4EE5\u4F7F\u7528 AGY\uFF08all \u5C06\u5411\u6240\u6709\u4EBA\u5F00\u653E\u4E3B\u673A\u5B8C\u6574\u8BBF\u95EE\uFF09"),
       executable: str("\u5BBF\u4E3B\u673A AGY CLI \u8DEF\u5F84\uFF08\u7559\u7A7A\u4F7F\u7528 data/agy-setup/agy.exe\uFF09", { allowEmpty: true }),
-      maxMinutes: int("\u4EFB\u52A1\u6700\u591A\u5206\u949F\u6570", { min: 1, max: 30 }),
+      maxMinutes: int("\u4EFB\u52A1\u6700\u591A\u5206\u949F\u6570", { min: 1, max: 1440 }),
       maxQueue: int("\u6392\u961F\u4E0A\u9650", { min: 1, max: 50 }),
       maxChainDepth: int("\u540E\u53F0\u7ED3\u679C\u56DE\u590D\u4E2D\u53EF\u8FDE\u7EED\u65B0\u5EFA\u4EFB\u52A1\u7684\u6B21\u6570\uFF080 \u4E3A\u7981\u6B62\uFF09", { min: 0, max: 10 })
     }, "\u5F02\u6B65\u4EE3\u7406"),
