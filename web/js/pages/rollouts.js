@@ -1,14 +1,10 @@
 import { enc, get } from '../api.js'
 import { menuButton } from '../main.js'
-import { badge, card, empty, fmt, h, icon, modal, mount, pager, spinner, textBlock, responseSection, mentionText } from '../ui.js'
+import { badge, statusBadge, phaseBadge, card, empty, fmt, h, icon, modal, mount, pager, spinner, textBlock, responseSection, mentionText } from '../ui.js'
 import { parseRolloutJson } from '../rollout-data.js'
 import { contextInspector } from '../context-inspector.js'
 import { initialPromptText } from '../context-view.js'
 
-const STATUS = {
-  queued: ['排队中', 'accent'], running: ['执行中', 'accent'], waiting_callback: ['等待回调', 'accent'], completed: ['已完成', 'ok'],
-  failed: ['失败', 'bad'], blocked: ['额度不足', 'warn'], interrupted: ['已中断', 'warn'],
-}
 const EVENT = {
   request: ['用户输入', 'chat'], callback: ['后台结果', 'logs'], progress: ['进度', 'clock'], response: ['模型响应', 'models'],
   thinking: ['思考强度', 'models'],
@@ -92,7 +88,7 @@ function timelineEvent(event, opened, r) {
     event.images?.length ? badge(`${event.images.length} 张图片`) : null,
     event.step != null ? badge(`第 ${event.step} 轮`) : null,
     event.thinking ? badge(`思考 ${event.thinking}`) : null,
-    event.phase ? badge(event.phase === 'running' ? '执行中' : event.phase === 'skipped' ? '未执行' : event.isError ? '失败' : '已返回', event.isError ? 'bad' : event.phase === 'running' ? 'accent' : '') : null,
+    phaseBadge(event),
     event.ms != null ? h('span', { class: 'small muted' }, fmt.dur(event.ms)) : null,
     h('time', { class: 'small muted', dateTime: new Date(event.at).toISOString() }, new Date(event.at).toLocaleTimeString('zh-CN', { hour12: false })))
   const response = responseSection(event.text, { heading: title, key: `text:${event.seq}`, open: opened.get(`text:${event.seq}`), limit: 280, markdown: ['response', 'callback'].includes(event.kind), className: event.isError ? 'small bad' : 'small' })
@@ -166,9 +162,8 @@ export async function render(root, [id]) {
     listSnapshot = key
     const visible = rollouts.filter(r => !filter || `${r.input} ${r.label} ${r.model ?? ''} ${r.id}`.toLowerCase().includes(filter))
     mount(items, visible.length ? pages.slice(visible).map(r => {
-      const [label, kind] = STATUS[r.status] ?? [r.status, '']
       return h('a', { class: `list-item computer-job ${r.id === selected ? 'sel' : ''}`, href: `#/rollouts/${enc(r.id)}`, 'aria-current': r.id === selected ? 'page' : undefined },
-        h('div', { class: 'row' }, badge(label, kind), h('span', { class: 'small muted right' }, fmt.short(r.createdAt))),
+        h('div', { class: 'row' }, statusBadge(r.status), h('span', { class: 'small muted right' }, fmt.short(r.createdAt))),
         h('strong', { class: 'clamp' }, mentionText(r.input)),
         h('span', { class: 'small muted clamp' }, r.label),
         h('span', { class: 'small muted' }, [r.model, `${r.steps} 轮`, fmt.usd(r.cost)].filter(Boolean).join(' · ')))
@@ -189,12 +184,11 @@ export async function render(root, [id]) {
     if (snapshot === key) return
     snapshot = key
     const opened = new Map([...detail.querySelectorAll('details[data-disclosure]')].map(el => [el.dataset.disclosure, el.open]))
-    const [label, kind] = STATUS[r.status] ?? [r.status, '']
     const execution = timelineEntries(r)
     const progress = r.events.at(-1)
     const reply = responseSection(r.reply, { heading: h('span', { class: 'card-title' }, icon('chat'), '最终回复'), key: 'reply', open: opened.get('reply'), limit: 560, className: 'rollout-reply', markdown: true })
     mount(detail,
-      card(h('span', { class: 'card-title' }, icon('layers'), '执行详情', badge(label, kind)),
+      card(h('span', { class: 'card-title' }, icon('layers'), '执行详情', statusBadge(r.status)),
         textBlock(r.input, { key: 'request', open: opened.get('request'), className: 'computer-task-text', limit: 220 }),
         h('div', { class: 'row small muted', style: { marginTop: '12px' } },
           h('span', r.label), h('span', SOURCE[r.source]), h('time', fmt.time(r.createdAt))),

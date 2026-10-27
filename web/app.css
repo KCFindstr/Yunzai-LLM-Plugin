@@ -10,6 +10,8 @@
   --ok: #16805d;
   --warn: #a96809;
   --bad: #ce4052;
+  --run: #2563c9;
+  --pending: #7048c2;
   --side: #fff;
   --side-text: #5b707b;
   --side-line: #e4e9ed;
@@ -31,7 +33,7 @@
   :root:not([data-theme="light"]) {
     --bg: #101b22; --panel: #18262e; --panel-2: #1e3039; --line: #2b3c45;
     --text: #e3edf1; --muted: #9aafb9; --accent: #61d6b5; --accent-soft: #61d6b517;
-    --ok: #61d6a5; --warn: #edba65; --bad: #ff8d9a; --side: #102129;
+    --ok: #61d6a5; --warn: #edba65; --bad: #ff8d9a; --side: #102129; --run: #79aaff; --pending: #b9a1ff;
     --side-text: #aebfc6; --side-line: #2b3c45;
     --canvas-bg: #0b141d; --canvas-glow: #19343e; --canvas-ink: #e3edf1; --canvas-overlay: #0d1922ed; --canvas-star: #c8d2ff55;
     --shadow: 0 2px 6px #0001, 0 8px 24px #0001; color-scheme: dark;
@@ -44,7 +46,7 @@
 :root[data-theme="dark"] {
   --bg: #101b22; --panel: #18262e; --panel-2: #1e3039; --line: #2b3c45;
   --text: #e3edf1; --muted: #9aafb9; --accent: #61d6b5; --accent-soft: #61d6b517;
-  --ok: #61d6a5; --warn: #edba65; --bad: #ff8d9a; --side: #102129;
+  --ok: #61d6a5; --warn: #edba65; --bad: #ff8d9a; --side: #102129; --run: #79aaff; --pending: #b9a1ff;
   --side-text: #aebfc6; --side-line: #2b3c45;
   --canvas-bg: #0b141d; --canvas-glow: #19343e; --canvas-ink: #e3edf1; --canvas-overlay: #0d1922ed; --canvas-star: #c8d2ff55;
   --shadow: 0 2px 6px #0001, 0 8px 24px #0001; color-scheme: dark;
@@ -172,6 +174,11 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent);
 .badge.ok { background: #17a96b13; color: var(--ok); border-color: transparent; }
 .badge.bad { background: #e0445a13; color: var(--bad); border-color: transparent; }
 .badge.warn { background: #d98b0b13; color: var(--warn); border-color: transparent; }
+.badge.run { background: color-mix(in srgb, var(--run) 12%, transparent); color: var(--run); border-color: transparent; }
+.badge.pending { background: color-mix(in srgb, var(--pending) 11%, transparent); color: var(--pending); border-color: color-mix(in srgb, var(--pending) 35%, transparent); border-style: dashed; }
+.badge.run::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 5px; border-radius: 50%; background: currentColor; vertical-align: 1px; animation: badge-pulse 1.4s ease-in-out infinite; }
+@keyframes badge-pulse { 50% { opacity: .3; } }
+@media (prefers-reduced-motion: reduce) { .badge.run::before { animation: none; } }
 .badge + .badge { margin-left: 6px; }
 .chips > .badge + .badge, .row > .badge + .badge { margin-left: 0; }
 .dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; background: var(--muted); flex: none; }
@@ -371,6 +378,14 @@ details[open] > summary .when-open { display: inline; }
 .tool-disclosure[open] .tool-preview { display: none; }
 .tool-content { border: 1px solid var(--line); background: var(--panel-2); border-radius: 10px; padding: 12px 14px; margin-top: 12px; display: flex; flex-direction: column; gap: 8px; }
 .tool-content .computer-arguments { margin-top: 2px; }
+.subagent-disclosure { margin-top: 4px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.subagent-disclosure > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 9px 12px; border-radius: 10px; font-size: 12.5px; }
+.subagent-disclosure > summary::-webkit-details-marker { display: none; }
+.subagent-disclosure > summary:hover { background: var(--panel-2); }
+.subagent-disclosure > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.subagent-disclosure > summary > .icon:last-child { margin-left: auto; transition: transform .15s ease; }
+.subagent-disclosure[open] > summary > .icon:last-child { transform: rotate(90deg); }
+.subagent-body { border-top: 1px solid var(--line); padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .thinking-step { margin-top: 10px; }
 .thinking-step > p { margin-top: 8px; }
 .judge-probabilities { display: grid; gap: 9px; max-width: 510px; margin-top: 15px; }

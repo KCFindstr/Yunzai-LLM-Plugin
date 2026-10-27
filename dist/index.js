@@ -1737,6 +1737,36 @@ var init_session = __esm({
   }
 });
 
+// src/agy/paths.ts
+import path5 from "node:path";
+import os from "node:os";
+function agyHostPaths() {
+  return [path5.resolve(IMAGE_STORE_ROOT), path5.join(os.userInfo().homedir, ".gemini", "antigravity-cli", "brain")];
+}
+function agyWorkspace(workspaceId) {
+  if (!/^[a-f0-9]{10}$/.test(workspaceId)) throw Error("\u65E0\u6548\u7684 AGY \u5DE5\u4F5C\u533A\u7F16\u53F7");
+  return path5.resolve(DATA_DIR, "agy-workspaces", workspaceId);
+}
+function agyPathInstructions(workspaceId) {
+  return `Path mapping (bot aliases are not real host paths): /work/attachments/<rest> = ${JSON.stringify(path5.resolve(IMAGE_STORE_ROOT))} + <rest>; /work/agy/${workspaceId}/out/<rest> = ${JSON.stringify(path5.join(agyWorkspace(workspaceId), "out"))} + <rest>; CLI-generated brain/<rest> = ${JSON.stringify(agyHostPaths()[1])} + <rest>. Resolve aliases to host paths when reading files/images. Keep intermediates in the working folder; ALWAYS save final deliverables in its out directory, and report them using /work/agy/${workspaceId}/out/<rest> aliases, never the real host path. If generate_image saves to brain/, use native host commands to COPY the generated file into out/ before reporting success. Verify the destination file exists; a suggested path or a file containing instructions to copy is not a delivered image. The image store and CLI brain directory are native --add-dir workspaces; no VM or command proxy is needed.`;
+}
+function agyOutputFile(alias, workspaceId) {
+  const prefix = `/work/agy/${workspaceId}/out/`;
+  if (!alias.startsWith(prefix)) throw Error("\u53EA\u80FD\u8BFB\u53D6\u5F53\u524D AGY \u4F1A\u8BDD\u7684\u8F93\u51FA\u6587\u4EF6");
+  const root = path5.join(agyWorkspace(workspaceId), "out");
+  const file = path5.resolve(root, alias.slice(prefix.length));
+  const relative = path5.relative(root, file);
+  if (!relative || relative.startsWith("..") || path5.isAbsolute(relative)) throw Error("\u65E0\u6548\u7684 AGY \u8F93\u51FA\u8DEF\u5F84");
+  return file;
+}
+var init_paths2 = __esm({
+  "src/agy/paths.ts"() {
+    "use strict";
+    init_paths();
+    init_images();
+  }
+});
+
 // src/core/setup.ts
 import fs4 from "node:fs";
 import path6 from "node:path";
@@ -5253,6 +5283,9 @@ function cleanEvent(event) {
     kind: event.kind,
     text: agyHistoryText(event.text, secrets, event.kind === "context" ? 32e3 : 12e3),
     step: event.step,
+    index: event.index,
+    thinking: event.thinking ? agyHistoryText(event.thinking, secrets) : void 0,
+    subagent: event.subagent && CONVERSATION.test(event.subagent) ? event.subagent : void 0,
     model: event.model ? agyHistoryText(event.model, secrets, 100) : void 0,
     tool: event.tool ? agyHistoryText(event.tool, secrets, 100) : void 0,
     args: event.args ? agyHistoryText(event.args, secrets) : void 0,
@@ -5284,6 +5317,215 @@ function recordAgyEvent(id, event) {
     store11.save();
   } catch {
     log.warn("AGY \u6267\u884C\u8BB0\u5F55\u4FDD\u5B58\u5931\u8D25");
+  }
+}
+function patchAgyEvents(id, patch) {
+  try {
+    const store11 = storeFor2(id);
+    let dirty = false;
+    store11.data.events = store11.data.events.map((event) => {
+      const update = patch(event);
+      if (!update) return event;
+      dirty = true;
+      return cleanEvent({ ...event, ...update });
+    });
+    if (dirty) store11.save();
+  } catch {
+    log.warn("AGY \u6267\u884C\u8BB0\u5F55\u4FDD\u5B58\u5931\u8D25");
+  }
+}
+function readAgyTranscript(conversationId, brain = agyHostPaths()[1]) {
+  if (!CONVERSATION.test(conversationId)) return;
+  let text2;
+  try {
+    text2 = fs18.readFileSync(path18.join(brain, conversationId, ".system_generated", "logs", "transcript.jsonl"), "utf8");
+  } catch {
+    return;
+  }
+  const entries2 = [];
+  for (const line of text2.split("\n")) {
+    try {
+      const entry = JSON.parse(line);
+      if (Number.isInteger(entry?.step_index)) entries2.push(entry);
+    } catch {
+    }
+  }
+  return entries2;
+}
+function createdSubagent(entry) {
+  const id = typeof entry.content === "string" ? /Created the following subagent:[\s\S]*?"conversationId":\s*"([0-9a-f-]{36})"/i.exec(entry.content)?.[1] : void 0;
+  return id && CONVERSATION.test(id) ? id.toLowerCase() : void 0;
+}
+function transcriptEvents(entries2) {
+  const events = [], calls = [];
+  let task = "", step = 0;
+  const time = (value) => typeof value === "string" && Date.parse(value) || 0;
+  const argument = (value) => {
+    try {
+      return typeof value === "string" ? JSON.parse(value) : value;
+    } catch {
+      return value;
+    }
+  };
+  for (const entry of entries2) {
+    const at = time(entry.created_at), content = typeof entry.content === "string" ? entry.content : "";
+    if (entry.type === "SYSTEM_MESSAGE" || entry.type === "USER_INPUT") {
+      task ||= (/content=([\s\S]*?)(?:<\/SYSTEM_MESSAGE>|$)/.exec(content)?.[1] ?? content.replace(/<\/?USER_REQUEST>/g, "")).trim();
+    } else if (entry.type === "PLANNER_RESPONSE") {
+      step++;
+      const thinking = thinkingOf(entry);
+      if (content.trim() || thinking) events.push({
+        seq: 0,
+        at,
+        kind: "response",
+        text: content,
+        thinking,
+        step,
+        index: entry.step_index,
+        inputTokens: entry.input_tokens,
+        outputTokens: entry.output_tokens
+      });
+      for (const call of entry.tool_calls ?? []) {
+        const args = Object.fromEntries(Object.entries(call.args ?? {}).map(([key, value]) => [key, argument(value)]));
+        const event = { seq: 0, at, kind: "tool", tool: String(call.name ?? "tool"), args: JSON.stringify(args), text: "\u6B63\u5728\u6267\u884C", phase: "running" };
+        events.push(event);
+        calls.push(event);
+      }
+    } else if (calls.length) {
+      const event = calls.shift();
+      const [, created, completed, body] = /^Created At: (.*)\nCompleted At: (.*)\n([\s\S]*)$/.exec(content) ?? [, "", "", content];
+      const failed = /ERROR|FAIL|CANCEL/i.test(entry.status ?? "");
+      Object.assign(event, {
+        index: entry.step_index,
+        phase: entry.status === "DONE" || failed ? "completed" : "running",
+        isError: failed,
+        text: `${body.trim() || (failed ? "\u5DE5\u5177\u6267\u884C\u5931\u8D25" : "\u5DE5\u5177\u8C03\u7528\u5B8C\u6210")}${entry.media?.length ? `
+[\u9644\u5E26 ${entry.media.length} \u4E2A\u5A92\u4F53\u6587\u4EF6]` : ""}`,
+        ms: time(completed) && time(created) ? time(completed) - time(created) : void 0,
+        subagent: createdSubagent(entry)
+      });
+    }
+  }
+  const last = entries2.at(-1);
+  return { task, events, running: !(last?.type === "PLANNER_RESPONSE" && !last.tool_calls?.length) };
+}
+function agySubagentHistory(id, conversationId, brain = agyHostPaths()[1]) {
+  const target = conversationId.toLowerCase();
+  let level = [...new Set(storeFor2(id).data.events.map((event) => event.subagent).filter((child2) => Boolean(child2)))];
+  const seen = /* @__PURE__ */ new Set();
+  for (let depth = 0; depth < 4 && level.length && !level.includes(target); depth++) {
+    level.forEach((child2) => seen.add(child2));
+    level = [...new Set(level.flatMap((child2) => subagentsOf(readAgyTranscript(child2, brain) ?? [])))].filter((child2) => !seen.has(child2));
+  }
+  if (!level.includes(target)) return;
+  const entries2 = readAgyTranscript(target, brain);
+  if (!entries2) return;
+  const secrets = privateValues(config.get());
+  const view = transcriptEvents(entries2);
+  const events = view.events.slice(-500).map((event, index) => cleanEvent({ ...event, seq: index + 1 }));
+  return { task: agyHistoryText(view.task, secrets, 16e3), running: view.running, events, dropped: Math.max(0, view.events.length - 500) };
+}
+function noteConversation(id, conversationId) {
+  if (!CONVERSATION.test(conversationId)) return;
+  try {
+    const store11 = storeFor2(id);
+    store11.data.conversations = [...store11.data.conversations ?? [], conversationId.toLowerCase()];
+    store11.save();
+  } catch {
+    log.warn("AGY \u6267\u884C\u8BB0\u5F55\u4FDD\u5B58\u5931\u8D25");
+  }
+}
+function findConversations(job, brain) {
+  let dirs;
+  try {
+    dirs = fs18.readdirSync(brain).filter((dir) => CONVERSATION.test(dir));
+  } catch {
+    return [];
+  }
+  const from = job.createdAt - 6e4, to = (job.updatedAt ?? Date.now()) + 6e4;
+  return dirs.map((dir) => ({ dir, prompt: readAgyTranscript(dir, brain)?.find((entry) => {
+    const at = Date.parse(entry.created_at ?? "");
+    return entry.type === "USER_INPUT" && at >= from && at <= to && entry.content?.includes(`Task: ${job.task}`);
+  }) })).filter(({ prompt }) => prompt).sort((a, b) => Date.parse(a.prompt.created_at) - Date.parse(b.prompt.created_at)).map(({ dir }) => dir.toLowerCase());
+}
+function resolveAgyHistory(job, brain = agyHostPaths()[1]) {
+  if (["queued", "running", "waiting"].includes(job.status)) return;
+  const store11 = storeFor2(job.id);
+  if (store11.data.resolved) return;
+  try {
+    const conversations = store11.data.conversations?.length ? store11.data.conversations : findConversations(job, brain);
+    const runs = [];
+    for (const event of store11.data.events) {
+      if (event.kind === "context") runs.push([]);
+      else runs.at(-1)?.push(event);
+    }
+    if (!runs.length) runs.push(store11.data.events);
+    if (conversations.length !== runs.length) return;
+    const updates = /* @__PURE__ */ new Map();
+    runs.forEach((run, i) => {
+      const entries2 = readAgyTranscript(conversations[i], brain) ?? [];
+      const byIndex = new Map(entries2.map((entry) => [entry.step_index, entry]));
+      const from = job.createdAt - 6e4, to = (job.updatedAt ?? Date.now()) + 6e4;
+      const own = entries2.filter((entry) => {
+        const at = Date.parse(entry.created_at ?? "");
+        return !(at < from || at > to);
+      });
+      const pair = (events, ordered, update) => {
+        const legacy = i === 0 && store11.data.dropped ? [] : events.filter((event) => event.index == null);
+        events.forEach((event) => {
+          const entry = event.index != null ? byIndex.get(event.index) : legacy.length === ordered.length && legacy.includes(event) ? ordered[legacy.indexOf(event)] : void 0;
+          const change = entry && update(entry, event);
+          if (change) updates.set(event.seq, change);
+        });
+      };
+      const aligned = /* @__PURE__ */ new Map();
+      if (!(i === 0 && store11.data.dropped)) {
+        const responses = own.filter((entry) => entry.type === "PLANNER_RESPONSE");
+        const issued = (from2) => {
+          const names2 = [], open = [];
+          for (const event of run.slice(from2 + 1)) {
+            if (event.kind === "response") break;
+            if (event.kind !== "tool") continue;
+            const tool = event.tool ?? "";
+            if (event.phase === "running") {
+              names2.push(tool);
+              open.push(tool);
+            } else if (open.includes(tool)) open.splice(open.lastIndexOf(tool), 1);
+            else names2.push(tool);
+          }
+          return names2.join(",");
+        };
+        let next = 0;
+        for (const [position, event] of run.entries()) {
+          if (event.kind !== "response" || event.index != null) continue;
+          const calls = issued(position);
+          while (next < responses.length && (responses[next].tool_calls ?? []).map((call) => call.name).join(",") !== calls) next++;
+          if (next === responses.length) {
+            aligned.clear();
+            break;
+          }
+          aligned.set(event, responses[next++]);
+        }
+      }
+      for (const event of run) {
+        if (event.kind !== "response" || event.thinking) continue;
+        const entry = event.index != null ? byIndex.get(event.index) : aligned.get(event);
+        const thinking = entry && thinkingOf(entry);
+        if (thinking) updates.set(event.seq, { thinking });
+      }
+      pair(
+        run.filter((event) => event.tool === "invoke_subagent" && !event.subagent && (event.index != null || event.phase === "running")),
+        own.filter((entry) => createdSubagent(entry)),
+        (entry, event) => {
+          const subagent = createdSubagent(entry);
+          return subagent && { subagent, ...event.phase === "running" ? { phase: "completed", text: "\u5DF2\u521B\u5EFA\u5B50\u4EE3\u7406" } : {} };
+        }
+      );
+    });
+    if (updates.size) patchAgyEvents(job.id, (event) => updates.get(event.seq));
+  } finally {
+    store11.data.resolved = true;
+    store11.save();
   }
 }
 function agyHistory(id) {
@@ -5320,9 +5562,32 @@ function pruneAgyHistory(ids) {
     fs18.rmSync(target, { recursive: true, force: true });
   }
 }
-function observeAgyJob(job, changed2) {
+function observeAgyJob(job, changed2, brain) {
   const texts = /* @__PURE__ */ new Map();
   const finished = /* @__PURE__ */ new Set();
+  const pendingThinking = /* @__PURE__ */ new Set(), pendingSubagents = /* @__PURE__ */ new Set();
+  let conversationId = "";
+  const fillFromTranscript = () => {
+    if (!(pendingThinking.size || pendingSubagents.size) || !conversationId) return;
+    const entries2 = new Map((readAgyTranscript(conversationId, brain) ?? []).map((entry) => [entry.step_index, entry]));
+    const thinking = /* @__PURE__ */ new Map(), subagents = /* @__PURE__ */ new Map();
+    for (const index of pendingThinking) {
+      const text2 = entries2.get(index) && thinkingOf(entries2.get(index));
+      if (text2) {
+        thinking.set(index, text2);
+        pendingThinking.delete(index);
+      }
+    }
+    for (const index of pendingSubagents) {
+      const child2 = entries2.get(index) && createdSubagent(entries2.get(index));
+      if (child2) {
+        subagents.set(index, child2);
+        pendingSubagents.delete(index);
+      }
+    }
+    if (!thinking.size && !subagents.size) return;
+    patchAgyEvents(job.id, (event) => event.index == null ? void 0 : event.kind === "response" && thinking.has(event.index) && !event.thinking ? { thinking: thinking.get(event.index) } : event.kind === "tool" && subagents.has(event.index) ? { subagent: subagents.get(event.index), ...event.phase === "running" ? { phase: "completed", text: "\u5DF2\u521B\u5EFA\u5B50\u4EE3\u7406" } : {} } : void 0);
+  };
   const progress = (text2) => {
     job.progress = text2;
     job.updatedAt = Date.now();
@@ -5335,6 +5600,10 @@ function observeAgyJob(job, changed2) {
       return;
     }
     if (event.event === "init") {
+      if (typeof event.conversation_id === "string") {
+        conversationId = event.conversation_id;
+        noteConversation(job.id, conversationId);
+      }
       progress("\u6A21\u578B\u5DF2\u542F\u52A8");
       recordAgyEvent(job.id, { kind: "progress", text: "\u6A21\u578B\u5DF2\u542F\u52A8", model: job.modelId });
       return;
@@ -5352,6 +5621,7 @@ ${agyHistoryText(event.result.error)}` : ""}` });
       return;
     }
     if (event.event === "runtime_exit") {
+      fillFromTranscript();
       recordAgyEvent(job.id, { kind: event.success ? "progress" : "error", text: `${event.detail}${event.error ? `
 ${event.error}` : ""}`, isError: !event.success });
       return;
@@ -5375,11 +5645,14 @@ ${event.error}` : ""}`, isError: !event.success });
         kind: "response",
         text: text2,
         step: job.steps,
+        index,
         model: job.modelId,
         ms: count(step.duration_seconds * 1e3),
         inputTokens: count(step.usage?.input_tokens),
         outputTokens: count(step.usage?.output_tokens)
       });
+      pendingThinking.add(index);
+      fillFromTranscript();
     } else if (step.step_type === "tool") {
       const tool = String(step.tool_name ?? step.tool_info?.name ?? "tool");
       const done = ["DONE", "ERROR", "FAILED"].includes(step.state);
@@ -5387,12 +5660,14 @@ ${event.error}` : ""}`, isError: !event.success });
       const activeKey = `${key}:active`;
       if (!done && finished.has(activeKey)) return;
       finished.add(done ? key : activeKey);
+      if (tool === "invoke_subagent") pendingSubagents.add(index);
       progress(done ? "\u5DE5\u5177\u5DF2\u8FD4\u56DE\uFF0C\u7EE7\u7EED\u5904\u7406" : `${agyHistoryText(tool, void 0, 100)} \u6267\u884C\u4E2D`);
       const isError = step.state !== "DONE" && done;
       recordAgyEvent(job.id, {
         kind: "tool",
         text: done ? agyHistoryText(step.tool_info?.output ?? step.tool_info?.error ?? step.error ?? (isError ? "\u5DE5\u5177\u6267\u884C\u5931\u8D25" : "\u5DE5\u5177\u8C03\u7528\u5B8C\u6210")) : "\u6B63\u5728\u6267\u884C",
         tool,
+        index,
         args: agyHistoryText(step.tool_info?.parameters),
         phase: done ? "completed" : "running",
         isError,
@@ -5401,7 +5676,7 @@ ${event.error}` : ""}`, isError: !event.success });
     }
   };
 }
-var ROOT3, stores3;
+var ROOT3, stores3, CONVERSATION, thinkingOf, subagentsOf;
 var init_history2 = __esm({
   "src/agy/history.ts"() {
     "use strict";
@@ -5410,8 +5685,12 @@ var init_history2 = __esm({
     init_store();
     init_log();
     init_privacy();
+    init_paths2();
     ROOT3 = path18.resolve(DATA_DIR, "agy-history");
     stores3 = /* @__PURE__ */ new Map();
+    CONVERSATION = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    thinkingOf = (entry) => typeof entry.thinking === "string" && entry.thinking.trim() ? entry.thinking.trim() : void 0;
+    subagentsOf = (entries2) => entries2.map(createdSubagent).filter((id) => Boolean(id));
   }
 });
 
@@ -6792,36 +7071,10 @@ init_images();
 // src/tools/imageFiles.ts
 init_images();
 init_session();
+init_paths2();
+init_exec();
 import fs5 from "node:fs";
 import path7 from "node:path";
-
-// src/agy/paths.ts
-init_paths();
-init_images();
-import path5 from "node:path";
-import os from "node:os";
-function agyHostPaths() {
-  return [path5.resolve(IMAGE_STORE_ROOT), path5.join(os.userInfo().homedir, ".gemini", "antigravity-cli", "brain")];
-}
-function agyWorkspace(workspaceId) {
-  if (!/^[a-f0-9]{10}$/.test(workspaceId)) throw Error("\u65E0\u6548\u7684 AGY \u5DE5\u4F5C\u533A\u7F16\u53F7");
-  return path5.resolve(DATA_DIR, "agy-workspaces", workspaceId);
-}
-function agyPathInstructions(workspaceId) {
-  return `Path mapping (bot aliases are not real host paths): /work/attachments/<rest> = ${JSON.stringify(path5.resolve(IMAGE_STORE_ROOT))} + <rest>; /work/agy/${workspaceId}/out/<rest> = ${JSON.stringify(path5.join(agyWorkspace(workspaceId), "out"))} + <rest>; CLI-generated brain/<rest> = ${JSON.stringify(agyHostPaths()[1])} + <rest>. Resolve aliases to host paths when reading files/images. Keep intermediates in the working folder; ALWAYS save final deliverables in its out directory, and report them using /work/agy/${workspaceId}/out/<rest> aliases, never the real host path. If generate_image saves to brain/, use native host commands to COPY the generated file into out/ before reporting success. Verify the destination file exists; a suggested path or a file containing instructions to copy is not a delivered image. The image store and CLI brain directory are native --add-dir workspaces; no VM or command proxy is needed.`;
-}
-function agyOutputFile(alias, workspaceId) {
-  const prefix = `/work/agy/${workspaceId}/out/`;
-  if (!alias.startsWith(prefix)) throw Error("\u53EA\u80FD\u8BFB\u53D6\u5F53\u524D AGY \u4F1A\u8BDD\u7684\u8F93\u51FA\u6587\u4EF6");
-  const root = path5.join(agyWorkspace(workspaceId), "out");
-  const file = path5.resolve(root, alias.slice(prefix.length));
-  const relative = path5.relative(root, file);
-  if (!relative || relative.startsWith("..") || path5.isAbsolute(relative)) throw Error("\u65E0\u6548\u7684 AGY \u8F93\u51FA\u8DEF\u5F84");
-  return file;
-}
-
-// src/tools/imageFiles.ts
-init_exec();
 async function readLocalImage(value, ctx) {
   if (typeof value !== "string" || !value.trim()) throw Error("\u8BF7\u63D0\u4F9B\u56FE\u7247\u8DEF\u5F84");
   const file = value.trim();
@@ -10369,6 +10622,7 @@ function agyDiagnosticLogger(id, stream, secrets) {
 
 // src/agy/runtime.ts
 init_history2();
+init_paths2();
 var AGY_MODEL = "gemini-3.8-flash-medium";
 var AGY_EFFORT = "medium";
 var agyRuntime = { spawn: spawn4 };
@@ -12203,8 +12457,16 @@ ${md}
   R("GET", "/api/logs", ({ query }) => recentLogs(Number(query.get("after")) || 0, query.get("level") || void 0, query.get("q") || "")),
   R("GET", "/api/agy", () => [...agyQueue.jobs].reverse().map(agyJobView)),
   R("GET", "/api/agy/:id/history", ({ params }) => {
+    const job = agyQueue.jobs.find((entry) => entry.id === params[0]);
+    if (!job) throw fail("\u4EFB\u52A1\u4E0D\u5B58\u5728", 404);
+    resolveAgyHistory(job);
+    return agyHistory(job.id);
+  }),
+  R("GET", "/api/agy/:id/subagents/:conversation", ({ params }) => {
     if (!agyQueue.jobs.some((job) => job.id === params[0])) throw fail("\u4EFB\u52A1\u4E0D\u5B58\u5728", 404);
-    return agyHistory(params[0]);
+    const history = agySubagentHistory(params[0], params[1]);
+    if (!history) throw fail("\u5B50\u4EE3\u7406\u8BB0\u5F55\u4E0D\u5B58\u5728", 404);
+    return history;
   }),
   R("POST", "/api/agy/:id/cancel", ({ params }) => {
     const job = agyQueue.jobs.find((entry) => entry.id === params[0]);

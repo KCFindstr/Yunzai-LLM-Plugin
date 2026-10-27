@@ -271,6 +271,15 @@ export const empty = text => h('div', { class: 'empty' }, text)
 export const card = (title, ...children) => h('section', { class: 'card' }, title ? h('h2', title) : null, children)
 export const stat = (k, v, s) => h('div', { class: 'stat' }, h('div', { class: 'k' }, k), h('div', { class: 'v' }, v), s ? h('div', { class: 's' }, s) : null)
 export const badge = (text, kind = '') => h('span', { class: `badge ${kind}` }, text)
+/** One colour per lifecycle stage on every job page: queued (pending), running, waiting, done, failed. */
+const STATUS = {
+  queued: ['排队中', 'pending'], running: ['执行中', 'run'], waiting: ['等待回复', 'warn'], waiting_callback: ['等待回调', 'warn'],
+  completed: ['已完成', 'ok'], failed: ['失败', 'bad'], cancelled: ['已取消', ''], interrupted: ['已中断', 'warn'], blocked: ['额度不足', 'warn'],
+}
+export const statusBadge = status => badge(...(STATUS[status] ?? [status, '']))
+export const phaseBadge = event => !event.phase ? null : event.isError ? badge('失败', 'bad')
+  : event.phase === 'running' ? badge('执行中', 'run') : event.phase === 'skipped' ? badge('未执行')
+  : event.phase === 'unreported' ? badge('未报告结果', 'warn') : badge('已返回', 'ok')
 export const spinner = () => h('span', { class: 'spin' })
 
 export function switchEl(checked, onchange, label = '启用或停用') {

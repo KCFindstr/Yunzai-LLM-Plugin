@@ -1,11 +1,7 @@
 import { enc, get, post } from '../api.js'
 import { menuButton } from '../main.js'
-import { act, badge, card, confirmDanger, empty, fmt, h, icon, modal, mount, pager, spinner, textBlock, responseSection, mentionText } from '../ui.js'
+import { act, badge, statusBadge, card, confirmDanger, empty, fmt, h, icon, modal, mount, pager, spinner, textBlock, responseSection, mentionText } from '../ui.js'
 
-const STATUS = {
-  queued: ['排队中', 'accent'], running: ['执行中', 'accent'], waiting: ['等待回复', 'warn'],
-  completed: ['已完成', 'ok'], failed: ['失败', 'bad'], cancelled: ['已取消', ''], interrupted: ['已中断', 'warn'],
-}
 const EVENT = { request: ['用户请求', 'persona'], response: ['电脑代理', 'models'], tool: ['工具结果', 'tools'], report: ['代理报告', 'check'], reply: ['对话回复', 'chat'], error: ['执行错误', 'alert'] }
 
 function expandIndicator() {
@@ -89,9 +85,8 @@ export async function render(root, [id]) {
     listSnapshot = key
     const visible = jobs.filter(job => !filter || `${job.task} ${job.id} ${job.modelId ?? ''} ${job.owner ?? ''}`.toLowerCase().includes(filter))
     mount(items, visible.length ? pages.slice(visible).map(job => {
-      const [label, kind] = STATUS[job.status] ?? [job.status, '']
       return h('a', { class: `list-item computer-job ${job.id === selected?.id ? 'sel' : ''}`, href: `#/computer/${enc(job.id)}`, 'aria-current': job.id === selected?.id ? 'page' : undefined },
-        h('div', { class: 'row' }, badge(label, kind), h('span', { class: 'small muted right' }, fmt.short(job.createdAt))),
+        h('div', { class: 'row' }, statusBadge(job.status), h('span', { class: 'small muted right' }, fmt.short(job.createdAt))),
         h('strong', { class: 'clamp' }, mentionText(job.task)),
         h('span', { class: 'small muted mono clamp' }, job.id),
         h('span', { class: 'small muted' }, [job.modelId, job.steps != null ? `${job.steps} 轮` : null, job.costUsd != null ? fmt.usd(job.costUsd) : null].filter(Boolean).join(' · ')),
@@ -114,7 +109,6 @@ export async function render(root, [id]) {
     snapshot = key
     const opened = new Set([...detail.querySelectorAll('details[open][data-seq]')].map(el => Number(el.dataset.seq)))
     const expanded = new Map([...detail.querySelectorAll('details[data-disclosure]')].map(el => [el.dataset.disclosure, el.open]))
-    const [label, kind] = STATUS[job.status] ?? [job.status, '']
     const replies = history.events.filter(event => event.kind === 'reply')
     const sent = replies.flatMap(event => event.images ?? [])
     const missing = replies.reduce((count, event) => count + Math.max(0, (event.imageCount ?? event.images?.length ?? 0) - (event.images?.length ?? 0)), 0)
@@ -123,7 +117,7 @@ export async function render(root, [id]) {
     const report = responseSection(job.report, { heading: h('summary', job.status === 'waiting' ? '等待用户回复的问题' : '最新代理报告'), key: 'report-text', open: true, markdown: 'auto' })
 
     mount(detail,
-      card(h('span', { class: 'card-title' }, icon('computer'), '任务详情', badge(label, kind)),
+      card(h('span', { class: 'card-title' }, icon('computer'), '任务详情', statusBadge(job.status)),
         textBlock(job.task, { key: 'computer-request', open: expanded.get('computer-request'), className: 'computer-task-text', limit: 220 }),
         h('div', { class: 'row small muted', style: { marginTop: '12px' } },
           h('span', `发起者 ${job.owner}`),

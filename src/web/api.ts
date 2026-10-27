@@ -26,7 +26,7 @@ import { indexSticker, stickerIncomplete } from '../stickers/indexer.ts'
 import { addImageSticker, listStickers, removeSticker, stickerFile, updateSticker, type Sticker } from '../stickers/store.ts'
 import { computerQueue } from '../tools/computer.ts'
 import { agyQueue, cancelAgyJob } from '../tools/agy.ts'
-import { agyHistory, agyJobView } from '../agy/history.ts'
+import { agyHistory, agyJobView, agySubagentHistory, resolveAgyHistory } from '../agy/history.ts'
 import { computerHistory, readComputerScreenshot } from '../computer/history.ts'
 import { helperToolLimit, registry } from '../tools/registry.ts'
 import { deleteSkill, listSkills, parseSkillMarkdown, saveSkill, skillsForTools } from '../tools/skills.ts'
@@ -690,8 +690,16 @@ export const routes: Route[] = [
 
   R('GET', '/api/agy', () => [...agyQueue.jobs].reverse().map(agyJobView)),
   R('GET', '/api/agy/:id/history', ({ params }) => {
+    const job = agyQueue.jobs.find(entry => entry.id === params[0])
+    if (!job) throw fail('任务不存在', 404)
+    resolveAgyHistory(job)
+    return agyHistory(job.id)
+  }),
+  R('GET', '/api/agy/:id/subagents/:conversation', ({ params }) => {
     if (!agyQueue.jobs.some(job => job.id === params[0])) throw fail('任务不存在', 404)
-    return agyHistory(params[0])
+    const history = agySubagentHistory(params[0], params[1])
+    if (!history) throw fail('子代理记录不存在', 404)
+    return history
   }),
   R('POST', '/api/agy/:id/cancel', ({ params }) => {
     const job = agyQueue.jobs.find(entry => entry.id === params[0])

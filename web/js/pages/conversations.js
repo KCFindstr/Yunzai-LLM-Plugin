@@ -1,6 +1,6 @@
 import { del, enc, get, post, put } from '../api.js'
 import { menuButton } from '../main.js'
-import { act, badge, card, confirmDanger, empty, fmt, h, icon, modal, mount, paged, pager, promptFields, tabs, mentionText, responseText } from '../ui.js'
+import { act, badge, statusBadge, card, confirmDanger, empty, fmt, h, icon, modal, mount, paged, pager, promptFields, tabs, mentionText, responseText } from '../ui.js'
 
 /** Recent turns table, shared with the overview page. */
 export function turnList(turns, { showConv = true } = {}) {
@@ -65,7 +65,7 @@ export async function render(root, [sub]) {
     },
       h('div', { class: 'row' }, h('b', { class: 'clamp' }, s.label), h('span', { class: 'right small muted' }, fmt.ago(s.updatedAt))),
       h('div', { class: 'row small muted', style: { gap: '6px' } },
-        s.waitingCallback ? badge('等待回调', 'accent') : null,
+        s.waitingCallback ? statusBadge('waiting_callback') : null,
         badge(kindLabel[s.kind] ?? s.kind),
         badge(`${s.messages / 2} 轮`),
         s.archive ? badge(`档案 ${s.archive}`) : null,
@@ -138,7 +138,7 @@ async function drawDetail(el, key, refresh) {
     ]
   }
   mount(el,
-    card(h('span', { class: 'card-title' }, icon('chat'), s.label, ' ', badge(kindLabel[s.kind] ?? s.kind), s.waitingCallback ? [' ', badge('等待回调', 'accent')] : null),
+    card(h('span', { class: 'card-title' }, icon('chat'), s.label, ' ', badge(kindLabel[s.kind] ?? s.kind), s.waitingCallback ? [' ', statusBadge('waiting_callback')] : null),
       h('div', { class: 'row small muted' },
         h('span', { class: 'mono' }, s.key),
         h('span', `最后活跃 ${fmt.time(s.updatedAt)}`),
