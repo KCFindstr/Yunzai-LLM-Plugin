@@ -183,13 +183,13 @@ describe('AGY host worker and async handoff', () => {
     }
   })
   it('preserves normal declarations, and delivers images', async () => {
-    for (const name of ['read_image', 'send_image', 'custom_tool']) registry.register({ name, description: name, parameters: {}, budgetExempt: true, run: async () => 'ok' })
+    for (const name of ['read_file', 'send_image', 'custom_tool']) registry.register({ name, description: name, parameters: {}, budgetExempt: true, run: async () => 'ok' })
     const ctx = context(); ctx.turn.asyncResult = { kind: 'agy', id: 'aabbccddee' }
     const offered = registry.forTurn(ctx)
-    assert.deepEqual(offered.map(tool => tool.name), ['custom_tool', 'read_image', 'send_image'])
+    assert.deepEqual(offered.map(tool => tool.name), ['custom_tool', 'read_file', 'send_image'])
     const allowed = registry.get('custom_tool')!
     assert.ok(!(await registry.execute([{ id: 'side-effect', name: 'custom_tool', args: {} }], ctx, [allowed])).results[0].isError)
-    registry.unregisterWhere(tool => ['read_image', 'send_image', 'custom_tool'].includes(tool.name))
+    registry.unregisterWhere(tool => ['read_file', 'send_image', 'custom_tool'].includes(tool.name))
     const image = Buffer.from('selected-image')
     const job: any = { id: 'aabbccddee', task: 'draw a chart', status: 'completed' }
     await completeAgyJob(job, { report: '/work/agy/aabbccddee/out/chart.png' }, ctx, {

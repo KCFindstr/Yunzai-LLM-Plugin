@@ -1,5 +1,5 @@
 import { deepMerge } from '../core/util.ts'
-import { dataUrl, genCallId, openaiEffort, parseArgs, toolImages } from './common.ts'
+import { acceptsFile, dataUrl, filePlaceholder, genCallId, openaiEffort, parseArgs, toolImages } from './common.ts'
 import { joinUrl, requestJson } from './http.ts'
 import type { Adapter, ChatParams, ChatResult, Part, ToolCall } from './types.ts'
 import { inlineThinking, joinThinking, stripThink } from './types.ts'
@@ -19,6 +19,10 @@ export const openaiResponses: Adapter = {
       content: content.map(c =>
         c.type === 'text'
           ? { type: 'input_text', text: c.text }
+          : c.type === 'file'
+            ? acceptsFile(p.provider, c.mime)
+              ? { type: 'input_file', filename: c.name || 'document.pdf', file_data: `data:${c.mime};base64,${c.data}` }
+              : { type: 'input_text', text: filePlaceholder(c) }
           : vision
             ? { type: 'input_image', image_url: dataUrl(c), detail: c.detail ?? 'low' }
             : { type: 'input_text', text: '[图片]' },

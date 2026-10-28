@@ -35,13 +35,13 @@ for (const platform of ['linux', 'win32']) it(`chat and saved image reading work
   t.mock.method(setupRuntime, 'exec', async () => { probes++; throw Object.assign(new Error('WSL is not installed'), { code: 'ENOENT' }) })
   const server = await mockServer((request, n) => {
     const names = request.body.tools.map((tool: any) => tool.function.name)
-    assert.ok(names.includes('read_image') && names.includes('send_image'))
+    assert.ok(names.includes('read_file') && names.includes('send_image'))
     assert.ok(!names.some((name: string) => ['run_code', 'computer_task', 'agy', 'google_lens'].includes(name)))
     if (n === 1) {
       file = JSON.stringify(request.body.messages).match(/\/work\/attachments\/[a-f0-9]{10}\/image-[a-f0-9]{40}\.png/)![0]
       return [200, { choices: [{ message: { role: 'assistant', content: '图片已保存' }, finish_reason: 'stop' }] }]
     }
-    if (n === 2) return [200, { choices: [{ message: { role: 'assistant', content: '', tool_calls: [{ id: 'read', type: 'function', function: { name: 'read_image', arguments: JSON.stringify({ path: file }) } }] }, finish_reason: 'tool_calls' }] }]
+    if (n === 2) return [200, { choices: [{ message: { role: 'assistant', content: '', tool_calls: [{ id: 'read', type: 'function', function: { name: 'read_file', arguments: JSON.stringify({ path: file }) } }] }, finish_reason: 'tool_calls' }] }]
     assert.ok(JSON.stringify(request.body.messages).includes(`data:image/png;base64,${image.data}`))
     return [200, { choices: [{ message: { role: 'assistant', content: '可以读取原图' }, finish_reason: 'stop' }] }]
   })

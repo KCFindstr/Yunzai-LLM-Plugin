@@ -14,7 +14,15 @@ export interface ImagePart {
   detail?: 'low' | 'high' | 'auto' | 'original'
 }
 
-export type Part = TextPart | ImagePart
+/** Video, audio or document input (base64) for models that read them natively. */
+export interface FilePart {
+  type: 'file'
+  data: string
+  mime: string
+  name?: string
+}
+
+export type Part = TextPart | ImagePart | FilePart
 
 export interface ToolCall {
   id: string
@@ -29,6 +37,8 @@ export interface ToolResult {
   isError?: boolean
   /** images for vision models to look at (e.g. web_fetch of an image URL); dropped for models without vision */
   images?: ImagePart[]
+  /** video/audio/document parts, sent only to adapters that accept the type (see acceptsFile) */
+  files?: FilePart[]
 }
 
 /** Provider-raw assistant output, replayed verbatim to the same provider+model inside one tool loop. */
@@ -176,5 +186,10 @@ export function joinThinking(...parts: unknown[]): string | undefined {
 }
 
 export function partsToText(parts: Part[]): string {
-  return parts.map(p => (p.type === 'text' ? p.text : '[图片]')).join('')
+  return parts.map(p => (p.type === 'text' ? p.text : p.type === 'file' ? `[${fileKind(p.mime)}]` : '[图片]')).join('')
+}
+
+/** Chinese kind name used in labels and placeholders. */
+export function fileKind(mime: string): string {
+  return mime.startsWith('video/') ? '视频' : mime.startsWith('audio/') ? '音频' : mime.startsWith('image/') ? '图片' : '文件'
 }

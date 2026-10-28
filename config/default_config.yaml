@@ -318,7 +318,7 @@ tools:
   # 以下辅助工具不占 chat.maxToolCalls，但所在轮次计入 chat.maxToolRounds；单工具每次回复次数范围0–32，0禁用；失败/无效参数也计数
   sendImage:
     maxPerTurn: 2
-  readImage:
+  readFile:
     maxPerTurn: 8
   loadSkill:
     maxPerTurn: 8

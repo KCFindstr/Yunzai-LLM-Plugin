@@ -18,8 +18,9 @@ function detail(result) {
 
 export function inspectWsl(run = spawnSync) {
   const result = run('wsl.exe', ['--help'], options)
-  if (result.error || result.status !== 0) throw Error(`无法运行 WSL：${detail(result)}\n${installHelp}`)
   const help = decodeWslOutput(result.stdout)
+  // Recent wsl.exe builds print full help yet exit with -1, so the help text decides, not the exit code.
+  if (result.error || (result.status !== 0 && !/--exec\b/.test(help))) throw Error(`无法运行 WSL：${detail(result)}\n${installHelp}`)
   // The Windows installation-only launcher prints help (sometimes with exit 0)
   // for distro execution arguments. Merely finding wsl.exe is not sufficient.
   if (!/--exec\b/.test(help)) throw Error(`WSL 尚未就绪：当前 wsl.exe 不支持 --exec，可能尚未完成安装。\n${installHelp}`)

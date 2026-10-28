@@ -189,7 +189,9 @@ async function runTurnInner(req: TurnRequest, ref: { turn?: TurnState; rolloutId
   // the quoted message's images are labelled inside the quote, not after the message
   const quoteStart = input.quotedImageStart ?? turn.imageRefs.length
   const ownImages = turn.imageRefs.slice(0, quoteStart)
-  const attachmentNote = ownImages.length ? '\n' + ownImages.map(imageLabel).join('\n') : ''
+  const ownFiles = (input.files ?? []).slice(0, input.quotedFileStart ?? input.files?.length)
+  const fileNote = ownFiles.length ? '\n' + ownFiles.map(imageLabel).join('\n') : ''
+  const attachmentNote = (ownImages.length ? '\n' + ownImages.map(imageLabel).join('\n') : '') + fileNote
   ref.turn = turn
   const ctx: ToolCtx = { e, eff, isAdmin, model, turn }
   let nativeSearch = saved?.nativeSearch ?? (
@@ -240,7 +242,8 @@ async function runTurnInner(req: TurnRequest, ref: { turn?: TurnState; rolloutId
   // Mark for background archiving; the ordered group window still includes overlapping exchanges.
   if (!req.computerResult && !req.asyncResult) markHandled(e, convKey)
 
-  const userMsg: UserMsg = { role: 'user', content: [{ type: 'text', text: header.sent + text }, ...input.images.flatMap((part, index) => index < quoteStart ? [{ type: 'text' as const, text: imageLabel(turn.imageRefs![index], index) }, part] : [part]), ...ownImages.slice(input.images.length).map((image, index) => ({ type: 'text' as const, text: imageLabel(image, input.images.length + index) }))] }
+  const userMsg: UserMsg = { role: 'user', content: [{ type: 'text', text: header.sent + text }, ...input.images.flatMap((part, index) => index < quoteStart ? [{ type: 'text' as const, text: imageLabel(turn.imageRefs![index], index) }, part] : [part]), ...ownImages.slice(input.images.length).map((image, index) => ({ type: 'text' as const, text: imageLabel(image, input.images.length + index) })),
+    ...ownFiles.length ? [{ type: 'text' as const, text: fileNote.trim() }] : []] }
   const storedUser: UserMsg = {
     role: 'user',
     content: [{ type: 'text', text: header.stored + text + attachmentNote }],
@@ -353,7 +356,7 @@ async function runTurnInner(req: TurnRequest, ref: { turn?: TurnState; rolloutId
       if (roundsSpent) break
       const jobsBefore = { agy: turn.agyJob, computer: turn.computerJob }
       const { results, terminal } = await registry.execute(res.toolCalls, ctx, offered, (result, ms) => {
-        if (result.images?.length && result.name !== 'read_image') {
+        if (result.images?.length && result.name !== 'read_file') {
           const refs = result.images.map(part => saveImage(turn.imageScope!, part))
           result.content += '\n' + refs.map(imageLabel).join('\n')
           turn.imageRefs!.push(...refs.filter(ref => !turn.imageRefs!.some(old => old.path === ref.path)))
@@ -366,7 +369,7 @@ async function runTurnInner(req: TurnRequest, ref: { turn?: TurnState; rolloutId
       })
       const roundsLeft = maxRounds - round - 1
       for (const result of results) result.content += `\n【工具余量】${result.name}：${result.remaining}；全局剩余 ${result.globalRemaining} 次（辅助工具不占）；剩余工具轮次 ${roundsLeft}`
-        + (!roundsLeft ? '，请直接给出最终回复。' : !result.globalRemaining ? '，此后仅可调用辅助工具 send_image/read_image/load_skill/list_stickers。' : '。')
+        + (!roundsLeft ? '，请直接给出最终回复。' : !result.globalRemaining ? '，此后仅可调用辅助工具 send_image/read_file/load_skill/list_stickers。' : '。')
       msgs.push({ role: 'tool', results })
       if (terminal) break
       if (checkQuota(model, quotaCtx)) break

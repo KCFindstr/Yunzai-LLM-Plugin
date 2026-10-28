@@ -1,4 +1,4 @@
-import { chatImageScope, saveImage, type SavedImage } from './images.ts'
+import { chatImageScope, MAX_FILE_BYTES, saveFile, saveImage, type SavedFile, type SavedImage } from './images.ts'
 import { detectImageMime, fetchBuffer, truncate } from '../core/util.ts'
 import type { ImagePart } from '../llm/types.ts'
 import { knownName } from './roster.ts'
@@ -13,6 +13,8 @@ export interface QuotedMessage {
   name: string
   text: string
   imageUrls: string[]
+  /** video, voice and file segments with a download URL */
+  media?: MediaRef[]
   /** the quoted message is a chat record; its inner messages are already individually limited */
   forward?: boolean
 }
@@ -24,6 +26,9 @@ export interface ExtractedInput {
   quoted?: QuotedMessage
   /** Index in `savedImages` where the quoted message's images begin; they are labelled inside the quote. */
   quotedImageStart?: number
+  /** Videos, audio and documents of the message and its quote, stored for read_file (never sent inline). */
+  files?: SavedFile[]
+  quotedFileStart?: number
   /** Raw segments that were images/stickers (for sticker-adding flows). */
   imageSegments: any[]
 }
@@ -34,11 +39,12 @@ export function quoteLabel(q: Pick<QuotedMessage, 'senderId' | 'fromBot' | 'name
   return `【引用 ${q.fromBot ? '你' : q.name}(平台ID ${q.senderId})】`
 }
 
-/** Put saved image labels where the quote's image placeholders were; any left over go at the end. */
-export function quoteBody(text: string, labels: string[]): string {
-  const rest = [...labels]
+/** Put saved labels where the quote's image (and video/voice/file) placeholders were; any left over go at the end. */
+export function quoteBody(text: string, labels: string[], fileLabels: string[] = []): string {
+  const rest = [...labels], files = [...fileLabels]
   const body = text.replace(/\[(?:图片|表情包)\]/g, placeholder => rest.shift() ?? placeholder)
-  return [body === '[非文本消息]' && labels.length ? '' : body, ...rest].filter(Boolean).join(' ')
+    .replace(/\[(?:视频|语音|文件:[^\]]*)\]/g, placeholder => files.shift() ?? placeholder)
+  return [body === '[非文本消息]' && (labels.length || fileLabels.length) ? '' : body, ...rest, ...files].filter(Boolean).join(' ')
 }
 
 export function isStickerSegment(s: any): boolean {
@@ -151,6 +157,35 @@ function imageUrl(segment: any): string | undefined {
   return [segment.url, segment.file].find(value => typeof value === 'string' && /^https?:\/\//.test(value))
 }
 
+export interface MediaRef { url: string; name?: string }
+/** Videos, voice messages and files captured per message; each may be tens of MB. */
+const MAX_MEDIA = 3
+
+/** Video, voice and file segments that carry a direct download URL (the QQBot bridge sends these). */
+export function mediaRefs(message: any[]): MediaRef[] {
+  const refs = (message ?? []).filter(s => ['video', 'record', 'file'].includes(s?.type)).flatMap((s): MediaRef[] => {
+    const url = [s.url, s.file].find(value => typeof value === 'string' && /^https?:\/\//.test(value))
+    const name = [s.name, s.file].find(value => typeof value === 'string' && value && !/^https?:/.test(value))
+    return url ? [{ url, name }] : []
+  })
+  return refs.filter((ref, index) => refs.findIndex(other => other.url === ref.url) === index).slice(0, MAX_MEDIA)
+}
+
+/**
+ * Download and store media for read_file. Formats no model reads (QQ silk voice and the like) are skipped, so
+ * their placeholder stays as plain text.
+ */
+export async function captureMedia(refs: MediaRef[], scope: string): Promise<SavedFile[]> {
+  const saved: SavedFile[] = []
+  for (const ref of refs) {
+    try {
+      const buffer = await fetchBuffer(ref.url, { maxBytes: MAX_FILE_BYTES, timeoutMs: 120_000 })
+      if (buffer) saved.push(saveFile(scope, buffer, ref.name))
+    } catch { /* unsupported or oversized: the message keeps its placeholder */ }
+  }
+  return saved
+}
+
 /** The group log and the reply path both ask for the quote; share one lookup per event. */
 export function getQuoted(e: any): Promise<QuotedMessage | undefined> {
   if (e._llmQuoted !== undefined) return Promise.resolve(e._llmQuoted || undefined)
@@ -190,6 +225,7 @@ async function resolveQuoted(e: any): Promise<QuotedMessage | undefined> {
       name: (uid && knownName(e, uid)) || String(sender?.card || sender?.nickname || sender?.name || uid || '某人'),
       text: segmentsToText(segs, e.self_id),
       imageUrls: [...segs.map(imageUrl), ...forwardImageUrls(segs)].filter((url: string | undefined): url is string => Boolean(url)),
+      media: mediaRefs(segs),
       forward: hasForward(segs) || undefined,
     }
   }
@@ -230,5 +266,9 @@ export async function extractInput(
     if (uid) Object.assign(quoted, { senderId: uid, fromBot: false, name: knownName(e, uid) || quoted.name })
   }
   const images = opts.vision ? parts.slice(0, Math.max(0, Math.floor(opts.maxImages))) : []
-  return { text, images, savedImages, quoted, quotedImageStart: quoted ? stored.savedImages.length : undefined, imageSegments }
+  const own = opts.includeImages ? await (e._llmMediaCapture ?? captureMedia(mediaRefs(message), scope)) : []
+  const currentMedia = new Set(mediaRefs(message).map(ref => ref.url))
+  const quotedMedia = opts.includeImages && quoted?.media?.length ? await captureMedia(quoted.media.filter(ref => !currentMedia.has(ref.url)), scope) : []
+  return { text, images, savedImages, quoted, quotedImageStart: quoted ? stored.savedImages.length : undefined, imageSegments,
+    files: [...own, ...quotedMedia], quotedFileStart: quoted ? own.length : undefined }
 }

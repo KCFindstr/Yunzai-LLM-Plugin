@@ -2,7 +2,7 @@ import type { EffectiveConfig, ModelConfig } from '../core/configTypes.ts'
 import { brief, log } from '../core/log.ts'
 import { truncate } from '../core/util.ts'
 import type { ToolCall, ToolResult, ToolSpec } from '../llm/types.ts'
-import type { ImagePart } from '../llm/types.ts'
+import type { FilePart, ImagePart } from '../llm/types.ts'
 import { prepareRuntimeTools, runtimeToolReady } from '../core/setup.ts'
 
 export interface TurnState {
@@ -16,6 +16,8 @@ export interface TurnState {
   memoryWrites?: number
   execRuns?: number
   imageRequests?: number
+  /** Video/audio/document bytes read_file added this reply. */
+  fileBytes?: number
   /** Tool-produced or URL images, sent after the text reply. */
   images: Buffer[]
   memoryChanged?: boolean
@@ -53,6 +55,7 @@ export interface ToolOutput {
   /** Stop the agent loop after this round (result already delivered by other means). */
   terminal?: boolean
   images?: ImagePart[]
+  files?: FilePart[]
 }
 
 export interface ToolDef {
@@ -76,10 +79,10 @@ export const MAX_IMAGES_PER_TURN = 2
  * Helper tools (budgetExempt) have their own per-reply limits and do not use up chat.maxToolCalls;
  * the rounds they run in still count toward chat.maxToolRounds.
  */
-const DEFAULT_HELPER_LIMITS: Record<string, number> = { send_image: 2, read_image: 8, load_skill: 8, list_stickers: 4 }
+const DEFAULT_HELPER_LIMITS: Record<string, number> = { send_image: 2, read_file: 8, load_skill: 8, list_stickers: 4 }
 export function helperToolLimit(ctx: Pick<ToolCtx, 'eff'>, name: string): number {
-  const key = { send_image: 'sendImage', read_image: 'readImage', load_skill: 'loadSkill', list_stickers: 'listStickers' }[name]
-  const tool = key ? ctx.eff.tools[key as 'sendImage' | 'readImage' | 'loadSkill' | 'listStickers'] : undefined
+  const key = { send_image: 'sendImage', read_file: 'readFile', load_skill: 'loadSkill', list_stickers: 'listStickers' }[name]
+  const tool = key ? ctx.eff.tools[key as 'sendImage' | 'readFile' | 'loadSkill' | 'listStickers'] : undefined
   return tool?.maxPerTurn ?? DEFAULT_HELPER_LIMITS[name] ?? 32
 }
 export function helperToolRemaining(ctx: ToolCtx, name: string): number {
@@ -189,7 +192,7 @@ class Registry {
           log.info(`工具 ${call.name}(${brief(call.args ?? {})}) ${o.isError ? '失败' : '完成'} ${Date.now() - started}ms → ${(o.content ?? '').length}字`)
           log.debug(`工具 ${call.name} 结果：${brief(o.content, 600)}`)
           return done({ id: call.id, name: call.name, content: truncate(o.content || '(无结果)', MAX_RESULT_CHARS), isError: o.isError,
-            ...(o.images?.length ? { images: o.images } : {}) })
+            ...(o.images?.length ? { images: o.images } : {}), ...(o.files?.length ? { files: o.files } : {}) })
         } catch (err: any) {
           const rawMsg = err === toolTimeout ? '工具执行超时' : err?.message ?? String(err)
           log.warn(`工具 ${call.name}(${brief(call.args ?? {})}) 出错: ${rawMsg}`)

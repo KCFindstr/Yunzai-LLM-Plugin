@@ -215,7 +215,7 @@ const tools = obj(
   {
     enable: bool('工具总开关'),
     sendImage: obj({ maxPerTurn: int('每次回复最多发送图片请求数（0禁用）', { min: 0, max: 32 }) }, '发送图片 send_image'),
-    readImage: obj({ maxPerTurn: int('每次回复最多读取图片次数（0禁用）', { min: 0, max: 32 }) }, '读取图片 read_image'),
+    readFile: obj({ maxPerTurn: int('每次回复最多读取文件次数（图片、视频、音频、PDF、文本；0禁用）', { min: 0, max: 32 }) }, '读取文件 read_file'),
     loadSkill: obj({ maxPerTurn: int('每次回复最多加载技能次数（0禁用）', { min: 0, max: 32 }) }, '加载技能 load_skill'),
     listStickers: obj({ maxPerTurn: int('每次回复最多查看表情列表次数（0禁用）', { min: 0, max: 32 }) }, '表情列表 list_stickers'),
     webSearch: obj(
@@ -466,6 +466,7 @@ export function schemaAt(keys) {
 /** Settings removed from the plugin. Older config.yaml files may still have them; they are dropped, not rejected. */
 export const RETIRED_PATHS = [
   ['tools', 'agy', 'distro'], // AGY runs on the host since it stopped using the WSL sandbox
+  ['tools', 'readImage'], // renamed to tools.readFile with the read_file tool; config.ts carries the old value over
 ]
 
 /** Remove retired settings from a YAML document in place. Returns the dotted paths that were removed. */

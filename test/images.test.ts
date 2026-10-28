@@ -25,7 +25,7 @@ it('reads saved image bytes into vision context on a later chat turn', async () 
       assert.ok(messages.includes(`data:image/png;base64,${part.data}`))
       return [200, { choices: [{ message: { role: 'assistant', content: 'I can see the saved image.' }, finish_reason: 'stop' }] }]
     }
-    if (messages.includes('Read the earlier image')) return [200, { choices: [{ message: { role: 'assistant', content: '', tool_calls: [{ id: 'read', type: 'function', function: { name: 'read_image', arguments: JSON.stringify({ path: file }) } }] }, finish_reason: 'tool_calls' }] }]
+    if (messages.includes('Read the earlier image')) return [200, { choices: [{ message: { role: 'assistant', content: '', tool_calls: [{ id: 'read', type: 'function', function: { name: 'read_file', arguments: JSON.stringify({ path: file }) } }] }, finish_reason: 'tool_calls' }] }]
     const current = request.body.messages.findLast((message: any) => message.role === 'user').content
     assert.equal(current[1].text, '[图片1:' + file + ']')
     assert.ok(current[2].image_url.url.endsWith(part.data))
@@ -65,14 +65,14 @@ it('reads earlier images of the same chat without a staging step, but never othe
   const other = saveImage(imageScope('other conversation'), part)
   const hostFile = path.join(TMP, 'host-image.png')
   fs.writeFileSync(hostFile, Buffer.from(part.data, 'base64'))
-  const read = registry.get('read_image')!
+  const read = registry.get('read_file')!
   const slashed = hostFile.replaceAll('\\', '/')
   for (const forbidden of [other.path, hostFile, slashed, 'file:///' + slashed, 'C:/Windows/win.ini', 'relative/without-workspace.png']) {
-    const { results } = await registry.execute([{ id: 'x', name: 'read_image', args: { path: forbidden } }], ctx, [read])
+    const { results } = await registry.execute([{ id: 'x', name: 'read_file', args: { path: forbidden } }], ctx, [read])
     assert.equal(results[0].isError, true, forbidden)
     assert.equal(results[0].images, undefined, forbidden)
   }
-  const { results } = await registry.execute([{ id: 'r', name: 'read_image', args: { path: saved.path } }], ctx, [read])
+  const { results } = await registry.execute([{ id: 'r', name: 'read_file', args: { path: saved.path } }], ctx, [read])
   assert.equal(results[0].images?.[0].data, part.data)
   assert.deepEqual(ctx.turn.images, [])
   assert.equal(currentImages(ctx)[0].path, saved.path)

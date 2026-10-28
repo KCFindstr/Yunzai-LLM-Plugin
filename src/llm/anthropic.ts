@@ -1,15 +1,21 @@
 import { deepMerge } from '../core/util.ts'
-import { anthropicEffort } from './common.ts'
+import { acceptsFile, anthropicEffort, filePlaceholder } from './common.ts'
 import { joinUrl, requestJson } from './http.ts'
-import type { Adapter, ChatParams, ChatResult, ImagePart, ToolCall } from './types.ts'
+import type { Adapter, ChatParams, ChatResult, FilePart, ImagePart, ToolCall } from './types.ts'
 import { joinThinking } from './types.ts'
 
-const CACHEABLE_TAIL = new Set(['text', 'image', 'tool_result'])
+const CACHEABLE_TAIL = new Set(['text', 'image', 'document', 'tool_result'])
 
 function imageBlock(c: ImagePart): any {
   return c.data
     ? { type: 'image', source: { type: 'base64', media_type: c.mime || 'image/png', data: c.data } }
     : { type: 'image', source: { type: 'url', url: c.url } }
+}
+
+function fileBlock(c: FilePart, p: ChatParams): any {
+  return acceptsFile(p.provider, c.mime)
+    ? { type: 'document', source: { type: 'base64', media_type: c.mime, data: c.data }, ...(c.name ? { title: c.name } : {}) }
+    : { type: 'text', text: filePlaceholder(c) }
 }
 
 /** Models that accept the dynamic-filtering web search tool version. */
@@ -40,6 +46,7 @@ export const anthropic: Adapter = {
           m.content
             .map(c => {
               if (c.type === 'text') return c.text ? { type: 'text', text: c.text } : null
+              if (c.type === 'file') return fileBlock(c, p)
               return vision ? imageBlock(c) : { type: 'text', text: '[图片]' }
             })
             .filter(Boolean),
@@ -59,8 +66,8 @@ export const anthropic: Adapter = {
           m.results.map(r => ({
             type: 'tool_result',
             tool_use_id: r.id,
-            content: vision && r.images?.length
-              ? [{ type: 'text', text: r.content || '(empty)' }, ...r.images.map(imageBlock)]
+            content: (vision && r.images?.length) || r.files?.length
+              ? [{ type: 'text', text: r.content || '(empty)' }, ...(vision ? r.images ?? [] : []).map(imageBlock), ...(r.files ?? []).map(c => fileBlock(c, p))]
               : r.content || '(empty)',
             ...(r.isError ? { is_error: true } : {}),
           })),

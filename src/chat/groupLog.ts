@@ -1,6 +1,6 @@
 import { config } from '../core/config.ts'
-import { captureImageSegments, forwardLines, forwardNodes, getQuoted, quoteBody, quoteLabel, type ForwardLimits } from './message.ts'
-import { chatImageScope, imageLabel, truncateImageText } from './images.ts'
+import { captureImageSegments, captureMedia, mediaRefs, forwardLines, forwardNodes, getQuoted, quoteBody, quoteLabel, type ForwardLimits } from './message.ts'
+import { chatImageScope, imageLabel, truncateImageText, type SavedFile } from './images.ts'
 import { formatNow, truncate } from '../core/util.ts'
 import { observeUsers, knownName, rememberMessage } from './roster.ts'
 import { markChatterHandled, recordChatter, updateChatterImages } from './chatter.ts'
@@ -106,10 +106,20 @@ export function recordGroupMessage(e: any) {
       line.text += '\n' + labels
       updateChatterImages(e, labels)
     }).catch(() => {})
+    // Media URLs expire, so videos and files are stored now for a later read_file.
+    if (mediaRefs(e.message ?? []).length) {
+      e._llmMediaCapture ??= captureMedia(mediaRefs(e.message ?? []), chatImageScope(e))
+      void e._llmMediaCapture.then((files: SavedFile[]) => {
+        if (!files.length) return
+        const labels = files.map(imageLabel).join('\n')
+        line.text += '\n' + labels
+        updateChatterImages(e, labels)
+      }).catch(() => {})
+    }
   }
 }
 
-const IMAGE_LABEL = /\n?\[图片\d+:\/work\/attachments\/[^\]\r\n]+\]/g
+const IMAGE_LABEL = /\n?\[(?:图片|视频|音频|文件)\d+:\/work\/attachments\/[^\]\r\n]+\]/g
 
 /** A reply's quoted message: from this log when it is recent, otherwise fetched from the adapter. */
 function attachQuote(e: any, list: Line[], line: Line, images: boolean) {
@@ -128,11 +138,12 @@ function attachQuote(e: any, list: Line[], line: Line, images: boolean) {
   void getQuoted(e).then(async q => {
     if (!q) return
     line.quote = { label: quoteLabel(q), text: truncate((q.text || '[非文本消息]').replace(/\s+/g, ' '), 200), labels: [] }
-    if (!images || !q.imageUrls.length) return
+    if (!images || (!q.imageUrls.length && !q.media?.length)) return
     const stored = await captureImageSegments(q.imageUrls.map(url => ({ type: 'image', url })), chatImageScope(e))
     const uid = q.senderId ? undefined : imageSender(e, stored.savedImages.map(image => image.path))
     if (uid) line.quote.label = quoteLabel({ senderId: uid, fromBot: false, name: knownName(e, uid) || q.name })
-    line.quote.labels = stored.savedImages.map(imageLabel)
+    const files = await captureMedia(q.media ?? [], chatImageScope(e))
+    line.quote.labels = [...stored.savedImages, ...files].map(imageLabel)
   }).catch(() => {})
 }
 
@@ -144,7 +155,8 @@ function renderLine(l: Line, maxChars: number): string {
   const body = truncateImageText(l.text, maxChars) + forwardBlock(l.forward, maxChars * FORWARD_BUDGET_LINES)
   if (!l.quote) return body
   const room = maxChars - l.text.replace(IMAGE_LABEL, '').trim().length
-  const quoted = room >= 4 ? quoteBody(truncate(l.quote.text, room), l.quote.labels) : ['…', ...l.quote.labels].join(' ')
+  const images = l.quote.labels.filter(label => label.startsWith('[图片')), files = l.quote.labels.filter(label => !label.startsWith('[图片'))
+  const quoted = room >= 4 ? quoteBody(truncate(l.quote.text, room), images, files) : ['…', ...l.quote.labels].join(' ')
   return `${l.quote.label}${quoted}\n${body}`
 }
 

@@ -235,13 +235,20 @@ def main():
             destroy(os.path.join(BASE, f's-{session}'))
         print(json.dumps({'ok': True}))
         return
-    if action == 'read_image':
+    if action in ('read_image', 'read_file'):
         work = os.path.join(BASE, f's-{session}')
         file = str(req.get('path') or '')
         relative = file[6:] if file.startswith('/work/') else file
         target = os.path.realpath(os.path.join(work, relative))
         if not session or not os.path.isdir(work) or os.path.isabs(relative) or not target.startswith(os.path.realpath(work) + os.sep):
-            raise ValueError('image path outside current workspace')
+            raise ValueError('file path outside current workspace')
+        if action == 'read_file':
+            # the bot detects the format itself; the runner only confines the read and caps its size
+            if os.path.islink(target) or not os.path.isfile(target) or os.path.getsize(target) > 40 * 1024 * 1024:
+                raise ValueError('file missing, not a regular file or over 40 MiB')
+            with open(target, 'rb') as f:
+                print(json.dumps({'file': {'name': os.path.basename(target), 'b64': base64.b64encode(f.read()).decode()}}))
+            return
         img = read_image(target, os.path.basename(target))
         if not img:
             raise ValueError('image missing, unsupported or over 5 MiB')

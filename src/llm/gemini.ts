@@ -1,5 +1,5 @@
 import { deepMerge } from '../core/util.ts'
-import { genCallId, geminiThinking, parseArgs, toolImages } from './common.ts'
+import { acceptsFile, filePlaceholder, genCallId, geminiFile, geminiThinking, parseArgs, toolImages } from './common.ts'
 import { joinUrl, requestJson } from './http.ts'
 import { usesServerState } from './state.ts'
 import type { Adapter, ChatParams, ChatResult, Part, ToolCall } from './types.ts'
@@ -25,6 +25,8 @@ export const gemini: Adapter = {
       content: content.map(c =>
         c.type === 'text'
           ? { type: 'text', text: c.text }
+          : c.type === 'file'
+            ? acceptsFile(p.provider, c.mime) && geminiFile(c) || { type: 'text', text: filePlaceholder(c) }
           : vision && c.data
             ? { type: 'image', data: c.data, mime_type: c.mime || 'image/png' }
             : vision && c.url

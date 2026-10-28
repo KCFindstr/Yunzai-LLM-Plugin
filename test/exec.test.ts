@@ -129,7 +129,7 @@ it('run_code exposes paths only through stdout; explicit image tools read the sa
     assert.match(result.content, /\[stdout\]\n\/work\/tmp\/chosen.png/)
     assert.doesNotMatch(result.content, /生成的图片|图片1:|自动|发送/)
     assert.equal(ctx.turn.images.length, 0)
-    const read: any = await registry.get('read_image')!.run({ path: '/work/tmp/chosen.png' }, ctx)
+    const read: any = await registry.get('read_file')!.run({ path: '/work/tmp/chosen.png' }, ctx)
     assert.equal(read.images[0].data, png)
     assert.equal(ctx.turn.images.length, 0)
     const rendered: any = await registry.get('render_html')!.run({ html: '<img src="/work/tmp/chosen.png">' }, ctx)

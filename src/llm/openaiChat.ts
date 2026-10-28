@@ -1,13 +1,16 @@
 import { deepMerge } from '../core/util.ts'
-import { dataUrl, genCallId, openaiEffort, parseArgs, toolImages } from './common.ts'
+import { acceptsFile, dataUrl, filePlaceholder, genCallId, openaiEffort, parseArgs, toolImages } from './common.ts'
 import { joinUrl, requestJson } from './http.ts'
 import type { Adapter, ChatParams, ChatResult, Part, ToolCall } from './types.ts'
 import { inlineThinking, joinThinking, stripThink } from './types.ts'
 
-function userContent(parts: Part[], vision: boolean): any {
-  if (!parts.some(p => p.type === 'image')) return parts.map(p => (p.type === 'text' ? p.text : '')).join('')
+function userContent(parts: Part[], vision: boolean, provider: ChatParams['provider']): any {
+  if (!parts.some(p => p.type !== 'text')) return parts.map(p => (p.type === 'text' ? p.text : '')).join('')
   return parts.map(p => {
     if (p.type === 'text') return { type: 'text', text: p.text }
+    if (p.type === 'file') return acceptsFile(provider, p.mime)
+      ? { type: 'file', file: { filename: p.name || 'document.pdf', file_data: `data:${p.mime};base64,${p.data}` } }
+      : { type: 'text', text: filePlaceholder(p) }
     if (!vision) return { type: 'text', text: '[图片]' }
     return { type: 'image_url', image_url: { url: dataUrl(p), detail: p.detail === 'original' ? 'high' : p.detail ?? 'low' } }
   })
@@ -46,7 +49,7 @@ export const openaiChat: Adapter = {
     const messages: any[] = [{ role: 'system', content: p.system }]
 
     for (const m of p.messages) {
-      if (m.role === 'user') messages.push({ role: 'user', content: userContent(m.content, vision) })
+      if (m.role === 'user') messages.push({ role: 'user', content: userContent(m.content, vision, p.provider) })
       else if (m.role === 'assistant') {
         if (m.native?.provider === 'openai' && m.native.model === p.model.model) {
           messages.push(m.native.data)
@@ -65,7 +68,7 @@ export const openaiChat: Adapter = {
         for (const r of m.results) messages.push({ role: 'tool', tool_call_id: r.id, content: r.content })
         // Tool messages are text-only here: images follow as a user message right after the results.
         const images = toolImages(m.results, vision)
-        if (images.length) messages.push({ role: 'user', content: userContent(images, vision) })
+        if (images.length) messages.push({ role: 'user', content: userContent(images, vision, p.provider) })
       }
     }
 

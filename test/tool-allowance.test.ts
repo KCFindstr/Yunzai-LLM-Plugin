@@ -82,33 +82,33 @@ it('exempts mixed-batch helpers from global calls while reserving ordinary calls
 
 
 it('enforces configured helper caps before parallel work, including malformed and failed calls', async () => {
-  const original = registry.get('read_image')
+  const original = registry.get('read_file')
   let executed = 0
-  registry.register({ name: 'read_image', budgetExempt: true, description: 'test', parameters: {}, run: async () => { executed++; throw Error('failed read') } })
+  registry.register({ name: 'read_file', budgetExempt: true, description: 'test', parameters: {}, run: async () => { executed++; throw Error('failed read') } })
   const ctx = context(0, 1)
   ctx.eff.tools.enable = true
-  ctx.eff.tools.readImage.maxPerTurn = 2
+  ctx.eff.tools.readFile.maxPerTurn = 2
   ctx.eff.tools.loadSkill.maxPerTurn = 0
-  const def = registry.get('read_image')!
+  const def = registry.get('read_file')!
   try {
     assert.match(registry.specs([def], ctx)[0].description, /每次回复最多调用 2 次/)
     const { results } = await registry.execute([
-      { id: 'invalid', name: 'read_image', args: { _invalid_json: true } },
-      { id: 'failed', name: 'read_image', args: {} },
-      { id: 'blocked', name: 'read_image', args: {} },
+      { id: 'invalid', name: 'read_file', args: { _invalid_json: true } },
+      { id: 'failed', name: 'read_file', args: {} },
+      { id: 'blocked', name: 'read_file', args: {} },
     ], ctx, [def])
     assert.equal(executed, 1)
-    assert.equal(ctx.turn.helperCalls?.read_image, 2)
+    assert.equal(ctx.turn.helperCalls?.read_file, 2)
     assert.equal(ctx.turn.toolCalls ?? 0, 0)
     assert.ok(results.every(result => result.isError && result.remaining === '剩余 0 次' && result.globalRemaining === 0))
-    const repeated = await registry.execute([{ id: 'not-offered', name: 'read_image', args: {} }], ctx, [])
+    const repeated = await registry.execute([{ id: 'not-offered', name: 'read_file', args: {} }], ctx, [])
     assert.equal(repeated.results[0].remaining, '剩余 0 次')
     assert.equal(ctx.turn.toolCalls ?? 0, 0, 'an exhausted helper never consumes the ordinary quota')
-    ctx.eff.tools.readImage.maxPerTurn = 0
-    assert.ok(!registry.forTurn(ctx).some(tool => tool.name === 'read_image'))
-    const normalized = normalize({ tools: { sendImage: { maxPerTurn: 5 }, readImage: { maxPerTurn: -2 }, loadSkill: { maxPerTurn: 100 }, listStickers: { maxPerTurn: 'invalid' } } })
-    assert.deepEqual([normalized.tools.sendImage.maxPerTurn, normalized.tools.readImage.maxPerTurn, normalized.tools.loadSkill.maxPerTurn, normalized.tools.listStickers.maxPerTurn], [5, 0, 32, 4])
-  } finally { registry.unregisterWhere(tool => tool.name === 'read_image'); if (original) registry.register(original) }
+    ctx.eff.tools.readFile.maxPerTurn = 0
+    assert.ok(!registry.forTurn(ctx).some(tool => tool.name === 'read_file'))
+    const normalized = normalize({ tools: { sendImage: { maxPerTurn: 5 }, readFile: { maxPerTurn: -2 }, loadSkill: { maxPerTurn: 100 }, listStickers: { maxPerTurn: 'invalid' } } })
+    assert.deepEqual([normalized.tools.sendImage.maxPerTurn, normalized.tools.readFile.maxPerTurn, normalized.tools.loadSkill.maxPerTurn, normalized.tools.listStickers.maxPerTurn], [5, 0, 32, 4])
+  } finally { registry.unregisterWhere(tool => tool.name === 'read_file'); if (original) registry.register(original) }
 })
 
 

@@ -167,7 +167,7 @@ export interface HttpToolConfig {
 export interface ToolsSection {
   enable: boolean
   sendImage: { maxPerTurn: number }
-  readImage: { maxPerTurn: number }
+  readFile: { maxPerTurn: number }
   loadSkill: { maxPerTurn: number }
   listStickers: { maxPerTurn: number }
   webSearch: {

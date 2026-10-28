@@ -187,6 +187,61 @@ export const MIME_EXT: Record<string, string> = {
   'image/bmp': 'bmp',
 }
 
+/** Text extensions read_file returns as text; everything else must be a recognised binary format. */
+const TEXT_EXT: Record<string, string> = {
+  txt: 'text/plain', md: 'text/markdown', csv: 'text/csv', json: 'application/json', log: 'text/plain', xml: 'text/xml',
+  yaml: 'text/yaml', yml: 'text/yaml', html: 'text/html', htm: 'text/html', srt: 'text/plain', vtt: 'text/plain',
+  py: 'text/plain', js: 'text/plain', ts: 'text/plain', sh: 'text/plain', ini: 'text/plain', toml: 'text/plain',
+}
+const TEXT_MIME_EXT: Record<string, string> = { 'text/plain': 'txt', 'text/markdown': 'md', 'text/csv': 'csv', 'application/json': 'json', 'text/xml': 'xml', 'text/yaml': 'yaml', 'text/html': 'html' }
+
+/**
+ * Detect video, audio, PDF and text files from their bytes (a name only picks the text flavour). Images are
+ * left to detectImageMime. Formats no model reads (QQ silk voice, mkv, archives…) return undefined.
+ */
+export function detectFileMime(buf: Buffer, name = ''): string | undefined {
+  if (buf.length < 12) return buf.length && isText(buf) ? textMime(name) : undefined
+  const ascii = (from: number, to: number) => buf.subarray(from, to).toString('latin1')
+  if (ascii(0, 5) === '%PDF-') return 'application/pdf'
+  if (ascii(4, 8) === 'ftyp') {
+    const brand = ascii(8, 12)
+    if (/^(heic|heix|heim|heis|hevc|mif1|msf1|avif|avis)$/.test(brand)) return undefined
+    if (brand === 'M4A ' || brand === 'M4B ') return 'audio/mp4'
+    if (brand === 'qt  ') return 'video/quicktime'
+    if (brand.startsWith('3g')) return 'video/3gpp'
+    return 'video/mp4'
+  }
+  if (buf[0] === 0x1a && buf[1] === 0x45 && buf[2] === 0xdf && buf[3] === 0xa3)
+    return buf.subarray(0, 64).includes('webm') ? (/\.(weba|ogg|opus)$/i.test(name) ? 'audio/webm' : 'video/webm') : undefined
+  if (ascii(0, 4) === 'RIFF' && ascii(8, 12) === 'AVI ') return 'video/x-msvideo'
+  if (ascii(0, 4) === 'RIFF' && ascii(8, 12) === 'WAVE') return 'audio/wav'
+  if (buf[0] === 0x00 && buf[1] === 0x00 && buf[2] === 0x01 && (buf[3] === 0xba || buf[3] === 0xb3)) return 'video/mpeg'
+  if (ascii(0, 4) === 'OggS') return 'audio/ogg'
+  if (ascii(0, 4) === 'fLaC') return 'audio/flac'
+  if (ascii(0, 3) === 'ID3' || (buf[0] === 0xff && (buf[1] & 0xe6) === 0xe2)) return 'audio/mpeg'
+  if (buf[0] === 0xff && (buf[1] & 0xf6) === 0xf0) return 'audio/aac'
+  return isText(buf) ? textMime(name) : undefined
+}
+
+function textMime(name: string): string | undefined {
+  const ext = /\.([a-z0-9]+)$/i.exec(name)?.[1]?.toLowerCase()
+  return ext ? TEXT_EXT[ext] : 'text/plain'
+}
+
+/** UTF-8 without control bytes other than whitespace. */
+function isText(buf: Buffer): boolean {
+  const sample = buf.subarray(0, 65536)
+  for (const byte of sample) if (byte < 0x20 && byte !== 0x09 && byte !== 0x0a && byte !== 0x0d && byte !== 0x0c) return false
+  try { new TextDecoder('utf-8', { fatal: true }).decode(sample, { stream: sample.length < buf.length }); return true } catch { return false }
+}
+
+export const FILE_EXT: Record<string, string> = {
+  'video/mp4': 'mp4', 'video/webm': 'webm', 'video/quicktime': 'mov', 'video/x-msvideo': 'avi', 'video/3gpp': '3gp', 'video/mpeg': 'mpg',
+  'audio/mpeg': 'mp3', 'audio/wav': 'wav', 'audio/ogg': 'ogg', 'audio/flac': 'flac', 'audio/mp4': 'm4a', 'audio/aac': 'aac', 'audio/webm': 'weba',
+  'application/pdf': 'pdf', ...TEXT_MIME_EXT,
+}
+export const isTextMime = (mime: string) => mime in TEXT_MIME_EXT
+
 /** Download with a hard size cap. Returns undefined on any failure. */
 export async function fetchBuffer(
   url: string,

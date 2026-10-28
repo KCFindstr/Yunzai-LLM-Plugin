@@ -173,6 +173,21 @@ export async function readSandboxImage(ctx: ToolCtx, file: string): Promise<{ na
   return result.image
 }
 
+/** Read any explicitly requested file (up to 40 MiB) from this reply's workspace. */
+export async function readSandboxFile(ctx: ToolCtx, file: string): Promise<{ name: string; data: Buffer }> {
+  const session = ctx.turn.sandboxSession
+  if (!session || !sandboxEnabled(ctx)) throw Error('本轮没有可读取的代码工作目录')
+  try {
+    const result = await serialize(session, () => callRunner(ctx.eff.tools.exec, { action: 'read_file', session, path: file }, 60, ctx.signal))
+    return { name: result.file.name, data: Buffer.from(result.file.b64, 'base64') }
+  } catch (error: any) {
+    // A runner installed before read_file existed can still read images.
+    if (!/unknown action/.test(error?.message ?? '')) throw error
+    const image = await readSandboxImage(ctx, file)
+    return { name: image.name, data: Buffer.from(image.b64, 'base64') }
+  }
+}
+
 /** Render a full HTML document with the sandbox's headless Chrome; relative URLs resolve against /work. */
 export async function renderInSandbox(
   html: string,
