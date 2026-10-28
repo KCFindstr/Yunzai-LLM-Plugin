@@ -70,6 +70,8 @@ export interface ToolDef {
   limit?(ctx: ToolCtx): string | undefined
   /** Current enforced allowance, read after every call in a parallel batch has settled. */
   remaining?(ctx: ToolCtx): string
+  /** Overrides the default 60 s limit for tools that wait on a slow call (e.g. a model describing a video). */
+  timeoutMs?: number
   run(args: Record<string, any>, ctx: ToolCtx): Promise<ToolOutput | string>
 }
 
@@ -185,7 +187,7 @@ class Registry {
         try {
           const out = await Promise.race([
             def.run(call.args ?? {}, ctx),
-            new Promise<never>((_, rej) => setTimeout(() => rej(toolTimeout), TOOL_TIMEOUT_MS).unref?.()),
+            new Promise<never>((_, rej) => setTimeout(() => rej(toolTimeout), def.timeoutMs ?? TOOL_TIMEOUT_MS).unref?.()),
           ])
           const o: ToolOutput = typeof out === 'string' ? { content: out } : out
           if (o.terminal) terminal = true
@@ -196,7 +198,7 @@ class Registry {
         } catch (err: any) {
           const rawMsg = err === toolTimeout ? '工具执行超时' : err?.message ?? String(err)
           log.warn(`工具 ${call.name}(${brief(call.args ?? {})}) 出错: ${rawMsg}`)
-          const content = err === toolTimeout ? `工具「${call.name}」执行超时（超过 ${TOOL_TIMEOUT_MS / 1000} 秒未响应）`
+          const content = err === toolTimeout ? `工具「${call.name}」执行超时（超过 ${(def.timeoutMs ?? TOOL_TIMEOUT_MS) / 1000} 秒未响应）`
             : /fetch failed|ECONNREFUSED|ENOTFOUND|ETIMEDOUT/i.test(rawMsg) ? `工具「${call.name}」网络请求失败：无法连接到目标服务（${rawMsg}）`
             : `执行出错: ${rawMsg}`
           return done({ id: call.id, name: call.name, content, isError: true })

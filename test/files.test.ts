@@ -72,16 +72,40 @@ it('read_file passes video natively only to models that accept it, and pages tex
   assert.equal(ok.isError, undefined)
   assert.equal(ok.files?.[0].mime, 'video/mp4')
   assert.match(ok.content, /已作为原生视频加入上下文/)
+  writeUserConfig('providers:\n  plain:\n    type: openai\n    baseUrl: http://127.0.0.1:9/v1\n    apiKey: fake\nmodels:\n  - id: p\n    provider: plain\n    model: p\ndefaultModel: p\n')
+  config.load()
   const refused = (await registry.execute([{ id: 'v', name: 'read_file', args: { path: video.path } }], toolCtx('plain', gemini.e), [read])).results[0]
   assert.equal(refused.isError, true)
   assert.equal(refused.files, undefined)
-  assert.match(refused.content, /无法直接读取视频/)
+  assert.match(refused.content, /无法直接读取视频（video\/mp4），也没有可读取它的辅助模型/)
   assert.doesNotMatch(refused.content, /agy|run_code/, 'neither tool is registered in this test')
+  writeUserConfig('providers:\n  gem:\n    type: gemini\n    apiKey: fake\nmodels:\n  - id: m\n    provider: gem\n    model: m\ndefaultModel: m\n')
+  config.load()
   const text = saveFile(scope, Buffer.from('x'.repeat(7000)), 'notes.txt')
   const first = (await registry.execute([{ id: 't', name: 'read_file', args: { path: text.path } }], gemini, [read])).results[0]
   assert.match(first.content, /共 7000 字，本次第 0–6000 字；用 offset=6000 继续读/)
   const rest = (await registry.execute([{ id: 't', name: 'read_file', args: { path: text.path, offset: 6000 } }], gemini, [read])).results[0]
   assert.match(rest.content, /本次第 6000–7000 字）\nx{1000}/)
+})
+
+it('has the vision model describe a video the current model cannot read', async () => {
+  const server = await mockServer(request => {
+    const steps = request.body.input[0].content
+    assert.equal(request.body.model, 'g')
+    assert.deepEqual(steps[0], { type: 'text', text: '关注的问题：猫在做什么' })
+    assert.deepEqual(steps[1], { type: 'video', data: mp4.toString('base64'), mime_type: 'video/mp4' })
+    return [200, { id: 'd', status: 'completed', steps: [{ type: 'model_output', content: [{ type: 'text', text: '0:03 猫跳上桌子' }] }], usage: {} }]
+  })
+  try {
+    writeUserConfig(`providers:\n  gem:\n    type: gemini\n    baseUrl: ${server.url}\n    apiKey: fake\n  plain:\n    type: openai\n    baseUrl: http://127.0.0.1:9/v1\n    apiKey: fake\nmodels:\n  - id: p\n    provider: plain\n    model: p\n  - id: g\n    provider: gem\n    model: g\n    vision: true\ndefaultModel: p\nvisionModel: g\n`)
+    config.load()
+    const ctx = toolCtx('plain'), video = saveFile(chatImageScope(ctx.e), mp4, 'clip.mp4')
+    const result = (await registry.execute([{ id: 'v', name: 'read_file', args: { path: video.path, question: '猫在做什么' } }], ctx, [registry.get('read_file')!])).results[0]
+    assert.equal(result.isError, undefined)
+    assert.equal(result.files, undefined, 'the current model only gets text')
+    assert.match(result.content, /辅助模型 g 的描述，不是你亲眼所见：\n0:03 猫跳上桌子/)
+    assert.equal(server.requests.length, 1)
+  } finally { await server.close() }
 })
 
 it('sends a read video to Gemini as a native video step', async () => {
