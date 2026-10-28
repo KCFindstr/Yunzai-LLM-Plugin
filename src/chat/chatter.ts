@@ -28,11 +28,11 @@ function enabledFor(groupId: string): boolean {
   return !c.trigger.groupBlacklist.map(String).includes(groupId)
 }
 
-export function recordChatter(e: any, name: string, text: string) {
+export function recordChatter(e: any, name: string, text: string, limit = 300) {
   if (!e?.group_id || !text || isSensitive(text) || !enabledFor(String(e.group_id))) return
   const key = `${e.self_id}:${e.group_id}`
   const list = store.data[key] ??= []
-  list.push({ t: Date.now(), name, text: truncate(text, 300), mid: e.message_id != null ? String(e.message_id) : undefined })
+  list.push({ t: Date.now(), name, text: truncate(text, limit), mid: e.message_id != null ? String(e.message_id) : undefined })
   if (list.length > MAX_BUFFERED) list.splice(0, list.length - MAX_BUFFERED)
   store.save()
 }

@@ -3346,11 +3346,11 @@ function enabledFor(groupId) {
   if (white.length && !white.includes(groupId)) return false;
   return !c.trigger.groupBlacklist.map(String).includes(groupId);
 }
-function recordChatter(e, name, text2) {
+function recordChatter(e, name, text2, limit = 300) {
   if (!e?.group_id || !text2 || isSensitive(text2) || !enabledFor(String(e.group_id))) return;
   const key = `${e.self_id}:${e.group_id}`;
   const list2 = store5.data[key] ??= [];
-  list2.push({ t: Date.now(), name, text: truncate(text2, 300), mid: e.message_id != null ? String(e.message_id) : void 0 });
+  list2.push({ t: Date.now(), name, text: truncate(text2, limit), mid: e.message_id != null ? String(e.message_id) : void 0 });
   if (list2.length > MAX_BUFFERED) list2.splice(0, list2.length - MAX_BUFFERED);
   store5.save();
 }
@@ -3454,9 +3454,11 @@ function briefSegments(message, selfId) {
       case "xml":
         out += "[\u5361\u7247]";
         break;
-      case "forward":
-        out += "[\u804A\u5929\u8BB0\u5F55]";
+      case "forward": {
+        const count = forwardNodes(s).length;
+        out += count ? `[\u804A\u5929\u8BB0\u5F55 ${count}\u6761]` : "[\u804A\u5929\u8BB0\u5F55]";
         break;
+      }
     }
   }
   return out.replace(/\s+/g, " ").trim();
@@ -3469,14 +3471,16 @@ function recordGroupMessage(e) {
   const key = keyOf(e);
   const list2 = logs.get(key) ?? [];
   const name = `${knownName(e) || "\u7FA4\u53CB"}(\u5E73\u53F0ID ${e.user_id})`;
+  const forward = (e.message ?? []).filter((s) => s?.type === "forward").flatMap((s) => forwardLines(s, e.self_id, LOG_FORWARD_LIMITS));
   rememberMessage(e, text2);
-  recordChatter(e, name, text2);
+  recordChatter(e, name, forward.length ? [text2, ...forward].join("\n") : text2, forward.length ? 1500 : void 0);
   list2.push({
     t: Date.now(),
     uid: String(e.user_id),
     name,
     text: truncate(text2, 200),
-    mid: e.message_id != null ? String(e.message_id) : void 0
+    mid: e.message_id != null ? String(e.message_id) : void 0,
+    forward: forward.length ? forward : void 0
   });
   if (list2.length > MAX_LINES) list2.splice(0, list2.length - MAX_LINES);
   logs.set(key, list2);
@@ -3520,11 +3524,25 @@ function attachQuote(e, list2, line, images) {
   });
 }
 function renderLine(l, maxChars) {
-  if (!l.quote) return truncateImageText(l.text, maxChars);
+  const body = truncateImageText(l.text, maxChars) + forwardBlock(l.forward, maxChars * FORWARD_BUDGET_LINES);
+  if (!l.quote) return body;
   const room = maxChars - l.text.replace(IMAGE_LABEL, "").trim().length;
   const quoted = room >= 4 ? quoteBody(truncate(l.quote.text, room), l.quote.labels) : ["\u2026", ...l.quote.labels].join(" ");
   return `${l.quote.label}${quoted}
-${truncateImageText(l.text, maxChars)}`;
+${body}`;
+}
+function forwardBlock(lines, budget) {
+  if (!lines?.length) return "";
+  const out = [];
+  for (const [index, line] of lines.entries()) {
+    if (line.length > budget) {
+      out.push(`\uFF08\u5176\u4F59 ${lines.length - index} \u6761\u7565\uFF09`);
+      break;
+    }
+    out.push(line);
+    budget -= line.length;
+  }
+  return "\n" + out.map((line) => `  ${line}`).join("\n");
 }
 function imageSender(e, paths) {
   if (!e?.group_id || !paths.length) return void 0;
@@ -3572,7 +3590,7 @@ function cachedMessageSender(e, messageId) {
   if (!e?.group_id || messageId == null) return void 0;
   return logs.get(keyOf(e))?.find((line) => line.mid === String(messageId))?.uid;
 }
-var MAX_LINES, logs, keyOf, IMAGE_LABEL;
+var MAX_LINES, logs, LOG_FORWARD_LIMITS, FORWARD_BUDGET_LINES, keyOf, IMAGE_LABEL;
 var init_groupLog = __esm({
   "src/chat/groupLog.ts"() {
     "use strict";
@@ -3584,6 +3602,8 @@ var init_groupLog = __esm({
     init_chatter();
     MAX_LINES = 200;
     logs = /* @__PURE__ */ new Map();
+    LOG_FORWARD_LIMITS = { perNode: 80, nodes: 30 };
+    FORWARD_BUDGET_LINES = 5;
     keyOf = (e) => `${e?.self_id}:${e?.group_id}`;
     IMAGE_LABEL = /\n?\[图片\d+:\/work\/attachments\/[^\]\r\n]+\]/g;
   }
@@ -3602,7 +3622,26 @@ function quoteBody(text2, labels2) {
 function isStickerSegment(s) {
   return s?.type === "mface" || s?.type === "image" && (s.sub_type == 1 || /表情/.test(s.summary ?? ""));
 }
-function segmentsToText(message, selfId) {
+function forwardNodes(s) {
+  const content = s?.content ?? s?.data?.content;
+  if (!Array.isArray(content)) return [];
+  return content.map((node) => {
+    const d = node?.type === "node" ? node.data ?? node : node;
+    const raw = d?.message ?? d?.content ?? [];
+    const message = Array.isArray(raw) ? raw.map((segment) => ({ ...segment, ...segment?.data })) : [{ type: "text", text: String(raw) }];
+    return { name: String(d?.sender?.card || d?.sender?.nickname || d?.nickname || d?.name || "\u67D0\u4EBA"), message };
+  });
+}
+function forwardLines(s, selfId, limits2 = FORWARD_LIMITS) {
+  const nodes = forwardNodes(s);
+  const lines = nodes.slice(0, limits2.nodes).map((node) => `${node.name}: ${truncate(segmentsToText(node.message, selfId, true).replace(/\s+/g, " ") || "[\u975E\u6587\u672C\u6D88\u606F]", limits2.perNode)}`);
+  if (nodes.length > limits2.nodes) lines.push(`\uFF08\u5176\u4F59 ${nodes.length - limits2.nodes} \u6761\u7565\uFF09`);
+  return lines;
+}
+function forwardImageUrls(message) {
+  return (message ?? []).filter((s) => s?.type === "forward").flatMap(forwardNodes).flatMap((node) => node.message).filter((s) => !isStickerSegment(s)).map(imageUrl).filter((url) => Boolean(url)).slice(0, MAX_FORWARD_IMAGES);
+}
+function segmentsToText(message, selfId, nested = false) {
   let out = "";
   for (const s of message ?? []) {
     switch (s?.type) {
@@ -3644,9 +3683,15 @@ function segmentsToText(message, selfId) {
         out += title ? `[\u5361\u7247:${truncate(String(title), 60)}]` : "[\u5361\u7247]";
         break;
       }
-      case "forward":
-        out += "[\u804A\u5929\u8BB0\u5F55]";
+      case "forward": {
+        const lines = nested ? [] : forwardLines(s, selfId);
+        out += lines.length ? `
+\u3010\u804A\u5929\u8BB0\u5F55 ${forwardNodes(s).length}\u6761\u3011
+${lines.join("\n")}
+\u3010\u804A\u5929\u8BB0\u5F55\u7ED3\u675F\u3011
+` : "[\u804A\u5929\u8BB0\u5F55]";
         break;
+      }
     }
   }
   return out.replace(/[ \t]+/g, " ").trim();
@@ -3708,14 +3753,15 @@ async function resolveQuoted(e) {
       fromBot: uid != null && e.self_id != null && uid === String(e.self_id),
       name: uid && knownName(e, uid) || String(sender?.card || sender?.nickname || sender?.name || uid || "\u67D0\u4EBA"),
       text: segmentsToText(segs, e.self_id),
-      imageUrls: segs.map(imageUrl).filter((url) => Boolean(url))
+      imageUrls: [...segs.map(imageUrl), ...forwardImageUrls(segs)].filter((url) => Boolean(url)),
+      forward: hasForward(segs) || void 0
     };
   }
   e._llmQuoted = q ?? null;
   return q;
 }
 async function captureImageSegments(message, scope) {
-  const urls = [...new Set(message.map(imageUrl).filter((url) => Boolean(url)))];
+  const urls = [...new Set([...message.map(imageUrl), ...forwardImageUrls(message)].filter((url) => Boolean(url)))];
   const parts = [], savedImages = [];
   for (let offset = 0; offset < urls.length; offset += 4) {
     const loaded = await Promise.all(urls.slice(offset, offset + 4).map(loadImage));
@@ -3747,7 +3793,7 @@ async function extractInput(e, opts) {
   const images = opts.vision ? parts.slice(0, Math.max(0, Math.floor(opts.maxImages))) : [];
   return { text: text2, images, savedImages, quoted, quotedImageStart: quoted ? stored.savedImages.length : void 0, imageSegments };
 }
-var MAX_IMAGE_BYTES2;
+var MAX_IMAGE_BYTES2, FORWARD_LIMITS, MAX_FORWARD_IMAGES, hasForward;
 var init_message = __esm({
   "src/chat/message.ts"() {
     "use strict";
@@ -3756,6 +3802,9 @@ var init_message = __esm({
     init_roster();
     init_groupLog();
     MAX_IMAGE_BYTES2 = 37e5;
+    FORWARD_LIMITS = { perNode: 200, nodes: 60 };
+    MAX_FORWARD_IMAGES = 4;
+    hasForward = (message) => (message ?? []).some((s) => s?.type === "forward" && forwardNodes(s).length);
   }
 });
 
@@ -6301,7 +6350,7 @@ function buildHeader(e, eff, input, isAdmin, opts = {}) {
     const saved = input.savedImages ?? [];
     const start = input.quotedImageStart ?? saved.length;
     const labels2 = saved.slice(start).map((image, index) => imageLabel(image, start + index));
-    quote.push(quoteLabel(input.quoted) + quoteBody(truncate(input.quoted.text || "[\u975E\u6587\u672C\u6D88\u606F]", 300), labels2));
+    quote.push(quoteLabel(input.quoted) + quoteBody(truncate(input.quoted.text || "[\u975E\u6587\u672C\u6D88\u606F]", input.quoted.forward ? 6e3 : 300), labels2));
   }
   const render2 = (lines) => `${[...lines, head].join("\n")}
 `;
@@ -6678,6 +6727,13 @@ function selectModel(eff, ctx, exact) {
   }
   return { block: first2 };
 }
+function toolJob(call, turn, before) {
+  const kind = call && JOB_TOOLS[call.name];
+  if (!kind) return void 0;
+  const created = kind === "agy" ? turn.agyJob : turn.computerJob;
+  const id = call.args?.action === "start" ? created !== before[kind] ? created : void 0 : call.args?.id;
+  return typeof id === "string" ? { kind, id } : void 0;
+}
 async function runTurn(req) {
   semaphore.max = Math.max(1, req.eff.reply.concurrency || 3);
   const callbackJob = req.asyncResult?.id ?? req.computerResult?.id;
@@ -6927,6 +6983,7 @@ ${session.summary}` }] });
         phase: roundsSpent ? "skipped" : "running"
       });
       if (roundsSpent) break;
+      const jobsBefore = { agy: turn.agyJob, computer: turn.computerJob };
       const { results, terminal } = await registry.execute(res.toolCalls, ctx, offered, (result, ms) => {
         if (result.images?.length && result.name !== "read_image") {
           const refs = result.images.map((part) => saveImage(turn.imageScope, part));
@@ -6944,7 +7001,8 @@ ${session.summary}` }] });
           ms,
           isError: result.isError,
           images,
-          omittedImages: (result.images?.length ?? 0) - images.length
+          omittedImages: (result.images?.length ?? 0) - images.length,
+          job: toolJob(res.toolCalls.find((call2) => call2.id === result.id), turn, jobsBefore)
         });
       });
       const roundsLeft = maxRounds - round - 1;
@@ -7030,7 +7088,7 @@ function parseSummary(text2) {
   if (m) return { episode: m[1].trim() || void 0, summary: m[2].trim() || void 0 };
   return { summary: text2.trim() || void 0 };
 }
-var NATIVE_SEARCH_TYPES, semaphore, degraded;
+var NATIVE_SEARCH_TYPES, semaphore, degraded, JOB_TOOLS;
 var init_agent = __esm({
   "src/chat/agent.ts"() {
     "use strict";
@@ -7063,6 +7121,7 @@ var init_agent = __esm({
     NATIVE_SEARCH_TYPES = /* @__PURE__ */ new Set(["anthropic", "openai-responses", "gemini"]);
     semaphore = new Semaphore(3);
     degraded = /* @__PURE__ */ new Map();
+    JOB_TOOLS = { agy: "agy", computer_task: "computer" };
   }
 });
 

@@ -1,5 +1,5 @@
 import { config } from '../core/config.ts'
-import { captureImageSegments, getQuoted, quoteBody, quoteLabel } from './message.ts'
+import { captureImageSegments, forwardLines, forwardNodes, getQuoted, quoteBody, quoteLabel, type ForwardLimits } from './message.ts'
 import { chatImageScope, imageLabel, truncateImageText } from './images.ts'
 import { formatNow, truncate } from '../core/util.ts'
 import { observeUsers, knownName, rememberMessage } from './roster.ts'
@@ -16,11 +16,17 @@ interface Line {
   bot?: boolean
   /** conversation (session key) whose history already contains this line */
   conv?: string
+  /** inner messages of a chat record (合并转发), one line each, already limited per message */
+  forward?: string[]
 }
 
 // Room for a 100-message context plus the trigger and messages queued after it.
 const MAX_LINES = 200
 const logs = new Map<string, Line[]>()
+/** Chat records in the recent log: shorter inner messages than in the current message. */
+const LOG_FORWARD_LIMITS: ForwardLimits = { perNode: 80, nodes: 30 }
+/** A chat record in the recent log may use this many times a normal line's character budget. */
+const FORWARD_BUDGET_LINES = 5
 
 const keyOf = (e: any) => `${e?.self_id}:${e?.group_id}`
 
@@ -57,9 +63,11 @@ export function briefSegments(message: any[], selfId?: any): string {
       case 'xml':
         out += '[卡片]'
         break
-      case 'forward':
-        out += '[聊天记录]'
+      case 'forward': {
+        const count = forwardNodes(s).length
+        out += count ? `[聊天记录 ${count}条]` : '[聊天记录]'
         break
+      }
     }
   }
   return out.replace(/\s+/g, ' ').trim()
@@ -73,14 +81,16 @@ export function recordGroupMessage(e: any) {
   const key = keyOf(e)
   const list = logs.get(key) ?? []
   const name = `${knownName(e) || '群友'}(平台ID ${e.user_id})`
+  const forward = (e.message ?? []).filter((s: any) => s?.type === 'forward').flatMap((s: any) => forwardLines(s, e.self_id, LOG_FORWARD_LIMITS))
   rememberMessage(e, text)
-  recordChatter(e, name, text)
+  recordChatter(e, name, forward.length ? [text, ...forward].join('\n') : text, forward.length ? 1500 : undefined)
   list.push({
     t: Date.now(),
     uid: String(e.user_id),
     name,
     text: truncate(text, 200),
     mid: e.message_id != null ? String(e.message_id) : undefined,
+    forward: forward.length ? forward : undefined,
   })
   if (list.length > MAX_LINES) list.splice(0, list.length - MAX_LINES)
   logs.set(key, list)
@@ -131,10 +141,26 @@ function attachQuote(e: any, list: Line[], line: Line, images: boolean) {
  * text and the quoted text gets what is left of `maxChars`; image labels are not counted.
  */
 function renderLine(l: Line, maxChars: number): string {
-  if (!l.quote) return truncateImageText(l.text, maxChars)
+  const body = truncateImageText(l.text, maxChars) + forwardBlock(l.forward, maxChars * FORWARD_BUDGET_LINES)
+  if (!l.quote) return body
   const room = maxChars - l.text.replace(IMAGE_LABEL, '').trim().length
   const quoted = room >= 4 ? quoteBody(truncate(l.quote.text, room), l.quote.labels) : ['…', ...l.quote.labels].join(' ')
-  return `${l.quote.label}${quoted}\n${truncateImageText(l.text, maxChars)}`
+  return `${l.quote.label}${quoted}\n${body}`
+}
+
+/** A chat record's inner messages, indented under its line, until the budget runs out. */
+function forwardBlock(lines: string[] | undefined, budget: number): string {
+  if (!lines?.length) return ''
+  const out: string[] = []
+  for (const [index, line] of lines.entries()) {
+    if (line.length > budget) {
+      out.push(`（其余 ${lines.length - index} 条略）`)
+      break
+    }
+    out.push(line)
+    budget -= line.length
+  }
+  return '\n' + out.map(line => `  ${line}`).join('\n')
 }
 
 /**

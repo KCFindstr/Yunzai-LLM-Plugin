@@ -13,6 +13,8 @@ export interface QuotedMessage {
   name: string
   text: string
   imageUrls: string[]
+  /** the quoted message is a chat record; its inner messages are already individually limited */
+  forward?: boolean
 }
 
 export interface ExtractedInput {
@@ -43,8 +45,47 @@ export function isStickerSegment(s: any): boolean {
   return s?.type === 'mface' || (s?.type === 'image' && (s.sub_type == 1 || /表情/.test(s.summary ?? '')))
 }
 
+export interface ForwardLimits {
+  /** characters per inner message */
+  perNode: number
+  /** inner messages shown before the rest are summarized as a count */
+  nodes: number
+}
+
+export const FORWARD_LIMITS: ForwardLimits = { perNode: 200, nodes: 60 }
+/** Images captured from inside a forward, so a long chat record cannot flood the vision input. */
+const MAX_FORWARD_IMAGES = 4
+
+/** Inner messages of a forward (合并转发) segment, when the adapter delivered them inline as `content`. */
+export function forwardNodes(s: any): { name: string; message: any[] }[] {
+  const content = s?.content ?? s?.data?.content
+  if (!Array.isArray(content)) return []
+  return content.map((node: any) => {
+    const d = node?.type === 'node' ? node.data ?? node : node
+    const raw = d?.message ?? d?.content ?? []
+    const message = Array.isArray(raw) ? raw.map((segment: any) => ({ ...segment, ...segment?.data })) : [{ type: 'text', text: String(raw) }]
+    return { name: String(d?.sender?.card || d?.sender?.nickname || d?.nickname || d?.name || '某人'), message }
+  })
+}
+
+/** One line per inner message, each cut to its own budget so one long message cannot crowd out the rest. */
+export function forwardLines(s: any, selfId?: any, limits: ForwardLimits = FORWARD_LIMITS): string[] {
+  const nodes = forwardNodes(s)
+  const lines = nodes.slice(0, limits.nodes)
+    .map(node => `${node.name}: ${truncate(segmentsToText(node.message, selfId, true).replace(/\s+/g, ' ') || '[非文本消息]', limits.perNode)}`)
+  if (nodes.length > limits.nodes) lines.push(`（其余 ${nodes.length - limits.nodes} 条略）`)
+  return lines
+}
+
+export const hasForward = (message: any[]) => (message ?? []).some(s => s?.type === 'forward' && forwardNodes(s).length)
+
+function forwardImageUrls(message: any[]): string[] {
+  return (message ?? []).filter(s => s?.type === 'forward').flatMap(forwardNodes).flatMap(node => node.message)
+    .filter(s => !isStickerSegment(s)).map(imageUrl).filter((url): url is string => Boolean(url)).slice(0, MAX_FORWARD_IMAGES)
+}
+
 /** Segments -> text for the LLM, preserving mention identities and their positions. */
-export function segmentsToText(message: any[], selfId?: any): string {
+export function segmentsToText(message: any[], selfId?: any, nested = false): string {
   let out = ''
   for (const s of message ?? []) {
     switch (s?.type) {
@@ -85,9 +126,12 @@ export function segmentsToText(message: any[], selfId?: any): string {
         out += title ? `[卡片:${truncate(String(title), 60)}]` : '[卡片]'
         break
       }
-      case 'forward':
-        out += '[聊天记录]'
+      case 'forward': {
+        // A forward inside a forward stays a placeholder; one level of chat record is enough context.
+        const lines = nested ? [] : forwardLines(s, selfId)
+        out += lines.length ? `\n【聊天记录 ${forwardNodes(s).length}条】\n${lines.join('\n')}\n【聊天记录结束】\n` : '[聊天记录]'
         break
+      }
     }
   }
   return out.replace(/[ \t]+/g, ' ').trim()
@@ -145,7 +189,8 @@ async function resolveQuoted(e: any): Promise<QuotedMessage | undefined> {
       fromBot: uid != null && e.self_id != null && uid === String(e.self_id),
       name: (uid && knownName(e, uid)) || String(sender?.card || sender?.nickname || sender?.name || uid || '某人'),
       text: segmentsToText(segs, e.self_id),
-      imageUrls: segs.map(imageUrl).filter((url: string | undefined): url is string => Boolean(url)),
+      imageUrls: [...segs.map(imageUrl), ...forwardImageUrls(segs)].filter((url: string | undefined): url is string => Boolean(url)),
+      forward: hasForward(segs) || undefined,
     }
   }
   e._llmQuoted = q ?? null
@@ -154,7 +199,7 @@ async function resolveQuoted(e: any): Promise<QuotedMessage | undefined> {
 
 /** Persist every successfully loaded image, even if vision or a tool never uses it. */
 export async function captureImageSegments(message: any[], scope: string) {
-  const urls = [...new Set(message.map(imageUrl).filter((url): url is string => Boolean(url)))]
+  const urls = [...new Set([...message.map(imageUrl), ...forwardImageUrls(message)].filter((url): url is string => Boolean(url)))]
   const parts: ImagePart[] = [], savedImages: SavedImage[] = []
   for (let offset = 0; offset < urls.length; offset += 4) {
     const loaded = await Promise.all(urls.slice(offset, offset + 4).map(loadImage))

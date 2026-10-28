@@ -96,6 +96,17 @@ function selectModel(eff: EffectiveConfig, ctx: QuotaCtx, exact?: string): { pic
   return { block: first }
 }
 
+const JOB_TOOLS: Record<string, 'agy' | 'computer'> = { agy: 'agy', computer_task: 'computer' }
+
+// Links a background-task tool call to its job so the rollout can jump there before the result comes back.
+function toolJob(call: { name: string; args: Record<string, any> } | undefined, turn: TurnState, before: { agy?: string; computer?: string }) {
+  const kind = call && JOB_TOOLS[call.name]
+  if (!kind) return undefined
+  const created = kind === 'agy' ? turn.agyJob : turn.computerJob
+  const id = call.args?.action === 'start' ? created !== before[kind] ? created : undefined : call.args?.id
+  return typeof id === 'string' ? { kind, id } : undefined
+}
+
 export async function runTurn(req: TurnRequest): Promise<TurnOutcome> {
   semaphore.max = Math.max(1, req.eff.reply.concurrency || 3)
   const callbackJob = req.asyncResult?.id ?? req.computerResult?.id
@@ -340,6 +351,7 @@ async function runTurnInner(req: TurnRequest, ref: { turn?: TurnState; rolloutId
       for (const call of res.toolCalls) recordRolloutEvent(ref.rolloutId, { kind: 'tool', text: roundsSpent ? '已达到工具轮数上限，未执行' : '正在执行',
         step, tool: call.name, callId: call.id, args: agyHistoryText(call.args), phase: roundsSpent ? 'skipped' : 'running' })
       if (roundsSpent) break
+      const jobsBefore = { agy: turn.agyJob, computer: turn.computerJob }
       const { results, terminal } = await registry.execute(res.toolCalls, ctx, offered, (result, ms) => {
         if (result.images?.length && result.name !== 'read_image') {
           const refs = result.images.map(part => saveImage(turn.imageScope!, part))
@@ -349,7 +361,8 @@ async function runTurnInner(req: TurnRequest, ref: { turn?: TurnState; rolloutId
         const images = recordRolloutImages(ref.rolloutId, result.images)
         recordRolloutEvent(ref.rolloutId, { kind: 'tool', text: result.content, step, tool: result.name,
           callId: result.id, phase: 'completed', ms, isError: result.isError, images,
-          omittedImages: (result.images?.length ?? 0) - images.length })
+          omittedImages: (result.images?.length ?? 0) - images.length,
+          job: toolJob(res.toolCalls.find(call => call.id === result.id), turn, jobsBefore) })
       })
       const roundsLeft = maxRounds - round - 1
       for (const result of results) result.content += `\n【工具余量】${result.name}：${result.remaining}；全局剩余 ${result.globalRemaining} 次（辅助工具不占）；剩余工具轮次 ${roundsLeft}`

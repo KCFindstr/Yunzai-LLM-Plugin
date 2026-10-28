@@ -99,7 +99,8 @@ export function buildHeader(e: any, eff: EffectiveConfig, input: ExtractedInput,
     const saved = input.savedImages ?? []
     const start = input.quotedImageStart ?? saved.length
     const labels = saved.slice(start).map((image, index) => imageLabel(image, start + index))
-    quote.push(quoteLabel(input.quoted) + quoteBody(truncate(input.quoted.text || '[非文本消息]', 300), labels))
+    // A quoted chat record is already limited per inner message; only cap the whole.
+    quote.push(quoteLabel(input.quoted) + quoteBody(truncate(input.quoted.text || '[非文本消息]', input.quoted.forward ? 6000 : 300), labels))
   }
   const render = (lines: string[]) => `${[...lines, head].join('\n')}\n`
   const memory = opts.memory ? [opts.memory] : []
