@@ -91,7 +91,7 @@ describe('AGY host worker and async handoff', () => {
     assert.equal(redact(alias), alias)
     const numericAlias = '/work/agy/1234567890/out/result.png'
     assert.equal(redact(numericAlias), numericAlias)
-    assert.ok(!redact('phone 1234567890').includes('1234567890'))
+    assert.ok(!redact('phone 13812345678').includes('13812345678'))
   })
   it('accepts a successful final record without a trailing newline or init banner and keeps streamed reply text', async t => {
     const events: any[] = []
@@ -240,7 +240,11 @@ describe('AGY host worker and async handoff', () => {
   it('keeps public Pixiv artwork evidence URLs usable while redacting private numbers', () => {
     const url = 'https://www.pixiv.net/en/artworks/123456789'
     assert.equal(redact(url), url)
-    assert.ok(!redact('phone 123456789').includes('123456789'))
+    assert.ok(!redact('phone 13812345678').includes('13812345678'))
+    assert.ok(!redact('phone 415-555-1234').includes('555-1234'))
     assert.ok(!redact(url, ['123456789']).includes('123456789'))
+  })
+  it('keeps QQ numbers visible', () => {
+    for (const qq of ['10001', '123456789', '2792491320', '10000000001']) assert.equal(redact(`QQ ${qq}`), `QQ ${qq}`)
   })
 })

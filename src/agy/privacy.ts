@@ -33,6 +33,8 @@ export function redact(text: string, secrets: string[] = []): string {
       // Random bot scope/workspace IDs may contain only digits; keep these file aliases usable.
       if (value.length === 10 && text[offset + 10] === '/' && (before.endsWith('/work/agy/') || before.endsWith('/work/attachments/'))) return value
       // Public artwork IDs are evidence identifiers, not personal phone/account numbers.
+      // QQ numbers are public chat identifiers (5-11 plain digits); only mask what looks like a phone number.
+      if (/^\d{9,11}$/.test(value) && !/^1[3-9]\d{9}$/.test(value)) return value
       return /https?:\/\/(?:www\.)?pixiv\.net\/(?:[a-z]{2}\/)?artworks\/$/i.test(before) ? value : '[private number]'
     })
 }

@@ -5243,6 +5243,7 @@ function redact(text2, secrets = []) {
   return result.replace(/-----BEGIN [\w ]*PRIVATE KEY-----[\s\S]*?-----END [\w ]*PRIVATE KEY-----/g, "[redacted]").replace(/\b(?:Bearer|Basic)\s+[\w.+/=-]+/gi, "[redacted]").replace(/\beyJ[\w-]+\.[\w-]+\.[\w-]+\b/g, "[redacted]").replace(/\b(?:sk-|AIza|ghp_|gho_|AKIA|ya29\.)[\w.-]{15,}/g, "[redacted]").replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, "[redacted]").replace(/(?:\b[A-Za-z]:[\\/]|\\\\)[^\s<>"'`，。；]+/g, "[private path]").replace(/\/(?:home|Users|root|mnt|var\/lib)\/[^\s<>"'`，。；]+/g, "[private path]").replace(/\b(?:10|127)\.\d{1,3}\.\d{1,3}\.\d{1,3}\b|\b192\.168\.\d{1,3}\.\d{1,3}\b|\b172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}\b/g, "[private address]").replace(/([?&](?:key|api_?key|token|password|auth|authorization|secret|signature|session|code)=)[^&#\s)]+/gi, "$1[redacted]").replace(/["']?\b(?:password|api[_ -]?key|secret|access[_ -]?token|refresh[_ -]?token|session[_ -]?id|cookie|sid)["']?\s*[:=]\s*["']?[^\s,;"']+["']?/gi, "[redacted]").replace(/(?<!\w)(?:\+?\d[ -]?){9,16}(?!\w)/g, (value, offset, text3) => {
     const before = text3.slice(0, offset);
     if (value.length === 10 && text3[offset + 10] === "/" && (before.endsWith("/work/agy/") || before.endsWith("/work/attachments/"))) return value;
+    if (/^\d{9,11}$/.test(value) && !/^1[3-9]\d{9}$/.test(value)) return value;
     return /https?:\/\/(?:www\.)?pixiv\.net\/(?:[a-z]{2}\/)?artworks\/$/i.test(before) ? value : "[private number]";
   });
 }
