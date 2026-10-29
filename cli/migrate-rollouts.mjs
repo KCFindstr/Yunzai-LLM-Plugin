@@ -4,6 +4,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseRolloutJson } from '../web/js/rollout-data.js'
+import { locations } from './layout.mjs'
 
 const validId = id => typeof id === 'string' && /^[a-f0-9]{16}$/.test(id)
 function atomicWrite(file, text) {
@@ -73,6 +74,6 @@ export function migrateRollouts(dataDirectory) {
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-  try { console.log(JSON.stringify(migrateRollouts(path.resolve(process.argv[2] ?? process.env.YZ_LLM_DATA_DIR ?? path.join(root, 'data'))))) }
+  try { console.log(JSON.stringify(migrateRollouts(path.resolve(process.argv[2] ?? locations(root).data)))) }
   catch (error) { console.error(error.message); process.exitCode = 1 }
 }

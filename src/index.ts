@@ -6,6 +6,7 @@ import { scanCatalog } from './commands/catalog.ts'
 import { registerCommandTools } from './commands/tools.ts'
 import { config } from './core/config.ts'
 import { log } from './core/log.ts'
+import { finishLayoutMigration } from './core/layout.ts'
 import { flushAllStores } from './core/store.ts'
 import { ownClasses } from './core/yunzai.ts'
 import { loadCustomTools } from './tools/custom.ts'
@@ -34,6 +35,7 @@ function startup() {
   ;(globalThis as any)[STARTED] = true
 
   config.watch()
+  finishLayoutMigration().catch(err => log.warn(`目录迁移收尾失败: ${err?.message ?? err}`))
   registerWebTools()
   registerSendImageTool()
   registerCommandTools()

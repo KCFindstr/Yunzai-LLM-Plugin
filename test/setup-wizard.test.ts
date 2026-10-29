@@ -23,8 +23,8 @@ it('shares cached setup checks with tool offering, execution and dependent skill
     probes++
     return { stdout: file === 'wsl.exe' ? JSON.stringify([installed, installed, installed]) : installed ? '--sandbox --dangerously-skip-permissions' : '', stderr: '' }
   })
-  fs.mkdirSync(path.join(TMP, 'data/agy-setup'), { recursive: true })
-  fs.writeFileSync(path.join(TMP, 'data/agy-setup/agy.exe'), '')
+  fs.mkdirSync(path.join(TMP, 'resources/agy-setup'), { recursive: true })
+  fs.writeFileSync(path.join(TMP, 'resources/agy-setup/agy.exe'), '')
   writeUserConfig(base + 'tools:\n  exec: { enable: true, distro: wizard-test }\n  agy: { enable: true, distro: wizard-test }\n  computer: { enable: true, distro: wizard-test }\n  googleLens: { enable: true, distro: wizard-test }\n')
   config.load()
   const eff = config.effective(), status = await setupStatus(true)

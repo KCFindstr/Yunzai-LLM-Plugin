@@ -10,7 +10,7 @@
 - 只复制 OneBot 适配器、system、other 和本插件；不复制 ws-plugin、stdin 适配器。
 - 连接方式：存在 `plugins/adapter/OneBotClient.js`（可选的正向 WS 客户端）时由它连接模拟 NapCat；没有时模拟 NapCat 以反向 WS 连接 TRSS 自带的 `ws://127.0.0.1:2599/OneBotv11`。
 - Redis：Yunzai 不附带 redis。Windows 首次运行时自动从 [redis-windows](https://github.com/redis-windows/redis-windows) 下载固定版本的 Redis 8 msys2 构建（校验 SHA-256）到 `sandbox/redis/`（git 忽略）；其他系统需要 PATH 中有 `redis-server`。
-- 插件数据（会话、额度、表情）写在 `.runtime/plugins/Yunzai-LLM-Plugin/data`，不影响正式数据。
+- 插件配置和数据（会话、额度、表情）按 Yunzai 规范写在 `.runtime/config/Yunzai-LLM-Plugin` 和 `.runtime/data/Yunzai-LLM-Plugin`，不影响正式数据。
 
 ## 使用
 

@@ -182,8 +182,11 @@ function prepare() {
   // management panel assets (served on web.port)
   copyDir(path.join(PLUGIN, 'web'), path.join(dst, 'web'))
   fs.copyFileSync(path.join(PLUGIN, 'config', 'default_config.yaml'), path.join(dst, 'config', 'default_config.yaml'))
+  // the plugin's own config and data follow the Yunzai layout: <root>/config|data/Yunzai-LLM-Plugin
+  const userConfigDir = path.join(RT, 'config', 'Yunzai-LLM-Plugin')
+  fs.mkdirSync(userConfigDir, { recursive: true })
   // persona files referenced as `file:xxx.md`
-  for (const f of fs.readdirSync(path.join(PLUGIN, 'config'))) if (/\.(md|txt)$/i.test(f)) fs.copyFileSync(path.join(PLUGIN, 'config', f), path.join(dst, 'config', f))
+  for (const f of fs.readdirSync(path.join(PLUGIN, 'config'))) if (/\.(md|txt)$/i.test(f)) fs.copyFileSync(path.join(PLUGIN, 'config', f), path.join(userConfigDir, f))
   let pluginConfig = useMock ? MOCK_PLUGIN_CONFIG : fs.readFileSync(userConfig, 'utf8')
   // --overlay <file>: YAML merged over the generated config (e.g. a copy of prod's settings without providers/keys)
   const overlayArg = argv.includes('--overlay') ? argv[argv.indexOf('--overlay') + 1] : undefined
@@ -196,10 +199,10 @@ function prepare() {
     }
     pluginConfig = YAML.stringify(merge(YAML.parse(pluginConfig), YAML.parse(fs.readFileSync(overlayArg, 'utf8'))))
   }
-  fs.writeFileSync(path.join(dst, 'config', 'config.yaml'), pluginConfig)
+  fs.writeFileSync(path.join(userConfigDir, 'config.yaml'), pluginConfig)
   // scripted runs must not depend on earlier runs (e.g. quota already spent today); stickers are kept
   if (scriptFile)
-    for (const f of ['usage.json', 'sessions.json', 'memory.json']) fs.rmSync(path.join(dst, 'data', f), { force: true })
+    for (const f of ['usage.json', 'sessions.json', 'memory.json']) fs.rmSync(path.join(RT, 'data', 'Yunzai-LLM-Plugin', f), { force: true })
 }
 
 // ---------------- processes ----------------

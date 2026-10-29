@@ -2,7 +2,7 @@
 
 用量与额度页面可选择本地起止时间、模型、输入/输出/缓存类别，以及 token/费用显示方式。起始时间包含在内，结束时间不包含。旧累计统计和额度窗口保持独立；明细不从历史总数推算。
 
-从本版本启动时起，`data/usage.sqlite` 保存每次调用的时间、配置模型 ID、供应商、上游模型、完整标准化 Usage（含缓存读、5 分钟/1 小时缓存写、输出中的思考 token、搜索次数、上游费用和缺失用量标记）、当时价格快照和费用分类。主模型、utilityChat 调用和 System One 判断均记录。System One 在明细中标为 `systemone:<模型>`。不保存聊天文本或身份凭证。
+从本版本启动时起，`Yunzai/data/Yunzai-LLM-Plugin/usage.sqlite` 保存每次调用的时间、配置模型 ID、供应商、上游模型、完整标准化 Usage（含缓存读、5 分钟/1 小时缓存写、输出中的思考 token、搜索次数、上游费用和缺失用量标记）、当时价格快照和费用分类。主模型、utilityChat 调用和 System One 判断均记录。System One 在明细中标为 `systemone:<模型>`。不保存聊天文本或身份凭证。
 
 认证接口 `GET /api/usage/history?from=<毫秒>&to=<毫秒>&model=<可选模型ID>` 使用 SQLite 的时间索引和模型/时间复合索引进行范围查询、按模型聚合；不会读取 JSON 全部调用记录。数据库使用 WAL；明细目前不自动过期。需要 Node >=22.13 的内置 SQLite。
 

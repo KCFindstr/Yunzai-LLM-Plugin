@@ -1,6 +1,6 @@
 # ==========================================================================
 #  Yunzai-LLM-Plugin 默认配置（请勿直接修改本文件）
-#  需要修改的项写到同目录的 config.yaml 里（只写要覆盖的部分即可），
+#  需要修改的项写到 Yunzai/config/Yunzai-LLM-Plugin/config.yaml 里（只写要覆盖的部分即可），
 #  或者私聊机器人用指令修改：#llm帮助 查看全部指令。
 #  config.yaml 修改后自动热重载。
 # ==========================================================================
@@ -578,7 +578,7 @@ tools:
     enable: false
     # admin=仅管理员；all=所有人（等同向所有可调用者开放主机完整访问）
     access: admin
-    # 留空使用 data/agy-setup/agy.exe
+    # 留空使用 npm run agy-setup 安装到 Yunzai/resources/Yunzai-LLM-Plugin/agy-setup/agy.exe 的 CLI
     executable: ''
     # 每个 AGY 任务最长运行时间，单位分钟
     maxMinutes: 10
@@ -632,7 +632,7 @@ memory:
     # 余弦相似度达到此值即视为相关（即使没有共同关键词）
     minScore: 0.3
 
-# 技能：plugins/Yunzai-LLM-Plugin/skills/<名称>/SKILL.md
+# 技能：插件自带 skills/<名称>/SKILL.md；自建技能放在 Yunzai/config/Yunzai-LLM-Plugin/skills/<名称>/SKILL.md（同名时优先）
 skills:
   # 是否向模型提供技能说明与 load_skill 工具；依赖未就绪时隐藏该技能
   enable: true
@@ -652,5 +652,5 @@ web:
   host: 127.0.0.1
   # 网页面板监听端口
   port: 6190
-  # 登录密码。留空则首次启动时随机生成，保存在 data/web-auth.json 并打印在日志中
+  # 登录密码。留空则首次启动时随机生成，保存在 Yunzai/data/Yunzai-LLM-Plugin/web-auth.json 并打印在日志中
   password: ''

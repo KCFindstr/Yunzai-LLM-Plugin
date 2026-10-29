@@ -2,9 +2,11 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createHash } from 'node:crypto'
+import { locations, migrateLayout } from './layout.mjs'
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 if (process.platform !== 'win32') throw Error('AGY requires a Windows host')
-const executable = path.join(root, 'data/agy-setup/agy.exe')
+migrateLayout(root)
+const executable = path.join(locations(root).resources, 'agy-setup', 'agy.exe')
 if (!fs.existsSync(executable)) {
   const manifest = await (await fetch('https://antigravity-cli-auto-updater-974169037036.us-central1.run.app/manifests/windows_amd64.json')).json()
   const url = new URL(manifest.url)

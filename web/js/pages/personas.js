@@ -29,7 +29,7 @@ export async function render(root, [nameArg]) {
     ),
     editor = h('textarea', { class: 'code', rows: 26, spellcheck: false }, sel.text),
     h('div', { class: 'row', style: { marginTop: '10px' } },
-      h('span', { class: 'small muted' }, sel.file ? `保存会写入 config/${sel.file}` : '保存到 config.yaml 的 persona.presets'),
+      h('span', { class: 'small muted' }, sel.file ? `保存会写入 Yunzai/config/Yunzai-LLM-Plugin/${sel.file}` : '保存到 config.yaml 的 persona.presets'),
       h('button', { class: 'btn primary right', onclick: () => act(() => put(`/api/personas/${enc(sel.name)}`, { text: editor.value }), '已保存') }, '保存'),
     ),
   ) : card(null, empty('还没有人设'))

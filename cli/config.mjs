@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 /**
- * Config tool for plugins/Yunzai-LLM-Plugin/config/config.yaml, driven by cli/schema.mjs.
+ * Config tool for the plugin's config.yaml, driven by cli/schema.mjs.
  *
  *   node cli/config.mjs              interactive: browse every valid key (set or not), typed inputs, search
  *   node cli/config.mjs list|get|describe|set|unset|check ...   scriptable (see --help)
  *
  * Only keys defined in the schema can be written; every value is validated. config.yaml keeps its comments and
- * only contains what you changed. The running bot hot-reloads the file. Env: YZ_LLM_CONFIG_DIR.
+ * only contains what you changed. The running bot hot-reloads the file. It lives in Yunzai/config/Yunzai-LLM-Plugin/
+ * (env: YZ_LLM_CONFIG_DIR).
  */
 import fs from 'node:fs'
 import path from 'node:path'
@@ -14,10 +15,14 @@ import { fileURLToPath } from 'node:url'
 import YAML from 'yaml'
 import { CHAT_PROVIDER_TYPES, configNotices, configProblems, dropRetired, MODEL_ID, modelDefaults, modelSuggestions, PRESET_PROVIDERS, PRICING_FIELDS, PROVIDER_TYPES, schemaAt, SCHEMA, suggestKeys, THINKING_SETTING, validate, validatePath, valuesOf } from './schema.mjs'
 import { migrateConfig } from './migrate.mjs'
+import { locations, migrateLayout } from './layout.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
-const CONFIG_DIR = process.env.YZ_LLM_CONFIG_DIR || path.resolve(here, '..', 'config')
-const DEFAULT_FILE = path.join(CONFIG_DIR, 'default_config.yaml')
+const PLUGIN_ROOT = path.resolve(here, '..')
+// config lives in Yunzai/config/Yunzai-LLM-Plugin; an install that still keeps it in the plugin folder is moved first
+migrateLayout(PLUGIN_ROOT)
+const CONFIG_DIR = locations(PLUGIN_ROOT).config
+const DEFAULT_FILE = locations(PLUGIN_ROOT).defaultConfig
 const USER_FILE = path.join(CONFIG_DIR, 'config.yaml')
 
 const C = { dim: s => `\x1b[90m${s}\x1b[0m`, ok: s => `\x1b[32m${s}\x1b[0m`, warn: s => `\x1b[33m${s}\x1b[0m`, err: s => `\x1b[31m${s}\x1b[0m`, h: s => `\x1b[36m${s}\x1b[0m` }

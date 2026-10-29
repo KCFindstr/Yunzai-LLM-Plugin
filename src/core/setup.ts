@@ -3,7 +3,7 @@ import path from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { config, resolveKeys, deepseekToolKey } from './config.ts'
-import { DATA_DIR } from './paths.ts'
+import { AGY_EXECUTABLE } from './paths.ts'
 import type { EffectiveConfig, ModelConfig } from './configTypes.ts'
 
 const exec = promisify(execFile)
@@ -49,7 +49,7 @@ export async function checkRuntime(kind: RuntimeKind, eff: EffectiveConfig, forc
     }
     if (kind === 'agy') {
       checks.push({ label: 'Windows 宿主机（无需 WSL）', ok: process.platform === 'win32' })
-      const executable = path.resolve(eff.tools.agy.executable || path.join(DATA_DIR, 'agy-setup/agy.exe'))
+      const executable = path.resolve(eff.tools.agy.executable || AGY_EXECUTABLE)
       checks.push({ label: 'AGY CLI', ok: fs.existsSync(executable) })
       let cliAvailable = false
       if (checks.every(c => c.ok)) {

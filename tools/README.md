@@ -1,6 +1,6 @@
 # 自定义工具
 
-把 `.js` / `.mjs` 文件放在这个目录，插件启动或 `#llm重载` 时自动加载。每个文件默认导出一个工具（或工具数组）：
+把 `.js` / `.mjs` 文件放在 `Yunzai/config/Yunzai-LLM-Plugin/tools/`（Yunzai 的 config 目录下，不是这个插件目录），插件启动或 `#llm重载` 时自动加载。这个目录只放说明和示例。每个文件默认导出一个工具（或工具数组）：
 
 ```js
 export default {

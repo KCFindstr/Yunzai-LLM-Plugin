@@ -17,6 +17,8 @@ fs.copyFileSync(path.join(PLUGIN_ROOT, 'config', 'default_config.yaml'), path.jo
 process.env.YZ_LLM_PLUGIN_DIR = TMP
 process.env.YZ_LLM_CONFIG_DIR = path.join(TMP, 'config')
 process.env.YZ_LLM_DATA_DIR = path.join(TMP, 'data')
+process.env.YZ_LLM_RESOURCES_DIR = path.join(TMP, 'resources')
+process.env.YZ_LLM_TEMP_DIR = path.join(TMP, 'temp')
 process.env.YZ_LLM_SKILLS_DIR = path.join(TMP, 'skills')
 process.env.YZ_LLM_TOOLS_DIR = path.join(TMP, 'tools')
 process.env.YZ_LLM_QUIET = '1'

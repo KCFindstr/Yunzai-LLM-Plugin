@@ -6,13 +6,13 @@ The chatbot acknowledges the request first, runs the worker asynchronously, then
 
 ## Setup
 
-Run `npm run agy-setup` in the plugin directory. It installs a host CLI at `data/agy-setup/agy.exe` if absent, using the official Windows manifest and checking its SHA-512 checksum. Sign in to Antigravity using the same Windows account that runs the bot. AGY inherits that account's normal environment, tools, CLI profile and login. Setup and execution do not create or modify private CLI profiles, permission settings or MCP configurations, and never invoke WSL, install VM services or restart the desktop.
+Run `npm run agy-setup` in the plugin directory. It installs a host CLI at `Yunzai/resources/Yunzai-LLM-Plugin/agy-setup/agy.exe` if absent, using the official Windows manifest and checking its SHA-512 checksum. Sign in to Antigravity using the same Windows account that runs the bot. AGY inherits that account's normal environment, tools, CLI profile and login. Setup and execution do not create or modify private CLI profiles, permission settings or MCP configurations, and never invoke WSL, install VM services or restart the desktop.
 
 Configure `tools.agy.enable`, `access` (`admin` or `all`), optional `executable`, `maxMinutes` (1–30), `maxQueue` (1–50) and `maxChainDepth` (0–10, default 1: how many times in a row a result turn may start or resume another job). Defaults remain disabled and admin-only. The former `tools.agy.distro` setting is obsolete and ignored. The setup wizard only checks that the host CLI is runnable and supports the required flags; it does not probe login, model access or filesystem permissions. `node cli/agy-verify.mjs` runs a small native file task and uses the account's AGY allowance. `node cli/agy-verify-image.mjs <bot-image-path>` tests native image reading through the prompt mapping.
 
-Each chatbot session retains a normal host task folder under `data/agy-workspaces/<session>/` and starts a fresh CLI conversation on every execution, including follow-up/clarification runs. These folders organize task files; they do not confine the worker. Each task must include its required context; previous files remain available through the same path mapping. Resetting or expiring the chatbot session starts a fresh mapping; late updates cannot replace it. Old files are not automatically deleted. Jobs remain serialized.
+Each chatbot session retains a normal host task folder under `Yunzai/data/Yunzai-LLM-Plugin/agy-workspaces/<session>/` and starts a fresh CLI conversation on every execution, including follow-up/clarification runs. These folders organize task files; they do not confine the worker. Each task must include its required context; previous files remain available through the same path mapping. Resetting or expiring the chatbot session starts a fresh mapping; late updates cannot replace it. Old files are not automatically deleted. Jobs remain serialized.
 
-Old `data/agy-setup/profile`, broker scripts and VM services from earlier versions are unused by AGY. The launcher explicitly selects the real Windows account's CLI data directory and removes inherited parent-CLI backend/profile selectors, so a bot started from an old AGY terminal cannot silently reuse its deny rules. Other host environment variables and tools remain inherited. Previously saved CLI conversation IDs are discarded while retaining their existing output folder. Setup does not remove old files or touch the bot VM. Google Lens keeps its independent `lens-setup` workflow.
+Old `agy-setup/profile`, broker scripts and VM services from earlier versions are unused by AGY. The launcher explicitly selects the real Windows account's CLI data directory and removes inherited parent-CLI backend/profile selectors, so a bot started from an old AGY terminal cannot silently reuse its deny rules. Other host environment variables and tools remain inherited. Previously saved CLI conversation IDs are discarded while retaining their existing output folder. Setup does not remove old files or touch the bot VM. Google Lens keeps its independent `lens-setup` workflow.
 
 ## Image and output paths
 
@@ -20,8 +20,8 @@ The prompt supplies an explicit path mapping on every task, including continuati
 
 | Bot alias | Real host location |
 | --- | --- |
-| `/work/attachments/<rest>` | `data/images/<rest>` |
-| `/work/agy/<session>/out/<rest>` | `data/agy-workspaces/<session>/out/<rest>` |
+| `/work/attachments/<rest>` | `Yunzai/data/Yunzai-LLM-Plugin/images/<rest>` |
+| `/work/agy/<session>/out/<rest>` | `Yunzai/data/Yunzai-LLM-Plugin/agy-workspaces/<session>/out/<rest>` |
 | CLI `brain/<rest>` artifacts | `<Windows home>/.gemini/antigravity-cli/brain/<rest>` |
 
 The worker resolves input aliases to host paths for native file/image tools. The image store and native CLI brain directory are passed with `--add-dir` so the CLI sandbox can use those files directly. It is instructed to keep intermediates in its working folder, always save final deliverables inside `out/`, and report only the corresponding bot aliases. When image generation writes to `brain/`, the worker must copy the actual image into `out/` with native host tools and verify it exists before reporting delivery. A text placeholder or frontend copy suggestion is not a deliverable. The output directory is created before launch. Input images retain their global 30-day TTL, independent of chatbot session expiry.

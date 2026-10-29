@@ -3,7 +3,7 @@ import path from 'node:path'
 import YAML from 'yaml'
 import { config } from '../core/config.ts'
 import { log } from '../core/log.ts'
-import { SKILLS_DIR } from '../core/paths.ts'
+import { SHIPPED_SKILLS_DIR, SKILLS_DIR } from '../core/paths.ts'
 import { truncate } from '../core/util.ts'
 import { registry } from './registry.ts'
 import { toolUnavailable, type ToolCtx } from './registry.ts'
@@ -39,15 +39,18 @@ export function parseSkillMarkdown(text: string, fallbackName: string): { name: 
 export function loadSkills(): Skill[] {
   const out: Skill[] = []
   try {
-    if (fs.existsSync(SKILLS_DIR))
-      for (const ent of fs.readdirSync(SKILLS_DIR, { withFileTypes: true })) {
+    // the user's own skills first: they replace a shipped skill of the same name
+    for (const root of [...new Set([SKILLS_DIR, SHIPPED_SKILLS_DIR])]) {
+      if (!fs.existsSync(root)) continue
+      for (const ent of fs.readdirSync(root, { withFileTypes: true })) {
         if (!ent.isDirectory()) continue
-        const dir = path.join(SKILLS_DIR, ent.name)
+        const dir = path.join(root, ent.name)
         const file = path.join(dir, 'SKILL.md')
         if (!fs.existsSync(file)) continue
         const s = parseSkillMarkdown(fs.readFileSync(file, 'utf8'), ent.name)
-        if (s.name && s.description) out.push({ ...s, dir })
+        if (s.name && s.description && !out.some(x => x.name === s.name)) out.push({ ...s, dir })
       }
+    }
   } catch (err: any) {
     log.warn(`加载技能失败: ${err.message}`)
   }
@@ -89,6 +92,7 @@ export function saveSkill(name: string, markdown: string): Skill {
 export function deleteSkill(name: string): boolean {
   const s = skills.find(x => x.name === name || path.basename(x.dir) === name)
   if (!s) return false
+  if (path.resolve(path.dirname(s.dir)) !== path.resolve(SKILLS_DIR)) throw new Error('内置技能不能删除，可以编辑后保存为自己的版本，或在配置里关闭技能')
   fs.rmSync(s.dir, { recursive: true, force: true })
   loadSkills()
   return true

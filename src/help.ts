@@ -89,4 +89,4 @@ export const ADMIN_HELP_TOOLS = `【管理 · 工具 / 技能 / 指令】
 #llm扫描指令 — 重新扫描已安装插件的指令
 #llm测试指令 <文本> — 查看某条指令会被哪个插件处理
 #llm添加指令说明 <指令> <说明> — 补充指令目录（提示给 AI）
-自定义 JS 工具放在 plugins/Yunzai-LLM-Plugin/tools/*.js，HTTP 工具写在配置 tools.http`
+自定义 JS 工具放在 Yunzai/config/Yunzai-LLM-Plugin/tools/*.js，HTTP 工具写在配置 tools.http`

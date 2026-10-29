@@ -48,7 +48,7 @@ describe('AGY host worker and async handoff', () => {
     const workspaceId = 'aabbcc1234', alias = `/work/agy/${workspaceId}/out/result.png`
     t.mock.method(agyRuntime, 'spawn', (file: string, args: string[], options: any) => {
       launches++
-      assert.equal(file, path.join(TMP, 'data/agy-setup/agy.exe'))
+      assert.equal(file, path.join(TMP, 'resources/agy-setup/agy.exe'))
       assert.equal(options.cwd, agyWorkspace(workspaceId))
       assert.equal(options.env.USERPROFILE, os.userInfo().homedir)
       assert.equal(options.env.ANTIGRAVITY_APP_DATA_DIR, path.join(os.userInfo().homedir, '.gemini', 'antigravity-cli'))
@@ -72,7 +72,7 @@ describe('AGY host worker and async handoff', () => {
     assert.deepEqual(await runAgy(job, normalize({}).tools.agy, new AbortController().signal, {}), { report: alias })
     assert.deepEqual(await runAgy(job, normalize({}).tools.agy, new AbortController().signal, {}), { report: alias })
     assert.equal(launches, 2)
-    assert.ok(!fs.existsSync(path.join(TMP, 'data/agy-setup/profile')))
+    assert.ok(!fs.existsSync(path.join(TMP, 'resources/agy-setup/profile')))
   })
   it('makes host output images readable through bot aliases without WSL', async () => {
     const ctx = context(), session = getAgySession(sessionKey(ctx.e, ctx.eff.chat.sessionScope), 60)

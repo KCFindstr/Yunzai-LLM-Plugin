@@ -2,7 +2,6 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 process.env.YZ_LLM_PLUGIN_DIR = root
-process.env.YZ_LLM_DATA_DIR = path.join(root, 'data')
 const { runAgy } = await import('../src/agy/runtime.ts')
 if (!process.argv[2]) throw Error('Usage: node cli/agy-verify-image.mjs <bot image path>')
 const calls = []

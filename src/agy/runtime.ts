@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
 import { spawn } from 'node:child_process'
-import { DATA_DIR } from '../core/paths.ts'
+import { AGY_EXECUTABLE } from '../core/paths.ts'
 import type { ComputerJob } from '../computer/queue.ts'
 import type { AgyConfig } from '../core/configTypes.ts'
 import { privateValues, redact } from './privacy.ts'
@@ -51,7 +51,7 @@ export async function runAgy(job: ComputerJob, cfg: AgyConfig, signal: AbortSign
     const stdoutLog = agyDiagnosticLogger(job.id, 'stdout', secrets)
     const stderrLog = agyDiagnosticLogger(job.id, 'stderr', secrets)
     const started = Date.now()
-    const child = agyRuntime.spawn(path.resolve(cfg.executable || path.join(DATA_DIR, 'agy-setup/agy.exe')), agyLaunchArgs(prompt, cfg.maxMinutes), { cwd, env: hostAgyEnvironment(), windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
+    const child = agyRuntime.spawn(path.resolve(cfg.executable || AGY_EXECUTABLE), agyLaunchArgs(prompt, cfg.maxMinutes), { cwd, env: hostAgyEnvironment(), windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
     let pending = '', bytes = 0, report = '', validInit = false, status = '', bad = false, timedOut = false
     let lastResponse = '', cliError = '', stderrTail = ''
     const responseText = new Map<number, string>()

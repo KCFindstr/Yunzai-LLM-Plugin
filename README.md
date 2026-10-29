@@ -67,7 +67,7 @@ npm run config -- check
 
 也可以用浏览器打开网页管理面板 `http://127.0.0.1:6190`（与 Yunzai 在同一台机器上）。登录密码在 `web.password` 设置；留空时首次启动会随机生成一个，打印在 Yunzai 日志里并保存在 `data/web-auth.json`。默认只监听本机；需要远程访问时把 `web.host` 改为 `0.0.0.0` 并设置强密码，最好再放在 HTTPS 反向代理后面（面板可以查看和修改包括 API Key 在内的全部配置）。
 
-或者直接编辑 `config/config.yaml`（只写要覆盖的项，完整选项见 `config/default_config.yaml`，修改后自动热重载）：
+或者直接编辑 `Yunzai/config/Yunzai-LLM-Plugin/config.yaml`（按 Yunzai 插件规范放在 Yunzai 的 config 目录下；只写要覆盖的项，完整选项见插件目录的 `config/default_config.yaml`，修改后自动热重载）。插件数据在 `Yunzai/data/Yunzai-LLM-Plugin/`，安装后下载的 AGY CLI 在 `Yunzai/resources/Yunzai-LLM-Plugin/`。旧版本放在插件目录里的 `config/`、`data/`、自建技能和自定义工具，会在首次启动时自动移到新位置。示例：
 
 ```yaml
 providers:

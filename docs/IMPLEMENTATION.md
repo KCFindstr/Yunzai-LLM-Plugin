@@ -34,10 +34,10 @@ plugins/Yunzai-LLM-Plugin/            (separate git repo, branch master)
     commands/              -> command catalog (runtime rule scan + help-file scraping + curated presets) and dispatcher
     stickers/              -> sticker store, vision indexing, picker
     help.ts                -> help menu text
-  config/default_config.yaml  -> all options, commented (Chinese). config/config.yaml = user overrides (gitignored)
+  config/default_config.yaml  -> all options, commented (Chinese). User overrides: Yunzai/config/Yunzai-LLM-Plugin/config.yaml
   skills/<name>/SKILL.md      -> custom skills (progressive disclosure via load_skill tool)
-  tools/*.js                  -> custom JS tools (optional)
-  data/                       -> runtime state (gitignored): sessions, usage ledger, pricing cache, stickers
+  tools/README.md             -> how to write custom JS tools; they live in Yunzai/config/Yunzai-LLM-Plugin/tools/
+  (no data/)                  -> runtime state in Yunzai/data/Yunzai-LLM-Plugin/ (cli/layout.mjs moves an old plugins/<name>/data there)
   test/*.test.ts              -> node:test unit/integration tests (run TS directly, Node >= 23.6 type stripping)
   sandbox/                    -> isolated Yunzai + fake NapCat for manual testing
 ```

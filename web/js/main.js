@@ -81,7 +81,7 @@ function login(message) {
       h('label', { class: 'col', for: 'password' }, h('span', { class: 'field-label' }, '管理密码'), pw),
       err, button,
       h('details', { class: 'login-help' }, h('summary', '在哪里找到密码？'),
-        h('p', '密码在 web.password 设置。留空时，首次启动会生成密码并打印在 Yunzai 日志中，也会保存在 data/web-auth.json。')),
+        h('p', '密码在 web.password 设置。留空时，首次启动会生成密码并打印在 Yunzai 日志中，也会保存在 Yunzai/data/Yunzai-LLM-Plugin/web-auth.json。')),
     ),
     h('span', { class: 'small muted' }, 'Yunzai LLM · 机器人管理面板'),
   ))
