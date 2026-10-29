@@ -30,7 +30,7 @@
     "plugin"
   ],
   "author": "KCFindstr",
-  "license": "MIT",
+  "license": "GPL-3.0",
   "devDependencies": {
     "@types/node": "^26.6.5",
     "marked": "18.1.1",
