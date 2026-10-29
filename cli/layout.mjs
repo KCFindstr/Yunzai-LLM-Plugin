@@ -42,18 +42,29 @@ const SHIPPED = new Set(['default_config.yaml', 'PERSONA.md'])
 const SHIPPED_SKILLS = new Set(['computer-use', 'genshin-team', 'google-lens'])
 /** written next to the moved data so the plugin can repoint WSL image mounts (src/core/layout.ts) */
 export const MOVED_MARKER = '.moved-from-plugin-folder.json'
+/** in the new data folder while a move from the plugin folder is unfinished (holds the old path) */
+export const PENDING = '.moving-from-plugin-folder'
 
 const isEmptyDir = dir => !fs.existsSync(dir) || fs.readdirSync(dir).length === 0
 
+/**
+ * Rename, or (another drive, a handle held open) copy then delete. Returns 'copied' when the copy is complete but
+ * the source could not be fully deleted: the destination is the good one and the source a leftover.
+ */
 function move(from, to) {
   fs.mkdirSync(path.dirname(to), { recursive: true })
   if (fs.existsSync(to)) fs.rmSync(to, { recursive: true, force: true })
   try {
     fs.renameSync(from, to)
+    return 'moved'
   } catch {
-    // another drive, or a file briefly held open: copy, then remove what was copied
     fs.cpSync(from, to, { recursive: true, preserveTimestamps: true })
-    fs.rmSync(from, { recursive: true, force: true })
+    try {
+      fs.rmSync(from, { recursive: true, force: true })
+      return 'moved'
+    } catch {
+      return 'copied'
+    }
   }
 }
 
@@ -94,11 +105,41 @@ export function migrateLayout(pluginRoot, loc = locations(pluginRoot)) {
     if (own.length) notes.push(`自定义工具 ${own.join('、')} → ${path.join(loc.config, 'tools')}`)
   }
 
+  // Data moves entry by entry, so one locked folder (an old AGY test profile, a file held by WSL) can't stop the
+  // rest. While a move is unfinished, the PENDING marker sits in the new folder and the next start resumes it:
+  // entries still in the old folder are the real ones and replace whatever was created meanwhile.
   const oldData = path.join(pluginRoot, 'data')
-  if (!env.YZ_LLM_DATA_DIR && path.resolve(oldData) !== path.resolve(loc.data) && !isEmptyDir(oldData) && isEmptyDir(loc.data)) {
-    move(oldData, loc.data)
-    fs.writeFileSync(path.join(loc.data, MOVED_MARKER), JSON.stringify({ from: oldData, at: Date.now() }))
-    notes.push(`数据：${oldData} → ${loc.data}`)
+  const pending = path.join(loc.data, PENDING)
+  if (!env.YZ_LLM_DATA_DIR && path.resolve(oldData) !== path.resolve(loc.data) && !isEmptyDir(oldData) && (isEmptyDir(loc.data) || fs.existsSync(pending))) {
+    fs.mkdirSync(loc.data, { recursive: true })
+    // names already copied in full whose source couldn't be deleted: never copy those leftovers over again
+    let state = { from: oldData, copied: [] }
+    try { state = { ...state, ...JSON.parse(fs.readFileSync(pending, 'utf8')) } } catch {}
+    const save = () => fs.writeFileSync(pending, JSON.stringify(state))
+    save()
+    const failed = [], moved = []
+    for (const name of fs.readdirSync(oldData)) {
+      if (state.copied.includes(name)) continue
+      const from = path.join(oldData, name)
+      // the AGY CLI is downloaded after install: a resource, not data; a newer download already there wins
+      const agy = name === 'agy-setup' && !env.YZ_LLM_RESOURCES_DIR
+      if (agy && fs.existsSync(path.join(loc.resources, 'agy-setup', 'agy.exe'))) continue
+      try {
+        if (move(from, agy ? path.join(loc.resources, 'agy-setup') : path.join(loc.data, name)) === 'copied') { state.copied.push(name); save() }
+        moved.push(name)
+      } catch (err) {
+        failed.push(`${name}（${err?.code ?? err?.message ?? err}）`)
+      }
+    }
+    if (moved.includes('images')) fs.writeFileSync(path.join(loc.data, MOVED_MARKER), JSON.stringify({ from: oldData, at: Date.now() }))
+    if (moved.length) notes.push(`数据 ${moved.length} 项：${oldData} → ${loc.data}`)
+    const left = fs.existsSync(oldData) ? fs.readdirSync(oldData) : []
+    if (failed.length) notes.push(`以下数据暂时无法移动，下次启动会继续（也可停止机器人后手动移到 ${loc.data}）：${failed.join('、')}`)
+    else {
+      fs.rmSync(pending, { force: true })
+      if (!left.length) fs.rmSync(oldData, { recursive: true, force: true })
+      else notes.push(`${oldData} 里还剩 ${left.join('、')}（已复制到新位置，或已有更新的 AGY CLI），确认无用后可以删除`)
+    }
   }
   // the AGY CLI is downloaded after install: a resource, not data
   const agy = path.join(loc.data, 'agy-setup')

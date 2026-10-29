@@ -38,9 +38,15 @@ function move(from, to) {
   if (fs.existsSync(to)) fs.rmSync(to, { recursive: true, force: true });
   try {
     fs.renameSync(from, to);
+    return "moved";
   } catch {
     fs.cpSync(from, to, { recursive: true, preserveTimestamps: true });
-    fs.rmSync(from, { recursive: true, force: true });
+    try {
+      fs.rmSync(from, { recursive: true, force: true });
+      return "moved";
+    } catch {
+      return "copied";
+    }
   }
 }
 function migrateLayout(pluginRoot, loc2 = locations(pluginRoot)) {
@@ -73,10 +79,41 @@ function migrateLayout(pluginRoot, loc2 = locations(pluginRoot)) {
     if (own.length) notes.push(`\u81EA\u5B9A\u4E49\u5DE5\u5177 ${own.join("\u3001")} \u2192 ${path.join(loc2.config, "tools")}`);
   }
   const oldData = path.join(pluginRoot, "data");
-  if (!env.YZ_LLM_DATA_DIR && path.resolve(oldData) !== path.resolve(loc2.data) && !isEmptyDir(oldData) && isEmptyDir(loc2.data)) {
-    move(oldData, loc2.data);
-    fs.writeFileSync(path.join(loc2.data, MOVED_MARKER), JSON.stringify({ from: oldData, at: Date.now() }));
-    notes.push(`\u6570\u636E\uFF1A${oldData} \u2192 ${loc2.data}`);
+  const pending = path.join(loc2.data, PENDING);
+  if (!env.YZ_LLM_DATA_DIR && path.resolve(oldData) !== path.resolve(loc2.data) && !isEmptyDir(oldData) && (isEmptyDir(loc2.data) || fs.existsSync(pending))) {
+    fs.mkdirSync(loc2.data, { recursive: true });
+    let state = { from: oldData, copied: [] };
+    try {
+      state = { ...state, ...JSON.parse(fs.readFileSync(pending, "utf8")) };
+    } catch {
+    }
+    const save2 = () => fs.writeFileSync(pending, JSON.stringify(state));
+    save2();
+    const failed = [], moved = [];
+    for (const name of fs.readdirSync(oldData)) {
+      if (state.copied.includes(name)) continue;
+      const from = path.join(oldData, name);
+      const agy2 = name === "agy-setup" && !env.YZ_LLM_RESOURCES_DIR;
+      if (agy2 && fs.existsSync(path.join(loc2.resources, "agy-setup", "agy.exe"))) continue;
+      try {
+        if (move(from, agy2 ? path.join(loc2.resources, "agy-setup") : path.join(loc2.data, name)) === "copied") {
+          state.copied.push(name);
+          save2();
+        }
+        moved.push(name);
+      } catch (err) {
+        failed.push(`${name}\uFF08${err?.code ?? err?.message ?? err}\uFF09`);
+      }
+    }
+    if (moved.includes("images")) fs.writeFileSync(path.join(loc2.data, MOVED_MARKER), JSON.stringify({ from: oldData, at: Date.now() }));
+    if (moved.length) notes.push(`\u6570\u636E ${moved.length} \u9879\uFF1A${oldData} \u2192 ${loc2.data}`);
+    const left = fs.existsSync(oldData) ? fs.readdirSync(oldData) : [];
+    if (failed.length) notes.push(`\u4EE5\u4E0B\u6570\u636E\u6682\u65F6\u65E0\u6CD5\u79FB\u52A8\uFF0C\u4E0B\u6B21\u542F\u52A8\u4F1A\u7EE7\u7EED\uFF08\u4E5F\u53EF\u505C\u6B62\u673A\u5668\u4EBA\u540E\u624B\u52A8\u79FB\u5230 ${loc2.data}\uFF09\uFF1A${failed.join("\u3001")}`);
+    else {
+      fs.rmSync(pending, { force: true });
+      if (!left.length) fs.rmSync(oldData, { recursive: true, force: true });
+      else notes.push(`${oldData} \u91CC\u8FD8\u5269 ${left.join("\u3001")}\uFF08\u5DF2\u590D\u5236\u5230\u65B0\u4F4D\u7F6E\uFF0C\u6216\u5DF2\u6709\u66F4\u65B0\u7684 AGY CLI\uFF09\uFF0C\u786E\u8BA4\u65E0\u7528\u540E\u53EF\u4EE5\u5220\u9664`);
+    }
   }
   const agy = path.join(loc2.data, "agy-setup");
   if (!env.YZ_LLM_RESOURCES_DIR && fs.existsSync(agy) && isEmptyDir(path.join(loc2.resources, "agy-setup"))) {
@@ -85,7 +122,7 @@ function migrateLayout(pluginRoot, loc2 = locations(pluginRoot)) {
   }
   return notes;
 }
-var STORE_NAME, SHIPPED, SHIPPED_SKILLS, MOVED_MARKER, isEmptyDir;
+var STORE_NAME, SHIPPED, SHIPPED_SKILLS, MOVED_MARKER, PENDING, isEmptyDir;
 var init_layout = __esm({
   "cli/layout.mjs"() {
     "use strict";
@@ -93,6 +130,7 @@ var init_layout = __esm({
     SHIPPED = /* @__PURE__ */ new Set(["default_config.yaml", "PERSONA.md"]);
     SHIPPED_SKILLS = /* @__PURE__ */ new Set(["computer-use", "genshin-team", "google-lens"]);
     MOVED_MARKER = ".moved-from-plugin-folder.json";
+    PENDING = ".moving-from-plugin-folder";
     isEmptyDir = (dir) => !fs.existsSync(dir) || fs.readdirSync(dir).length === 0;
   }
 });
@@ -4137,10 +4175,13 @@ print(json.dumps([subprocess.run(['sh','-c',c],stdout=subprocess.DEVNULL,stderr=
     const state = { ready: checks.every((c) => c.ok), checks, checkedAt: Date.now() };
     item.state = state;
     item.until = Date.now() + 6e4;
-    item.pending = void 0;
     return state;
   })();
-  return item.pending;
+  const pending = item.pending;
+  void pending.finally(() => {
+    if (item.pending === pending) item.pending = void 0;
+  });
+  return pending;
 }
 function runtimeToolReady(name, eff) {
   if (name === "web_search") return searchReady(eff);

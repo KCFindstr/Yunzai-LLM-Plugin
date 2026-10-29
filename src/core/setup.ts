@@ -61,10 +61,14 @@ export async function checkRuntime(kind: RuntimeKind, eff: EffectiveConfig, forc
       checks.push({ label: '宿主机 CLI 可运行（sandbox + turbo）', ok: cliAvailable })
     }
     const state = { ready: checks.every(c => c.ok), checks, checkedAt: Date.now() }
-    item.state = state; item.until = Date.now() + 60_000; item.pending = undefined
+    item.state = state; item.until = Date.now() + 60_000
     return state
   })()
-  return item.pending
+  // cleared once settled: a check with nothing to await finishes before this assignment, so clearing it inside
+  // would leave the finished promise cached forever (every forced re-check returned the old result)
+  const pending = item.pending
+  void pending.finally(() => { if (item.pending === pending) item.pending = undefined })
+  return pending
 }
 
 export function runtimeToolReady(name: string, eff: EffectiveConfig): boolean {
