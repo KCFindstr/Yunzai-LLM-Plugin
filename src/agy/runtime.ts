@@ -24,7 +24,10 @@ export function hostAgyEnvironment(source = process.env, home = os.userInfo().ho
 }
 export interface AgyRunSession { workspaceId: string }
 function killTree(pid: number | undefined) {
-  if (pid) { const killer = spawn('C:\\Windows\\System32\\taskkill.exe', ['/PID', String(pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' }); killer.on('error', () => {}) }
+  if (!pid) return
+  if (process.platform !== 'win32') { try { process.kill(-pid, 'SIGKILL') } catch { try { process.kill(pid, 'SIGKILL') } catch {} } return }
+  const taskkill = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'taskkill.exe')
+  const killer = spawn(taskkill, ['/PID', String(pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' }); killer.on('error', () => {})
 }
 export function agyLaunchArgs(prompt: string, maxMinutes: number) {
   return ['--print', prompt, '--model', AGY_MODEL, '--effort', AGY_EFFORT, '--sandbox', '--dangerously-skip-permissions',

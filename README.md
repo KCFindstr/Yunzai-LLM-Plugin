@@ -34,6 +34,8 @@ TRSS-Yunzai / Miao-Yunzai 的大模型对话插件。只在被 **@** 时说话�
 
 ## 安装
 
+需要 **Node.js ≥ 22.13**（插件使用内置的 `node:sqlite`，更早的版本无法加载）。
+
 ```bash
 cd plugins
 git clone <本仓库地址> Yunzai-LLM-Plugin

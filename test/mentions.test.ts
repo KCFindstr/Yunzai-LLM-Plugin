@@ -37,10 +37,10 @@ beforeEach(() => clearGroupLogs())
 
 describe('explicit reply mentions', () => {
   it('retains the first other-bot mention and the later self mention without changing their subjects', async () => {
-    const { e } = event({ self_id: 1905848787, message: [
+    const { e } = event({ self_id: 100000000, message: [
       { type: 'at', qq: 7 },
       { type: 'text', text: ' 修改记忆:你才是大肥鱼，' },
-      { type: 'at', qq: 1905848787 },
+      { type: 'at', qq: 100000000 },
       { type: 'text', text: ' 是哈基米，是美国豆包' },
     ] })
     const expected = '[at:7] 修改记忆:你才是大肥鱼，[at:you] 是哈基米，是美国豆包'

@@ -4,11 +4,16 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const configDir = process.env.YZ_LLM_CONFIG_DIR || path.join(root, 'config')
 const skillsDir = process.env.YZ_LLM_SKILLS_DIR || path.join(root, 'skills')
 const dataDir = process.env.YZ_LLM_DATA_DIR || path.join(root, 'data')
-if (!fs.existsSync(path.join(configDir, 'config.yaml'))) throw new Error('An existing config.yaml is required; the generator does not create production configuration')
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'yzllm-initial-request-'))
+// Without a config.yaml, run against a temp copy of the defaults so the real config dir is never written
+let configDir = process.env.YZ_LLM_CONFIG_DIR || path.join(root, 'config')
+if (!fs.existsSync(path.join(configDir, 'config.yaml'))) {
+  configDir = path.join(temp, 'config')
+  fs.mkdirSync(configDir)
+  fs.copyFileSync(path.join(root, 'config', 'default_config.yaml'), path.join(configDir, 'default_config.yaml'))
+}
 process.env.YZ_LLM_PLUGIN_DIR = root
 process.env.YZ_LLM_CONFIG_DIR = configDir
 process.env.YZ_LLM_SKILLS_DIR = skillsDir
@@ -57,10 +62,10 @@ try {
   const provider = config.getProvider(model.provider)
   const botName = config.get().persona.botName || '天津风'
   const event = {
-    self_id: 1905848787, user_id: 1001, group_id: groupId, group_name: '示例群',
+    self_id: 100000000, user_id: 1001, group_id: groupId, group_name: '示例群',
     message_id: 'example-initial', message_type: 'group', adapter_name: 'OneBotv11',
     sender: { nickname: '阿明', card: '阿明' }, isMaster: isAdmin,
-    message: [{ type: 'at', qq: 1905848787 }, { type: 'text', text: '截一下你的桌面给我看看' }],
+    message: [{ type: 'at', qq: 100000000 }, { type: 'text', text: '截一下你的桌面给我看看' }],
   }
   recordGroupMessage({ ...event, user_id: 1002, message_id: 'example-earlier', sender: { nickname: '小红' }, message: [{ type: 'text', text: '周六一起看猫吧' }] })
   recordGroupMessage(event)

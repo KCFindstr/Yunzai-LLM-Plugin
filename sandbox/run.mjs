@@ -10,7 +10,8 @@
  * Layout: sandbox/.runtime/ gets a *copy* of Yunzai's lib/ (PluginsLoader imports plugins relative to its own path),
  * the OneBot adapters, this plugin's build, safe config files and any test plugins (see install-plugins.mjs).
  */
-import { spawn } from 'node:child_process'
+import { execFileSync, spawn } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import readline from 'node:readline'
@@ -29,8 +30,13 @@ const PORTS = { yunzai: 2599, napcatWs: 3299, napcatHttp: 3298, mockLLM: 3297, r
 // OneBotClient (forward WS) is a local, optional adapter; without it the fake NapCat dials stock OneBotv11 instead
 const ONEBOT_CLIENT = path.join(ROOT, 'plugins', 'adapter', 'OneBotClient.js')
 const forwardWs = fs.existsSync(ONEBOT_CLIENT)
-// Yunzai doesn't ship redis: use the Windows build vendored in sandbox/redis, elsewhere redis-server on PATH
-const REDIS = process.platform === 'win32' ? path.join(here, 'redis', 'redis-server.exe') : 'redis-server'
+// Yunzai doesn't ship redis: on Windows download a pinned msys2 build into sandbox/redis (git-ignored), elsewhere redis-server on PATH
+const REDIS_DIR = path.join(here, 'redis')
+const REDIS = process.platform === 'win32' ? path.join(REDIS_DIR, 'redis-server.exe') : 'redis-server'
+const REDIS_ZIP = {
+  url: 'https://github.com/redis-windows/redis-windows/releases/download/8.10.2/Redis-8.10.2-Windows-x64-msys2.zip',
+  sha256: '7c8cebd50347eaa1d9e784da842ed47a4f33394637835531d6614777b950ee85',
+}
 
 const argv = process.argv.slice(2)
 const flag = f => argv.includes(f)
@@ -97,6 +103,27 @@ function unlinkJunctions() {
     try {
       if (fs.lstatSync(link).isSymbolicLink()) fs.unlinkSync(link)
     } catch {}
+  }
+}
+
+async function ensureRedis() {
+  if (process.platform !== 'win32' || fs.existsSync(REDIS)) return
+  print(`[sandbox] downloading Redis for Windows: ${REDIS_ZIP.url}`)
+  const res = await fetch(REDIS_ZIP.url)
+  if (!res.ok) throw new Error(`Redis download failed: HTTP ${res.status}`)
+  const zip = Buffer.from(await res.arrayBuffer())
+  const hash = createHash('sha256').update(zip).digest('hex')
+  if (hash !== REDIS_ZIP.sha256) throw new Error(`Redis download checksum mismatch: ${hash}`)
+  const tmp = fs.mkdtempSync(path.join(here, '.redis-'))
+  try {
+    fs.writeFileSync(path.join(tmp, 'redis.zip'), zip)
+    // Windows 10+ ships bsdtar, which extracts zip archives
+    execFileSync(path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe'), ['-xf', 'redis.zip'], { cwd: tmp, stdio: 'ignore' })
+    const src = path.join(tmp, path.basename(REDIS_ZIP.url, '.zip'))
+    fs.mkdirSync(REDIS_DIR, { recursive: true })
+    for (const f of fs.readdirSync(src)) if (f === 'redis-server.exe' || f.endsWith('.dll') || f.startsWith('README')) fs.copyFileSync(path.join(src, f), path.join(REDIS_DIR, f))
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true })
   }
 }
 
@@ -286,6 +313,7 @@ async function exec(line) {
 
 // ---------------- main ----------------
 
+await ensureRedis()
 prepare()
 print(`\x1b[35m[Sandbox]\x1b[0m runtime: ${RT}`)
 print(`\x1b[35m[Sandbox]\x1b[0m LLM: ${useMock ? `模拟 LLM (127.0.0.1:${PORTS.mockLLM})` : `sandbox/config.yaml（真实 API）`}`)

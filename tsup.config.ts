@@ -8,7 +8,7 @@ export default defineConfig({
   // SQLite is prefix-only in Node; rewriting node:sqlite to sqlite requests an npm package.
   removeNodeProtocol: false,
   dts: false,
-  sourcemap: true,
+  sourcemap: false,
   clean: true,
   outDir: 'dist',
   splitting: false,

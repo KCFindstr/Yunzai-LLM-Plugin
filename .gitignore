@@ -35,3 +35,8 @@ coverage/
 *.tmp
 *.swp
 *~
+
+# Downloaded on demand by sandbox/run.mjs; source maps are not shipped
+sandbox/redis/
+.redis-*/
+*.map
