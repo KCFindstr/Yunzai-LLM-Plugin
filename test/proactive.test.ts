@@ -156,6 +156,7 @@ describe('proactive replies', () => {
     assert.equal(spoke.kind === 'reply' && spoke.text, '是啊，空调开起来')
     const sent = String(llm.requests.at(-1)!.body.messages.at(-1).content)
     assert.match(sent, /【主动发言】没有人@你/)
+    assert.ok(sent.indexOf('今天好热') < sent.indexOf('【主动发言】'), 'proactive prompt should be attached to the end after message text')
     const stored = peekSession('proactive:spoke')!.messages[0]
     assert.match(JSON.stringify(stored), /你主动接话的群消息/)
   })

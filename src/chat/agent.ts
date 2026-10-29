@@ -260,9 +260,12 @@ async function runTurnInner(req: TurnRequest, ref: { turn?: TurnState; rolloutId
   // Mark for background archiving; the ordered group window still includes overlapping exchanges.
   if (!req.computerResult && !req.asyncResult) markHandled(e, convKey)
 
-  const proactiveNote = req.proactive ? `【主动发言】没有人@你或回复你：你在群里看到了上面的聊天，自己决定要不要接一句。像群友一样自然、简短，别重复别人说过的话；觉得不该说话时只回复 [skip]。\n` : ''
-  const userMsg: UserMsg = { role: 'user', content: [{ type: 'text', text: header.sent + proactiveNote + text }, ...input.images.flatMap((part, index) => index < quoteStart ? [{ type: 'text' as const, text: imageLabel(turn.imageRefs![index], index) }, part] : [part]), ...ownImages.slice(input.images.length).map((image, index) => ({ type: 'text' as const, text: imageLabel(image, input.images.length + index) })),
-    ...ownFiles.length ? [{ type: 'text' as const, text: fileNote.trim() }] : []] }
+  const proactiveNote = req.proactive ? `【主动发言】没有人@你或回复你：你在群里看到了上面的聊天，自己决定要不要接一句。像群友一样自然、简短，别重复别人说过的话；觉得不该说话时只回复 [skip]。` : ''
+  const hasAttachments = input.images.length > 0 || ownFiles.length > 0
+  const userText = header.sent + text + (!hasAttachments && proactiveNote ? (text ? `\n\n${proactiveNote}` : proactiveNote) : '')
+  const userMsg: UserMsg = { role: 'user', content: [{ type: 'text', text: userText }, ...input.images.flatMap((part, index) => index < quoteStart ? [{ type: 'text' as const, text: imageLabel(turn.imageRefs![index], index) }, part] : [part]), ...ownImages.slice(input.images.length).map((image, index) => ({ type: 'text' as const, text: imageLabel(image, input.images.length + index) })),
+    ...ownFiles.length ? [{ type: 'text' as const, text: fileNote.trim() }] : [],
+    ...hasAttachments && proactiveNote ? [{ type: 'text' as const, text: `\n${proactiveNote}` }] : []] }
   const storedUser: UserMsg = {
     role: 'user',
     content: [{ type: 'text', text: header.stored + (req.proactive ? '【你主动接话的群消息】' : '') + text + attachmentNote }],
