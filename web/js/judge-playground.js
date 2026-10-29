@@ -1,5 +1,5 @@
 import { get, post } from './api.js'
-import { act, badge, card, fmt, h, spinner } from './ui.js'
+import { act, badge, card, fmt, h, paged, spinner } from './ui.js'
 
 /**
  * Config-page helpers for the judges: the proactive reply threshold curve, and playgrounds where an admin writes a
@@ -48,7 +48,7 @@ export function curveCard(data, keys, threshold, save) {
   const caption = h('div', { class: 'small muted' })
   const draw = () => {
     chart.replaceChildren(curveSvg(t))
-    caption.textContent = `横轴是距机器人自己上次在本群回复的时间（群里其他人发言不影响）。机器人刚回复过时需要分数 ≥ ${t.start.toFixed(2)}；${duration(t.halfLife)}后 ≥ ${thresholdAt(t, t.halfLife).toFixed(2)}；很久没回复 ≥ ${t.end.toFixed(2)}（虚线）。消息先通过概率抽签，判断模型的分数再超过曲线才会回复。`
+    caption.textContent = `横轴为距上次回复时间。刚回复需分数 ≥ ${t.start.toFixed(2)}，${duration(t.halfLife)}后降至 ≥ ${thresholdAt(t, t.halfLife).toFixed(2)}，久未回复降至 ≥ ${t.end.toFixed(2)}。抽中且分数达到曲线即回复。`
   }
   const input = (k, label, attrs) => {
     const el = h('input', { type: 'number', value: t[k], ...attrs, style: { width: '110px' } })
@@ -60,11 +60,11 @@ export function curveCard(data, keys, threshold, save) {
   return card('回复阈值曲线',
     h('div', { class: 'small muted mono', style: { marginBottom: '8px' } }, `${keys.join('.')} · threshold(t) = end + (start − end) × 0.5^(t / halfLife)`),
     h('div', { class: 'row', style: { gap: '16px', flexWrap: 'wrap', marginBottom: '10px' } },
-      input('start', '机器人刚回复时 start（0–1）', { min: 0, max: 1, step: 0.01 }),
-      input('end', '机器人很久没回复 end（0–1）', { min: 0, max: 1, step: 0.01 }),
+      input('start', '刚回复阈值 start', { min: 0, max: 1, step: 0.01 }),
+      input('end', '久未回复阈值 end', { min: 0, max: 1, step: 0.01 }),
       input('halfLife', '半衰期 halfLife（秒）', { min: 1, max: 86400, step: 1 })),
     chart, caption,
-    h('div', { class: 'small muted', style: { marginTop: '6px' } }, '各群可在「分群设置 → 主动发言（本群）」里单独设置这条曲线。'))
+    h('div', { class: 'small muted', style: { marginTop: '6px' } }, '可在「分群设置」中按群单独配置。'))
 }
 
 /** replaceChildren without the null placeholders of optional parts */
@@ -157,7 +157,7 @@ export function proactivePlayground(data) {
       promptBlock(r.prompt))
   } }, '运行判断')
   return card('试一试：主动发言判断',
-    h('p', { class: 'small muted' }, '手写一段群聊，看判断模型给最后一条消息打多少分、按阈值曲线会不会接话。只做判断，不会生成或发送回复；会实际调用判断模型（计入用量）。'),
+    h('p', { class: 'small muted' }, '手写群聊测试判断模型评分与阈值触发。仅测试判断不发回复，实际调用判断模型（计入用量）。'),
     form.view, h('div', { class: 'row', style: { marginTop: '10px' } }, run), out)
 }
 
@@ -168,13 +168,13 @@ export function recentProactiveCard() {
     body.replaceChildren(
       h('div', { class: 'small', style: { marginBottom: '8px' } }, d.groups.length
         ? ['已开启：', ...d.groups.map(g => badge(`${g.name ?? '群'} ${g.id} · 概率 ${g.probability}${g.judge === 'always' ? '，不判断' : ' + 判断'}`, 'accent'))]
-        : h('span', { class: 'muted' }, '还没有群开启主动发言：在「分群设置」里添加群号，打开「主动发言（本群）→ 在本群启用主动发言」。')),
-      d.recent.length ? h('div', { class: 'table-wrap' }, h('table',
+        : h('span', { class: 'muted' }, '暂无群开启主动发言：可在「分群设置」添加群号并启用。')),
+      d.recent.length ? paged(d.recent, rows => h('div', { class: 'table-wrap' }, h('table',
         h('thead', h('tr', h('th', '时间'), h('th', '群'), h('th', '消息'), h('th', '分数 / 阈值'), h('th', '结果'))),
-        h('tbody', d.recent.map(r => h('tr',
+        h('tbody', rows.map(r => h('tr',
           h('td', { class: 'small' }, fmt.time(r.at)), h('td', { class: 'small mono' }, r.groupId), h('td', { class: 'small' }, r.text),
           h('td', { class: 'small mono' }, `${r.score != null ? r.score.toFixed(2) : '?'} / ${r.threshold.toFixed(2)}`),
-          h('td', r.error ? badge('失败', 'bad') : r.reply ? badge('接话', 'ok') : badge('不接话')))))))
+          h('td', r.error ? badge('失败', 'bad') : r.reply ? badge('接话', 'ok') : badge('不接话'))))))), { size: 10 })
         : h('div', { class: 'small muted' }, '本次启动后还没有主动发言判断。'))
   }).catch(err => body.replaceChildren(h('span', { class: 'small bad' }, err.message)))
   return card('最近的主动发言判断', body)
