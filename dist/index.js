@@ -1675,7 +1675,7 @@ function normalize(raw) {
   const w = isPlainObject(c.web) ? c.web : {};
   c.web = {
     enable: w.enable !== false,
-    host: String(w.host || "127.0.0.1"),
+    host: String(w.host || "0.0.0.0"),
     port: Number.isInteger(Number(w.port)) && Number(w.port) > 0 && Number(w.port) < 65536 ? Number(w.port) : 6190,
     password: String(w.password ?? "")
   };
@@ -11464,6 +11464,27 @@ import { spawn as spawn3 } from "node:child_process";
 
 // cli/image-store.mjs
 init_layout();
+function legacyMountScript(from, to) {
+  const q = (s) => "'" + String(s).replaceAll("'", "'\\''") + "'";
+  return `set -eu
+f=/opt/llm-agy/mount.sh
+[ -f "$f" ] || exit 0
+changed=$(python3 - "$f" ${q(from)} ${q(to)} <<'PY'
+import sys
+p, a, b = sys.argv[1:]
+s = open(p).read()
+t = s.replace(a.rstrip('\\\\') + '\\\\', b.rstrip('\\\\') + '\\\\')
+if t != s:
+    open(p, 'w').write(t)
+print('yes' if t != s else 'no')
+PY
+)
+[ "$changed" = yes ] || exit 0
+umount -l /var/lib/llm-desktop/disk/work/attachments 2>/dev/null || true
+umount -l /var/lib/llm-desktop/agy-share 2>/dev/null || true
+systemctl restart llm-desktop.service 2>/dev/null || true
+`;
+}
 function imageMountScript(source, remount = false) {
   const quoted = "'" + source.replaceAll("'", "'\\''") + "'";
   const mount = `#!/bin/sh
@@ -11500,9 +11521,15 @@ async function finishLayoutMigration() {
   const t = config.get().tools;
   const distros = [...new Set([t.exec, t.computer, t.googleLens].filter((x) => x.enable).map((x) => x.distro))];
   const failed = [];
+  let from;
+  try {
+    from = JSON.parse(fs22.readFileSync(marker, "utf8")).from;
+  } catch {
+  }
   for (const distro2 of distros) {
     try {
       await wslRoot(distro2, imageMountScript(path21.resolve(IMAGE_STORE_ROOT), true));
+      if (from) await wslRoot(distro2, legacyMountScript(from, path21.resolve(DATA_DIR)));
       log.mark(`WSL \u53D1\u884C\u7248 ${distro2} \u7684\u56FE\u7247\u5E93\u6302\u8F7D\u5DF2\u6307\u5411 ${IMAGE_STORE_ROOT}`);
     } catch (err) {
       failed.push(distro2);

@@ -20,6 +20,33 @@ export function provisionImageStore(distro, root, { remount = false } = {}) {
   if (result.status !== 0) throw Error(result.stderr || 'Global image mount failed')
 }
 
+/**
+ * Older desktop setups also mount <data>/shared-attachments through /opt/llm-agy/mount.sh (shown in the desktop as
+ * /work/projects). After the data folder moved from `from` to `to`, repoint that script and restart the desktop so
+ * it mounts the new folder. No-op when the script is absent or already current.
+ */
+export function legacyMountScript(from, to) {
+  const q = s => "'" + String(s).replaceAll("'", "'\\''") + "'"
+  return `set -eu
+f=/opt/llm-agy/mount.sh
+[ -f "$f" ] || exit 0
+changed=$(python3 - "$f" ${q(from)} ${q(to)} <<'PY'
+import sys
+p, a, b = sys.argv[1:]
+s = open(p).read()
+t = s.replace(a.rstrip('\\\\') + '\\\\', b.rstrip('\\\\') + '\\\\')
+if t != s:
+    open(p, 'w').write(t)
+print('yes' if t != s else 'no')
+PY
+)
+[ "$changed" = yes ] || exit 0
+umount -l /var/lib/llm-desktop/disk/work/attachments 2>/dev/null || true
+umount -l /var/lib/llm-desktop/agy-share 2>/dev/null || true
+systemctl restart llm-desktop.service 2>/dev/null || true
+`
+}
+
 /** Root shell script that (re)writes /opt/llm-images/mount.sh for `source` and mounts it read-only. */
 export function imageMountScript(source, remount = false) {
   const quoted = "'" + source.replaceAll("'", "'\\''") + "'"

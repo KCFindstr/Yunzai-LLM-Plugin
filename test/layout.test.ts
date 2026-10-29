@@ -58,6 +58,33 @@ it('moves an install that kept config and data in the plugin folder to the Yunza
   assert.equal(fs.readFileSync(path.join(loc.data, 'sessions.json'), 'utf8'), '{}')
 })
 
+it('resumes an interrupted data move: what is still in the old folder replaces what was created meanwhile', t => {
+  const saved = Object.fromEntries(Object.entries(process.env).filter(([k]) => k.startsWith('YZ_LLM_')))
+  for (const k of Object.keys(saved)) delete process.env[k]
+  t.after(() => Object.assign(process.env, saved))
+
+  const yz = path.join(TMP, 'layout-resume')
+  const plugin = path.join(yz, 'plugins', 'Yunzai-LLM-Plugin')
+  const loc = locations(plugin)
+  // the state an earlier failed copy left: real data still in the plugin folder, a fresh near-empty new folder
+  write(path.join(plugin, 'data', 'sessions.json'), 'real sessions')
+  write(path.join(plugin, 'data', 'usage.sqlite'), 'real usage')
+  write(path.join(plugin, 'data', 'agy-setup', 'agy.exe'), 'old cli')
+  write(path.join(loc.data, 'usage.sqlite'), 'fresh, empty')
+  write(path.join(loc.resources, 'agy-setup', 'agy.exe'), 'new cli')
+  assert.deepEqual(migrateLayout(plugin, loc), [], 'without the marker a non-empty new folder is left alone')
+
+  write(path.join(loc.data, '.moving-from-plugin-folder'), 'not json') // a damaged marker still resumes
+  const notes = migrateLayout(plugin, loc)
+  assert.equal(fs.readFileSync(path.join(loc.data, 'usage.sqlite'), 'utf8'), 'real usage')
+  assert.equal(fs.readFileSync(path.join(loc.data, 'sessions.json'), 'utf8'), 'real sessions')
+  assert.equal(fs.readFileSync(path.join(loc.resources, 'agy-setup', 'agy.exe'), 'utf8'), 'new cli', 'a newer CLI download wins')
+  assert.ok(!fs.existsSync(path.join(loc.data, '.moving-from-plugin-folder')), 'finished')
+  assert.deepEqual(fs.readdirSync(path.join(plugin, 'data')), ['agy-setup'])
+  assert.ok(notes.some(n => /还剩 agy-setup/.test(n)), notes.join('\n'))
+  assert.deepEqual(migrateLayout(plugin, loc), [], 'nothing left to do')
+})
+
 it('repoints the WSL image mount, unmounting an older location first', () => {
   const script = imageMountScript("D:\\Yunzai\\data\\Yunzai-LLM-Plugin\\images", true)
   assert.match(script, /umount \/var\/lib\/llm-images/)

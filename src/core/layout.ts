@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
 // the same mount script `npm run exec-setup / computer-setup / lens-setup` installs
-import { imageMountScript } from '../../cli/image-store.mjs'
+import { imageMountScript, legacyMountScript } from '../../cli/image-store.mjs'
 import { MOVED_MARKER } from '../../cli/layout.mjs'
 import { config } from './config.ts'
 import { log } from './log.ts'
@@ -31,9 +31,13 @@ export async function finishLayoutMigration() {
   const t = config.get().tools
   const distros = [...new Set([t.exec, t.computer, t.googleLens].filter(x => x.enable).map(x => x.distro))]
   const failed: string[] = []
+  let from: string | undefined
+  try { from = JSON.parse(fs.readFileSync(marker, 'utf8')).from } catch {}
   for (const distro of distros) {
     try {
       await wslRoot(distro, imageMountScript(path.resolve(IMAGE_STORE_ROOT), true))
+      // an older desktop setup also mounts <data>/shared-attachments
+      if (from) await wslRoot(distro, legacyMountScript(from, path.resolve(DATA_DIR)))
       log.mark(`WSL 发行版 ${distro} 的图片库挂载已指向 ${IMAGE_STORE_ROOT}`)
     } catch (err: any) {
       failed.push(distro)
