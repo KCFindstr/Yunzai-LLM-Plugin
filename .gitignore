@@ -1,4 +1,7 @@
 node_modules/
+.docusaurus/
+docs/build/
+docs/.docusaurus/
 config/config.yaml
 data/
 sandbox/.runtime*/
