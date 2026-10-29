@@ -1147,18 +1147,18 @@ var init_schema = __esm({
       "\u81EA\u52A8\u601D\u8003\u5F3A\u5EA6"
     );
     proactiveFields = {
-      probability: num("\u7B2C 1 \u5C42\uFF1A\u6BCF\u6761\u6D88\u606F\u88AB\u62BD\u4E2D\u7684\u6982\u7387\uFF08\u62BD\u4E2D\u540E\u8FD8\u8981\u901A\u8FC7\u5224\u65AD\u6A21\u578B\uFF09", { min: 0, max: 1 }),
-      window: int("\u5224\u65AD\u95F4\u9694\uFF08\u79D2\uFF09\uFF1A\u7A97\u53E3\u5185\u6709\u6D88\u606F\u88AB\u62BD\u4E2D\u65F6\uFF0C\u7ED3\u675F\u65F6\u5224\u65AD\u4E00\u6B21", { min: 5, max: 3600 }),
-      judge: oneOf((c) => ["always", ...judgeIds(c)], "\u5224\u65AD\u6A21\u578B\uFF08always=\u4E0D\u5224\u65AD\uFF0C\u62BD\u4E2D\u5373\u56DE\u590D\uFF1B\u7A7A=\u81EA\u52A8\u601D\u8003\u5224\u65AD\u6A21\u578B\u2192\u540E\u53F0\u4EFB\u52A1\u6A21\u578B\uFF09", { allowEmpty: true }),
+      probability: num("\u62BD\u7B7E\u6982\u7387\uFF08\u62BD\u4E2D\u540E\u8FDB\u5165\u6A21\u578B\u5224\u65AD\uFF09", { min: 0, max: 1 }),
+      window: int("\u5224\u65AD\u7A97\u53E3\uFF08\u79D2\uFF09\uFF1A\u7A97\u53E3\u5185\u6709\u62BD\u4E2D\u65F6\u8BC4\u4F30\u4E00\u6B21", { min: 5, max: 3600 }),
+      judge: oneOf((c) => ["always", ...judgeIds(c)], "\u5224\u65AD\u6A21\u578B\uFF08always=\u4EC5\u6309\u6982\u7387\uFF1B\u7A7A=\u7EE7\u627F\u601D\u8003\u5224\u65AD\u6A21\u578B\uFF09", { allowEmpty: true }),
       context: int("\u9644\u5E26\u6700\u8FD1\u7FA4\u804A\u6761\u6570", { min: 1, max: 50 }),
       criteria: obj({ reply: text("\u9002\u5408\u63D2\u8BDD\u7684\u60C5\u51B5"), skip: text("\u4E0D\u8BE5\u63D2\u8BDD\u7684\u60C5\u51B5") }, "\u5224\u65AD\u6807\u51C6\uFF08\u7ED9\u5224\u65AD\u6A21\u578B\u770B\uFF09"),
       threshold: obj(
         {
-          start: num("\u673A\u5668\u4EBA\u521A\u56DE\u590D\u8FC7\u65F6\u7684\u9608\u503C", { min: 0, max: 1 }),
-          end: num("\u673A\u5668\u4EBA\u5F88\u4E45\u6CA1\u56DE\u590D\u65F6\u7684\u9608\u503C", { min: 0, max: 1 }),
-          halfLife: int("\u534A\u8870\u671F\uFF08\u79D2\uFF09", { min: 1, max: 86400 })
+          start: num("\u521A\u56DE\u590D\u65F6\u7684\u521D\u59CB\u9608\u503C", { min: 0, max: 1 }),
+          end: num("\u4E45\u672A\u56DE\u590D\u65F6\u7684\u6700\u4F4E\u9608\u503C", { min: 0, max: 1 }),
+          halfLife: int("\u8870\u51CF\u534A\u8870\u671F\uFF08\u79D2\uFF09", { min: 1, max: 86400 })
         },
-        "\u56DE\u590D\u9608\u503C\u66F2\u7EBF\uFF08\u968F\u8DDD\u673A\u5668\u4EBA\u81EA\u5DF1\u4E0A\u6B21\u56DE\u590D\u7684\u65F6\u95F4\u8870\u51CF\uFF09"
+        "\u56DE\u590D\u9608\u503C\u66F2\u7EBF\uFF08\u968F\u8DDD\u4E0A\u6B21\u56DE\u590D\u7684\u65F6\u95F4\u8870\u51CF\uFF09"
       )
     };
     proactive = obj(proactiveFields, "\u4E3B\u52A8\u53D1\u8A00");
@@ -8107,13 +8107,18 @@ async function runTurnInner(req, ref) {
 ${recalled.join("\n")}` : ""].filter(Boolean).join("\n");
   const header = buildHeader(e, eff, input, isAdmin, { conv: convKey, memory: context });
   if (!req.computerResult && !req.asyncResult) markHandled(e, convKey);
-  const proactiveNote = req.proactive ? `\u3010\u4E3B\u52A8\u53D1\u8A00\u3011\u6CA1\u6709\u4EBA@\u4F60\u6216\u56DE\u590D\u4F60\uFF1A\u4F60\u5728\u7FA4\u91CC\u770B\u5230\u4E86\u4E0A\u9762\u7684\u804A\u5929\uFF0C\u81EA\u5DF1\u51B3\u5B9A\u8981\u4E0D\u8981\u63A5\u4E00\u53E5\u3002\u50CF\u7FA4\u53CB\u4E00\u6837\u81EA\u7136\u3001\u7B80\u77ED\uFF0C\u522B\u91CD\u590D\u522B\u4EBA\u8BF4\u8FC7\u7684\u8BDD\uFF1B\u89C9\u5F97\u4E0D\u8BE5\u8BF4\u8BDD\u65F6\u53EA\u56DE\u590D [skip]\u3002
-` : "";
+  const proactiveNote = req.proactive ? `\u3010\u4E3B\u52A8\u53D1\u8A00\u3011\u6CA1\u6709\u4EBA@\u4F60\u6216\u56DE\u590D\u4F60\uFF1A\u4F60\u5728\u7FA4\u91CC\u770B\u5230\u4E86\u4E0A\u9762\u7684\u804A\u5929\uFF0C\u81EA\u5DF1\u51B3\u5B9A\u8981\u4E0D\u8981\u63A5\u4E00\u53E5\u3002\u50CF\u7FA4\u53CB\u4E00\u6837\u81EA\u7136\u3001\u7B80\u77ED\uFF0C\u522B\u91CD\u590D\u522B\u4EBA\u8BF4\u8FC7\u7684\u8BDD\uFF1B\u89C9\u5F97\u4E0D\u8BE5\u8BF4\u8BDD\u65F6\u53EA\u56DE\u590D [skip]\u3002` : "";
+  const hasAttachments = input.images.length > 0 || ownFiles.length > 0;
+  const userText = header.sent + text2 + (!hasAttachments && proactiveNote ? text2 ? `
+
+${proactiveNote}` : proactiveNote : "");
   const userMsg = { role: "user", content: [
-    { type: "text", text: header.sent + proactiveNote + text2 },
+    { type: "text", text: userText },
     ...input.images.flatMap((part, index) => index < quoteStart ? [{ type: "text", text: imageLabel(turn.imageRefs[index], index) }, part] : [part]),
     ...ownImages.slice(input.images.length).map((image, index) => ({ type: "text", text: imageLabel(image, input.images.length + index) })),
-    ...ownFiles.length ? [{ type: "text", text: fileNote.trim() }] : []
+    ...ownFiles.length ? [{ type: "text", text: fileNote.trim() }] : [],
+    ...hasAttachments && proactiveNote ? [{ type: "text", text: `
+${proactiveNote}` }] : []
   ] };
   const storedUser = {
     role: "user",
@@ -8679,7 +8684,7 @@ var ADMIN_HELP_MODEL = `\u3010\u7BA1\u7406 \xB7 \u6A21\u578B\u4E0E\u63D0\u4F9B\u
 #llm\u6D4B\u8BD5\u6A21\u578B [\u6A21\u578Bid] \u2014 \u53D1\u4E00\u6761\u6D4B\u8BD5\u8BF7\u6C42`;
 var ADMIN_HELP_BILLING = `\u3010\u7BA1\u7406 \xB7 \u8BA1\u8D39\u4E0E\u989D\u5EA6\u3011\uFF08\u5355\u4F4D\uFF1A\u7F8E\u5143\uFF0C\u6EDA\u52A8\u7A97\u53E3\uFF09
 #llm\u989D\u5EA6\u8BBE\u7F6E <\u6A21\u578Bid> [user|group|global] 5h=<\u91D1\u989D> week=<\u91D1\u989D>
-  \u4F8B\uFF1A#llm\u989D\u5EA6\u8BBE\u7F6E sonnet user 5h=1 week=2 \uFF08\u6BCF\u4EBA\u6BCF5\u5C0F\u65F6$1\u3001\u6BCF\u5468$2\uFF09
+  \u4F8B\uFF1A#llm\u989D\u5EA6\u8BBE\u7F6E deepseek-pro user 5h=1 week=2 \uFF08\u6BCF\u4EBA\u6BCF5\u5C0F\u65F6$1\u3001\u6BCF\u5468$2\uFF09
   \u91D1\u989D\u5199 0 \u8868\u793A\u4E0D\u9650
 #llm\u4EF7\u683C <\u6A21\u578Bid> \u2014 \u5F53\u524D\u4F7F\u7528\u7684\u4EF7\u683C\u53CA\u6765\u6E90
 #llm\u8BBE\u7F6E\u4EF7\u683C <\u6A21\u578Bid> in=<\u8F93\u5165> out=<\u8F93\u51FA> [cacheRead=..] [cacheWrite=..]\uFF08\u6BCF\u767E\u4E07token\uFF09

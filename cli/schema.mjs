@@ -285,18 +285,18 @@ const autoThinking = obj(
 )
 
 const proactiveFields = {
-  probability: num('第 1 层：每条消息被抽中的概率（抽中后还要通过判断模型）', { min: 0, max: 1 }),
-  window: int('判断间隔（秒）：窗口内有消息被抽中时，结束时判断一次', { min: 5, max: 3600 }),
-  judge: oneOf(c => ['always', ...judgeIds(c)], '判断模型（always=不判断，抽中即回复；空=自动思考判断模型→后台任务模型）', { allowEmpty: true }),
+  probability: num('抽签概率（抽中后进入模型判断）', { min: 0, max: 1 }),
+  window: int('判断窗口（秒）：窗口内有抽中时评估一次', { min: 5, max: 3600 }),
+  judge: oneOf(c => ['always', ...judgeIds(c)], '判断模型（always=仅按概率；空=继承思考判断模型）', { allowEmpty: true }),
   context: int('附带最近群聊条数', { min: 1, max: 50 }),
   criteria: obj({ reply: text('适合插话的情况'), skip: text('不该插话的情况') }, '判断标准（给判断模型看）'),
   threshold: obj(
     {
-      start: num('机器人刚回复过时的阈值', { min: 0, max: 1 }),
-      end: num('机器人很久没回复时的阈值', { min: 0, max: 1 }),
-      halfLife: int('半衰期（秒）', { min: 1, max: 86400 }),
+      start: num('刚回复时的初始阈值', { min: 0, max: 1 }),
+      end: num('久未回复时的最低阈值', { min: 0, max: 1 }),
+      halfLife: int('衰减半衰期（秒）', { min: 1, max: 86400 }),
     },
-    '回复阈值曲线（随距机器人自己上次回复的时间衰减）',
+    '回复阈值曲线（随距上次回复的时间衰减）',
   ),
 }
 const proactive = obj(proactiveFields, '主动发言')

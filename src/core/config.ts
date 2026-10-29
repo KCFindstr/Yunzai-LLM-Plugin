@@ -513,7 +513,7 @@ export function normalize(raw: any): PluginConfig {
   const w = isPlainObject(c.web) ? c.web : {}
   c.web = {
     enable: w.enable !== false,
-    host: String(w.host || '127.0.0.1'),
+    host: String(w.host || '0.0.0.0'),
     port: Number.isInteger(Number(w.port)) && Number(w.port) > 0 && Number(w.port) < 65536 ? Number(w.port) : 6190,
     password: String(w.password ?? ''),
   }

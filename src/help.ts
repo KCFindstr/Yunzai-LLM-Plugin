@@ -51,7 +51,7 @@ export const ADMIN_HELP_MODEL = `【管理 · 模型与提供商】
 
 export const ADMIN_HELP_BILLING = `【管理 · 计费与额度】（单位：美元，滚动窗口）
 #llm额度设置 <模型id> [user|group|global] 5h=<金额> week=<金额>
-  例：#llm额度设置 sonnet user 5h=1 week=2 （每人每5小时$1、每周$2）
+  例：#llm额度设置 deepseek-pro user 5h=1 week=2 （每人每5小时$1、每周$2）
   金额写 0 表示不限
 #llm价格 <模型id> — 当前使用的价格及来源
 #llm设置价格 <模型id> in=<输入> out=<输出> [cacheRead=..] [cacheWrite=..]（每百万token）
