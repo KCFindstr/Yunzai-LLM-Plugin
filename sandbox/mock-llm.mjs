@@ -51,9 +51,10 @@ export function decide(body) {
   const tools = new Set((body.tools ?? []).map(t => t.function?.name))
   const last = messages.at(-1)
 
-  // thinking=auto judge (chat.thinkingJudge.mode: model)
+  // thinking=auto judge (autoThinking.judge is a chat model): classify only the message under evaluation
   if (/消息分类器/.test(system)) {
-    const msg = typeof last?.content === 'string' ? last.content : (last?.content ?? []).map(c => c.text ?? '').join('')
+    const all = typeof last?.content === 'string' ? last.content : (last?.content ?? []).map(c => c.text ?? '').join('')
+    const msg = all.slice(all.lastIndexOf('【待评估的消息】'))
     return reply(/配队|整理|攻略|规划|代码|分析/.test(msg) ? 'complex' : /[?？]|几|多少|什么/.test(msg) ? 'question' : 'casual')
   }
   if (/整理表情包库/.test(system)) {

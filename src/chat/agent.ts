@@ -6,13 +6,15 @@ import { prepareRuntimeTools } from '../core/setup.ts'
 import { ensureCatalog } from '../commands/catalog.ts'
 import type { EffectiveConfig, ThinkingLevel } from '../core/configTypes.ts'
 import { brief, log } from '../core/log.ts'
-import { Semaphore, sha1 } from '../core/util.ts'
+import { Semaphore, sha1, truncate } from '../core/util.ts'
 import { botNickname, senderName } from '../core/yunzai.ts'
 import { addUsage, chat, emptyUsage, LLMError, partsToText, usesServerState, type Msg, type ServerState, type UserMsg, type ToolSpec } from '../llm/index.ts'
 import { cleanupSandbox } from '../tools/exec.ts'
 import { registry, type ToolCtx, type ToolDef, type TurnState } from '../tools/registry.ts'
 import type { ExtractedInput } from './message.ts'
 import { resolveThinkingDecision, type ThinkingDecision } from './thinking.ts'
+import { botLineFor, groupLines, historyLines, messageHeading, type JudgeTranscript } from './judge.ts'
+import { quoteLabel } from './message.ts'
 import { markHandled } from './groupLog.ts'
 import { markdownEnabled } from './format.ts'
 import { buildHeader, buildMemoryBlock, buildSystemPrompt, SUMMARY_PROMPT } from './prompt.ts'
@@ -75,10 +77,30 @@ export interface TurnRequest {
   rolloutId?: string
   /** How many background results led to this turn (0 for a user message). */
   chainDepth?: number
+  /** The bot chose to speak up (proactive reply): nobody addressed it, and it may answer [skip] to stay quiet. */
+  proactive?: boolean
+}
+
+/** A proactive reply's way of saying it has nothing to add. */
+export const SKIP_REPLY = /^\s*[\[［【]?\s*(skip|不回复|跳过)\s*[\]］】]?\s*$/i
+
+/** The judge sees what the main model sees around the message: recent turns, the group chat and the message itself. */
+export function judgeTranscript(req: Pick<TurnRequest, 'e' | 'input' | 'convKey' | 'isAdmin'>): JudgeTranscript {
+  const { e, input, convKey, isAdmin } = req
+  const n = config.get().autoThinking.context
+  return {
+    bot: botLineFor(e),
+    history: historyLines(convKey, n),
+    recent: e.group_id ? groupLines(e, n, convKey) : [],
+    quote: input.quoted ? `${quoteLabel(input.quoted)}${truncate(input.quoted.text || '[非文本消息]', 300)}` : undefined,
+    heading: messageHeading(e, isAdmin),
+    text: input.text,
+    images: input.images.length,
+  }
 }
 
 export type TurnOutcome = (
-  | { kind: 'reply'; text: string; modelId: string; cost: number; dispatched?: string; images: Buffer[]; thinking: ThinkingLevel }
+  | { kind: 'reply'; text: string; modelId: string; cost: number; dispatched?: string; images: Buffer[]; thinking: ThinkingLevel; skipped?: boolean }
   | { kind: 'quota'; block: QuotaBlock; modelId: string }
   | { kind: 'error'; message: string; unconfigured?: boolean }
 ) & { afterReply?: (() => void)[] }
@@ -117,7 +139,7 @@ export async function runTurn(req: TurnRequest): Promise<TurnOutcome> {
     recordRolloutEvent(req.rolloutId!, { kind: 'callback', text: req.input.text, job: { kind: req.asyncResult ? 'agy' : 'computer', id: callbackJob! } })
   }
   const rolloutId = continued ? req.rolloutId! : startRollout({ conv: req.convKey, input: req.input.text || (req.input.images.length ? '（发了图片）' : '（只@了你，没说话）'),
-    inputImageCount: req.input.images.length, source: req.asyncResult?.kind ?? (req.computerResult ? 'computer' : 'chat'),
+    inputImageCount: req.input.images.length, source: req.asyncResult?.kind ?? (req.computerResult ? 'computer' : req.proactive ? 'proactive' : 'chat'),
     jobId: req.asyncResult?.id ?? req.computerResult?.id })
   const ref: { turn?: TurnState; rolloutId: string; continued: boolean } = { rolloutId, continued }
   try {
@@ -126,7 +148,7 @@ export async function runTurn(req: TurnRequest): Promise<TurnOutcome> {
       return runTurnInner(req, ref)
     })
     if (result.kind === 'reply') {
-      const text = result.text || (result.dispatched ? `（执行指令 ${result.dispatched}）` : '（无文字回复）')
+      const text = result.skipped ? '（主动发言：模型选择不接话）' : result.text || (result.dispatched ? `（执行指令 ${result.dispatched}）` : '（无文字回复）')
       recordRolloutEvent(rolloutId, { kind: 'reply', text })
       updateRollout(rolloutId, { status: hasPendingJobs(rolloutId) ? 'waiting_callback' : 'completed', reply: text })
     } else {
@@ -146,7 +168,8 @@ export async function runTurn(req: TurnRequest): Promise<TurnOutcome> {
 
 async function runTurnInner(req: TurnRequest, ref: { turn?: TurnState; rolloutId: string; continued: boolean }): Promise<TurnOutcome> {
   const { e, eff, input, isAdmin, convKey } = req
-  const quotaCtx: QuotaCtx = { userId: e.user_id, groupId: e.group_id, isAdmin }
+  // a proactive reply wasn't asked for: it counts against the group and global budgets, not the speaker's
+  const quotaCtx: QuotaCtx = req.proactive ? { groupId: e.group_id, isAdmin: false } : { userId: e.user_id, groupId: e.group_id, isAdmin }
   const saved = req.sessionConfig
   const savedBlock = saved && checkQuota(saved.model, quotaCtx)
   const { picked, block } = saved
@@ -164,12 +187,7 @@ async function runTurnInner(req: TurnRequest, ref: { turn?: TurnState; rolloutId
   if (!saved && thinkingSetting === 'auto' && !dropped.has('thinking')) recordRolloutEvent(ref.rolloutId, { kind: 'progress', text: '正在判断思考强度' })
   const decision: ThinkingDecision = saved?.decision ?? (dropped.has('thinking')
     ? { setting: thinkingSetting, level: 'off', source: 'unsupported', ms: 0 }
-    : await resolveThinkingDecision(
-        thinkingSetting,
-        eff.chat,
-        { text: input.text.replaceAll('[at:you]', '').trim(), images: input.images.length, quoted: Boolean(input.quoted), quotedText: input.quoted?.text },
-        quotaCtx,
-      ))
+    : await resolveThinkingDecision(thinkingSetting, model, judgeTranscript(req), quotaCtx))
   let thinking = decision.level
   updateRollout(ref.rolloutId, { thinking, thinkingDecision: decision })
   // A result turn reusing the original decision would only repeat the rollout's first thinking entry.
@@ -242,11 +260,12 @@ async function runTurnInner(req: TurnRequest, ref: { turn?: TurnState; rolloutId
   // Mark for background archiving; the ordered group window still includes overlapping exchanges.
   if (!req.computerResult && !req.asyncResult) markHandled(e, convKey)
 
-  const userMsg: UserMsg = { role: 'user', content: [{ type: 'text', text: header.sent + text }, ...input.images.flatMap((part, index) => index < quoteStart ? [{ type: 'text' as const, text: imageLabel(turn.imageRefs![index], index) }, part] : [part]), ...ownImages.slice(input.images.length).map((image, index) => ({ type: 'text' as const, text: imageLabel(image, input.images.length + index) })),
+  const proactiveNote = req.proactive ? `【主动发言】没有人@你或回复你：你在群里看到了上面的聊天，自己决定要不要接一句。像群友一样自然、简短，别重复别人说过的话；觉得不该说话时只回复 [skip]。\n` : ''
+  const userMsg: UserMsg = { role: 'user', content: [{ type: 'text', text: header.sent + proactiveNote + text }, ...input.images.flatMap((part, index) => index < quoteStart ? [{ type: 'text' as const, text: imageLabel(turn.imageRefs![index], index) }, part] : [part]), ...ownImages.slice(input.images.length).map((image, index) => ({ type: 'text' as const, text: imageLabel(image, input.images.length + index) })),
     ...ownFiles.length ? [{ type: 'text' as const, text: fileNote.trim() }] : []] }
   const storedUser: UserMsg = {
     role: 'user',
-    content: [{ type: 'text', text: header.stored + text + attachmentNote }],
+    content: [{ type: 'text', text: header.stored + (req.proactive ? '【你主动接话的群消息】' : '') + text + attachmentNote }],
   }
 
   const prefix: Msg[] = []
@@ -387,6 +406,11 @@ async function runTurnInner(req: TurnRequest, ref: { turn?: TurnState; rolloutId
     `[${model.id}] ${Date.now() - started}ms think=${thinking} in=${usage.input} cache=${usage.cacheRead}/${usage.cacheWrite + usage.cacheWrite1h} out=${usage.output}${usage.reasoning ? `(思考${usage.reasoning})` : ''}${usage.webSearches ? ` 自带搜索${usage.webSearches}次` : ''} $${cost.toFixed(5)}${usage.inputIncomplete ? ' (上游历史用量可能缺失)' : ''}${turn.dispatched ? ` cmd=${turn.dispatched}` : ''}`,
   )
   if (finalText) log.debug(`[${model.id}] 回复：${brief(finalText, 500)}`)
+  // a proactive turn that decided to stay quiet leaves no trace in the conversation
+  if (req.proactive && !turn.dispatched && !turn.images.length && (!finalText.trim() || SKIP_REPLY.test(finalText))) {
+    recordTurn({ ...turnInfo(), reply: '（主动发言：不接话）' })
+    return { kind: 'reply', text: '', modelId: model.id, cost, images: [], thinking, skipped: true }
+  }
   recordTurn({ ...turnInfo(), reply: finalText || (turn.dispatched ? `（执行指令 ${turn.dispatched}）` : '') })
 
   if (turn.memoryChanged) {

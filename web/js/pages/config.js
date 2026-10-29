@@ -1,8 +1,9 @@
-import { api, del, get, put } from '../api.js'
+import { api, del, enc, get, post, put } from '../api.js'
 import { menuButton } from '../main.js'
-import { act, badge, card, combo, confirmDanger, empty, h, icon, modal, mount, promptFields, switchEl, tabs, toast } from '../ui.js'
+import { act, badge, card, combo, confirmDanger, empty, fmt, h, icon, modal, mount, promptFields, spinner, switchEl, tabs, toast } from '../ui.js'
 import { setupWizard } from '../setup-wizard.js'
 import { agyAccessWarning } from '../agy-access.js'
+import { curveCard, proactivePlayground, recentProactiveCard, thinkingPlayground } from '../judge-playground.js'
 
 /**
  * Schema-driven config editor. Every write goes through PUT /api/config (validated server-side with the same
@@ -10,6 +11,17 @@ import { agyAccessWarning } from '../agy-access.js'
  */
 
 const BASIC = ['enable', 'admins', 'defaultModel', 'fallbackModels', 'utilityModel', 'visionModel']
+/** shown inside the 模型 section, not as sections of their own */
+const MODEL_LISTS = [['models', '聊天模型', 'chat'], ['embeddingModels', '向量模型', 'embedding'], ['systemoneModels', 'System One 模型', 'systemone']]
+const NESTED = ['embeddingModels', 'systemoneModels']
+const CHAT_TYPES = ['openai', 'openai-responses', 'anthropic', 'gemini']
+const PROVIDER_KINDS = [['聊天模型提供商', p => CHAT_TYPES.includes(p.type)], ['向量提供商（voyage）', p => p.type === 'voyage'], ['System One 提供商', p => p.type === 'systemone']]
+/** tool config groups -> the tools they configure (the switch beside each name turns those on or off) */
+const TOOL_GROUPS = {
+  webSearch: ['web_search'], webFetch: ['web_fetch'], botCommand: ['run_bot_command', 'search_bot_commands', 'list_bot_commands'],
+  renderHtml: ['render_html'], exec: ['run_code'], computer: ['computer_task'], googleLens: ['google_lens'], agy: ['agy'],
+  sendImage: ['send_image'], readFile: ['read_file'], loadSkill: ['load_skill'], listStickers: ['list_stickers'],
+}
 const isContainer = n => n && ['obj', 'map', 'arr'].includes(n.t)
 const pathOf = keys => keys.join('.')
 
@@ -29,7 +41,7 @@ async function refresh() {
 
 function sections() {
   const fields = state.data.schema.fields
-  return [['setup', '设置向导'], ['basic', '基础'], ...Object.entries(fields).filter(([k, n]) => !BASIC.includes(k) && isContainer(n)).map(([k, n]) => [k, n.label ?? k])]
+  return [['setup', '设置向导'], ['basic', '基础'], ...Object.entries(fields).filter(([k, n]) => !BASIC.includes(k) && !NESTED.includes(k) && isContainer(n)).map(([k, n]) => [k, k === 'models' ? '模型' : n.label ?? k])]
 }
 
 function draw() {
@@ -59,7 +71,15 @@ function drawBody(body) {
   if (state.search.trim()) return mount(body, card(null, searchResults(state.search.trim().toLowerCase())))
   if (state.section === 'basic')
     return mount(body, card('基础', BASIC.filter(k => schema.fields[k]).map(k => leaf(schema.fields[k], [k], effective[k], effective))))
+  if (state.section === 'models')
+    return mount(body, MODEL_LISTS.map(([k, title]) => card(title,
+      h('div', { class: 'small muted mono', style: { marginBottom: '6px' } }, k),
+      descFor([k]) ? h('div', { class: 'small muted', style: { whiteSpace: 'pre-wrap', marginBottom: '8px' } }, descFor([k])) : null,
+      container(schema.fields[k], [k], effective[k], effective))))
+  if (state.section === 'providers') return mount(body, providersBody())
   const node = schema.fields[state.section]
+  const extras = state.section === 'autoThinking' ? [thinkingPlayground(state.data)]
+    : state.section === 'proactive' ? [curveCard(state.data, ['proactive', 'threshold'], effective.proactive.threshold, save), proactivePlayground(state.data), recentProactiveCard()] : []
   const skillsLink = state.section === 'skills' ? h('div', { class: 'notice', style: { borderColor: 'var(--accent)', background: 'var(--accent-soft)', marginBottom: '16px' } },
     icon('tools', 18),
     h('span', '要创建、编写或管理具体的技能内容，请前往「工具与技能 → 技能」页面。'),
@@ -68,8 +88,33 @@ function drawBody(body) {
     skillsLink,
     h('div', { class: 'small muted mono', style: { marginBottom: '6px' } }, state.section),
     descFor([state.section]) ? h('div', { class: 'small muted', style: { whiteSpace: 'pre-wrap', marginBottom: '8px' } }, descFor([state.section])) : null,
-    container(node, [state.section], effective[state.section], effective)))
+    container(node, [state.section], effective[state.section], effective)), ...extras)
 }
+
+/** Providers by what they serve: chat models, embeddings (voyage), System One judges. */
+function providersBody() {
+  const { schema, effective } = state.data
+  const node = schema.fields.providers
+  const entries = Object.entries(effective.providers ?? {})
+  return [
+    ...PROVIDER_KINDS.map(([title, test]) => {
+      const list = entries.filter(([, p]) => test(p))
+      return card(title, list.length ? list.map(([k, v]) => {
+        const keys = ['providers', k]
+        const remove = h('button', { class: 'btn sm ghost danger', onclick: async e => {
+          e.preventDefault()
+          if (await confirmDanger(`删除 providers.${k}？`)) reset(keys, '已删除')
+        } }, '删除')
+        return group(node.value, keys, v, effective.providers, `${k}`, h('span', { class: 'row' }, badge(v.type), remove))
+      }) : h('div', { class: 'small muted', style: { padding: '6px 0' } }, '（空）'))
+    }),
+    h('button', { class: 'btn', style: { marginTop: '16px' }, onclick: () => addProvider() }, '＋ 添加提供商'),
+  ]
+}
+
+/** Not errors: settings that probably don't do what was meant, shown beside the setting / model they concern. */
+const noticesAt = keys => (state.data.notices ?? []).filter(n => n.paths.includes(pathOf(keys))).map(n => n.text)
+const noticeBox = texts => texts.length ? h('div', { class: 'small', style: { border: '1px solid var(--accent)', background: 'var(--accent-soft)', borderRadius: '8px', padding: '8px 10px', margin: '6px 0', whiteSpace: 'pre-wrap' } }, texts.join('\n')) : null
 
 /** Same checks as the terminal editor's 检查配置: models pointing at a missing provider, keyless defaults, ... */
 function problems() {
@@ -113,8 +158,10 @@ async function reset(keys, msg = '已恢复默认') {
 // ---------- containers ----------
 
 function container(node, keys, value, parent) {
+  if (pathOf(keys) === 'tools') return toolsBody(node, keys, value)
   if (node.t === 'obj') return Object.entries(node.fields).map(([k, f]) => {
     if (f.whenTypes && parent && value && !f.whenTypes.includes(value.type)) return null
+    if (pathOf(keys) === 'proactive' && k === 'threshold') return null
     return isContainer(f) ? group(f, [...keys, k], value?.[k], value) : leaf(f, [...keys, k], value?.[k], value)
   })
   if (node.t === 'map') return mapEditor(node, keys, value ?? {})
@@ -122,15 +169,17 @@ function container(node, keys, value, parent) {
   return null
 }
 
-function group(node, keys, value, parent, title, actions) {
+function group(node, keys, value, parent, title, actions, lead) {
   const p = pathOf(keys)
   const content = h('div', { style: { paddingBottom: '8px' } })
   const det = h('details', { class: 'group', open: state.open.has(p) },
-    h('summary', title ?? node.label ?? keys.at(-1), h('span', { class: 'small muted mono' }, keys.at(-1)),
+    h('summary', lead ?? null, title ?? node.label ?? keys.at(-1), h('span', { class: 'small muted mono' }, keys.at(-1)),
       isOverridden(keys) ? badge('已修改', 'warn') : null,
+      noticesAt(keys).length ? badge('提示', 'accent') : null,
       node.t === 'map' ? badge(`${Object.keys(value ?? {}).length} 项`) : node.t === 'arr' ? badge(`${(value ?? []).length} 项`) : null,
       h('span', { style: { flex: 1 } }), actions),
     descFor(keys) ? h('div', { class: 'small muted', style: { whiteSpace: 'pre-wrap' } }, descFor(keys)) : null,
+    noticeBox(noticesAt(keys)),
     content,
   )
   // render lazily on first open: big maps (groups) stay cheap
@@ -187,6 +236,7 @@ function mapEditor(node, keys, value) {
 function arrEditor(node, keys, value) {
   const add = async () => {
     if (pathOf(keys) === 'models') return addModel()
+    if (NESTED.includes(pathOf(keys))) return addOtherModel(pathOf(keys))
     const create = node.create ?? []
     const fields = create.map(f => fieldFor(node.item.fields?.[f], f, node.item.fields?.[f]?.label ?? f, {}))
     let item = {}
@@ -209,7 +259,10 @@ function arrEditor(node, keys, value) {
         e.preventDefault()
         if (await confirmDanger(`删除「${title}」？`)) reset([...keys, i], '已删除')
       } }, '删除')
-      return group(node.item, [...keys, i], item, value, title, remove)
+      const kind = MODEL_LISTS.find(([k]) => k === pathOf(keys))?.[2]
+      const isHttp = pathOf(keys) === 'tools.http' && item?.name
+      const lead = isHttp ? toolSwitch([item.name]) : null
+      return group(node.item, [...keys, i], item, value, title, h('span', { class: 'row' }, kind ? testButton(item.id, kind) : null, remove), lead)
     }),
     h('button', { class: 'btn sm', style: { marginTop: '6px' }, onclick: add }, '＋ 添加'),
   ]
@@ -230,7 +283,7 @@ function leaf(node, keys, value, parent, title, extra) {
       h('div', { class: 'key' }, pathOf(keys)),
       descFor(keys) ? h('div', { class: 'desc' }, descFor(keys)) : null,
     ),
-    h('div', { class: 'ctl' }, input, warning, h('div', { class: 'row' },
+    h('div', { class: 'ctl' }, input, warning, noticeBox(noticesAt(keys)), h('div', { class: 'row' },
       overridden && !extra ? h('button', { class: 'btn sm ghost', onclick: () => reset(keys) }, '恢复默认') : null, extra)),
   )
 }
@@ -252,7 +305,12 @@ function control(node, keys, value, parent) {
     case 'str': {
       const sugg = suggestionsFor(node, parent)
       // a real list to pick from (a datalist only shows what matches the text already typed)
-      if (sugg.length) return combo(sugg, value ?? '', { empty: node.required ? undefined : '（空）', onchange: v => (v === '' && !node.required ? reset(keys, '已清除') : save(keys, v)) })
+      if (sugg.length || (keys.at(-1) === 'model' && parent?.provider)) {
+        const c = combo(sugg, value ?? '', { empty: node.required ? undefined : '（空）', onchange: v => (v === '' && !node.required ? reset(keys, '已清除') : save(keys, v)) })
+        // the provider's own model list, so models newer than this version show up too
+        if (keys.at(-1) === 'model' && parent?.provider) liveModelNames(parent.provider, keys[0] === 'embeddingModels' ? 'embedding' : 'chat').then(list => list && c.setOptions(list))
+        return c
+      }
       const input = h('input', { type: 'text', value: value ?? '', placeholder: node.pattern ? `格式：${node.pattern}` : '' })
       input.addEventListener('change', () => save(keys, input.value))
       return h('div', input)
@@ -305,6 +363,8 @@ function control(node, keys, value, parent) {
         try { save(keys, JSON.parse(ta.value)) } catch (err) { toast(`JSON 格式错误：${err.message}`, 'bad') }
       } }, '保存')))
     }
+    case 'levels':
+      return levelsControl(keys, value ?? {}, parent)
     case 'pricing': {
       const auto = value == null || value === 'auto'
       const sel = h('select', { onchange: () => (sel.value === 'auto' ? save(keys, 'auto') : save(keys, { input: 0, output: 0 })) },
@@ -392,11 +452,87 @@ async function addProvider() {
 
 const modelOptions = () => state.data.schema.fields.models.item.fields.model.suggestByProvider ?? {}
 
+/** Upstream model names from the provider's list endpoint, merged with the known ones (cached server-side). */
+const liveCache = new Map()
+function liveModelNames(provider, kind = 'chat') {
+  const key = `${provider}|${kind}`
+  if (!liveCache.has(key)) liveCache.set(key, get(`/api/providers/${enc(provider)}/models?kind=${kind}`).then(r => r.models).catch(() => undefined))
+  return liveCache.get(key)
+}
+
+function testButton(id, kind) {
+  const out = h('span', { class: 'small' })
+  const btn = h('button', { class: 'btn sm', onclick: async e => {
+    e.preventDefault()
+    btn.disabled = true
+    out.replaceChildren(spinner())
+    const r = await act(() => post(`/api/models/${enc(id)}/test?kind=${kind}`))
+    btn.disabled = false
+    out.replaceChildren(!r ? '' : r.ok ? h('span', { class: 'ok' }, `✓ ${fmt.dur(r.ms)}${r.text ? ` · ${r.text.slice(0, 30)}` : ''}`) : h('span', { class: 'bad', title: r.error }, `✕ ${r.error.slice(0, 50)}`))
+  } }, '测试')
+  return h('span', { class: 'row' }, btn, out)
+}
+
+/** One select per auto-thinking category; for a model, options show what its provider actually sends. */
+function levelsControl(keys, value, parent) {
+  const { effective } = state.data
+  const isModel = keys[0] === 'models'
+  const actual = isModel ? state.data.effectiveThinking?.[parent?.provider] ?? {} : {}
+  const defaults = effective.autoThinking?.levels ?? {}
+  const levels = state.data.thinking ?? []
+  return h('div', { class: 'col', style: { gap: '6px' } },
+    (effective.autoThinking?.categories ?? []).map(({ name }, i) => {
+      const cur = value?.[name] ?? ''
+      const fallback = defaults[name] ?? 'low'
+      const sel = h('select', { onchange: () => (sel.value === '' ? reset([...keys, name], '已清除') : save([...keys, name], sel.value)) },
+        h('option', { value: '', selected: cur === '' }, isModel ? `（默认 ${fallback}${actual[fallback] && actual[fallback] !== fallback ? `，实际 ${actual[fallback]}` : ''}）` : `（未设置，low）`),
+        levels.map(l => h('option', { value: l, selected: l === cur }, actual[l] && actual[l] !== l ? `${l}（实际 ${actual[l]}）` : l)))
+      return h('label', { class: 'row small' }, h('span', { class: 'mono', style: { width: '110px' } }, `${i === 0 ? '★ ' : ''}${name}`), sel)
+    }),
+    h('span', { class: 'small muted' }, isModel ? '★ 第一个类别：判断失败时、以及该模型用于后台任务时使用' : '★ 第一个类别也是判断失败时的后备'))
+}
+
+/** tools: a switch beside each tool's name instead of a separate list of disabled tools */
+function toolSwitch(names, enableKeys, enabled) {
+  const disabled = state.data.effective.tools?.disabled ?? []
+  const on = (enabled ?? true) && !names.some(n => disabled.includes(n))
+  const wrap = h('span', { onclick: e => e.stopPropagation(), title: names.join(', ') })
+  wrap.append(switchEl(on, async checked => {
+    const ok = await act(async () => {
+      if (enableKeys) await put('/api/config', { path: pathOf(enableKeys), value: checked })
+      const set = new Set(disabled)
+      for (const n of names) checked ? set.delete(n) : !enableKeys && set.add(n)
+      if (set.size !== disabled.length || [...set].some(n => !disabled.includes(n))) await put('/api/config', { path: 'tools.disabled', value: [...set] })
+    }, `${names[0]} 已${checked ? '启用' : '停用'}`)
+    if (ok) await refresh()
+  }, `启用或停用 ${names.join(', ')}`))
+  return wrap
+}
+
+function toolsBody(node, keys, value) {
+  const fields = Object.entries(node.fields).filter(([k]) => k !== 'disabled')
+  const out = fields.map(([k, f]) => {
+    const names = TOOL_GROUPS[k]
+    if (!names || !isContainer(f)) return isContainer(f) ? group(f, [...keys, k], value?.[k], value) : leaf(f, [...keys, k], value?.[k], value)
+    const hasEnable = Boolean(f.fields?.enable)
+    // the group's own enable switch moves beside its name
+    const inner = hasEnable ? { ...f, fields: Object.fromEntries(Object.entries(f.fields).filter(([x]) => x !== 'enable')) } : f
+    return group(inner, [...keys, k], value?.[k], value, undefined, null, toolSwitch(names, hasEnable ? [...keys, k, 'enable'] : undefined, hasEnable ? value?.[k]?.enable !== false : undefined))
+  })
+  const covered = new Set([...Object.values(TOOL_GROUPS).flat(), ...(value?.http ?? []).map(t => t.name)])
+  const others = h('div', { class: 'col', style: { gap: '6px', padding: '8px 0' } }, spinner())
+  get('/api/tools').then(tools => {
+    const rest = tools.filter(t => !covered.has(t.name))
+    others.replaceChildren(...(rest.length ? rest.map(t => h('div', { class: 'row small' }, toolSwitch([t.name]), h('b', { class: 'mono' }, t.name), h('span', { class: 'muted' }, t.description.slice(0, 60)))) : [h('span', { class: 'small muted' }, '（无）')]))
+  }).catch(() => others.replaceChildren(h('span', { class: 'small bad' }, '读取工具列表失败')))
+  return [...out, h('details', { class: 'group', open: true }, h('summary', '其他工具', h('span', { class: 'small muted' }, '记忆、表情、技能等没有单独设置的工具')), others)]
+}
+
 async function addModel(providerName) {
   const { effective, schema } = state.data
-  const providers = Object.keys(effective.providers ?? {})
-  if (!providers.length) return toast('请先添加提供商', 'bad')
-  const ids = (effective.models ?? []).map(m => m.id)
+  const providers = Object.keys(effective.providers ?? {}).filter(p => CHAT_TYPES.includes(effective.providers[p].type))
+  if (!providers.length) return toast('请先添加聊天模型的提供商', 'bad')
+  const ids = allIds()
   const byProvider = modelOptions()
   const defId = m => m.replace(/^.*\//, '').replace(/[^\p{L}\p{N}_.-]+/gu, '-')
   const provider = providerName ?? providers[0]
@@ -404,7 +540,7 @@ async function addModel(providerName) {
   let autoId = defId(first(provider))
   const followModel = inp => {
     if (inp.id.value === autoId) inp.id.value = autoId = defId(inp.model.value)
-    inp.vision.checked = !/deepseek/.test(inp.model.value)
+    inp.vision.checked = (state.data.modelDefaults?.[inp.model.value] ?? { vision: true }).vision
   }
   const r = await promptFields('添加模型', [
     { name: 'provider', label: '提供商', value: provider, options: providers.map(p => ({ value: p, label: `${p} · ${effective.providers[p].type}` })),
@@ -416,7 +552,7 @@ async function addModel(providerName) {
     { name: 'model', label: '上游模型（官方 API 的模型 ID）', value: first(provider), combo: byProvider[provider] ?? [], onchange: followModel },
     { name: 'id', label: '别名 id（在指令里使用，可用中文）', value: autoId },
     { name: 'thinking', label: '思考强度', value: 'low', options: state.data.thinking ?? schema.fields.models.item.fields.thinking.values },
-    { name: 'vision', label: '支持图片输入', type: 'checkbox', value: !/deepseek/.test(first(provider)) },
+    { name: 'vision', label: '支持图片输入', type: 'checkbox', value: (state.data.modelDefaults?.[first(provider)] ?? { vision: true }).vision },
     { name: 'makeDefault', label: '设为默认模型', type: 'checkbox', value: !effective.defaultModel },
   ], '添加', r => {
     if (!r.model.trim()) return '请填写上游模型名'
@@ -426,10 +562,42 @@ async function addModel(providerName) {
   })
   if (!r) return
   const id = r.id.trim()
-  const entry = { id, provider: r.provider, model: r.model.trim(), thinking: r.thinking, pricing: 'auto', ...(r.vision ? {} : { vision: false }) }
+  const caps = state.data.modelDefaults?.[r.model.trim()] ?? {}
+  const entry = { id, provider: r.provider, model: r.model.trim(), thinking: r.thinking, pricing: 'auto', ...caps, vision: r.vision }
   state.open.add(pathOf(['models', ids.length]))
   if (!(await save(['models', ids.length], entry, `已添加模型 ${id}`))) return
   if (r.makeDefault) await save(['defaultModel'], id, `已设 ${id} 为默认模型`)
+}
+
+const allIds = () => ['models', ...NESTED].flatMap(k => (state.data.effective[k] ?? []).map(m => m.id))
+
+/** Embedding or System One model: provider of the right type, upstream name, alias. */
+async function addOtherModel(list) {
+  const { effective } = state.data
+  const embedding = list === 'embeddingModels'
+  const types = embedding ? ['voyage', 'openai', 'openai-responses'] : ['systemone']
+  const providers = Object.keys(effective.providers ?? {}).filter(p => types.includes(effective.providers[p].type))
+  if (!providers.length) return toast(embedding ? '请先添加 voyage 或 OpenAI 兼容的提供商' : '请先添加 systemone 提供商', 'bad')
+  const sugg = p => (embedding ? state.data.embeddingSuggestions?.[p] ?? [] : ['jev-latest'])
+  const ids = allIds()
+  const r = await promptFields(embedding ? '添加向量模型' : '添加 System One 模型', [
+    { name: 'provider', label: '提供商', value: providers[0], options: providers.map(p => ({ value: p, label: `${p} · ${effective.providers[p].type}` })),
+      onchange: inp => { inp.model.setOptions(sugg(inp.provider.value)); inp.model.value = sugg(inp.provider.value)[0] ?? '' } },
+    { name: 'model', label: '上游模型名', value: sugg(providers[0])[0] ?? '', combo: sugg(providers[0]) },
+    { name: 'id', label: '别名 id', value: '' },
+    ...(embedding ? [{ name: 'dimensions', label: '向量维度', type: 'number', value: '512' }] : []),
+  ], '添加', r => {
+    const id = (r.id.trim() || r.model.trim())
+    if (!r.model.trim()) return '请填写上游模型名'
+    if (!/^[\p{L}\p{N}_.-]+$/u.test(id)) return '别名只能包含中英文、数字和 . _ -（不能有空格）'
+    if (ids.includes(id)) return '别名已存在（聊天、向量和 System One 模型的别名不能重复）'
+  })
+  if (!r) return
+  const id = r.id.trim() || r.model.trim()
+  const entry = { id, provider: r.provider, model: r.model.trim(), ...(embedding ? { dimensions: Number(r.dimensions) || 512 } : {}) }
+  const n = (effective[list] ?? []).length
+  state.open.add(pathOf([list, n]))
+  await save([list, n], entry, `已添加 ${id}`)
 }
 
 // ---------- search ----------

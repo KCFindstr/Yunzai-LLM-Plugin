@@ -14,7 +14,11 @@ for (const protocol of ['openai', 'openai-responses'] as const) it(`reuses the i
   registry.register({ name: 'cache_side_effect', description: 'Must not run from worker data', parameters: {}, run: async () => { sideEffects++; return 'bad' } })
   registry.register({ name: 'send_image', description: 'Send an output image', parameters: { type: 'object', properties: { path: { type: 'string' } } }, budgetExempt: true,
     run: async (_args, ctx) => { ctx.turn.images.push(image); return 'selected' } })
-  const server = await mockServer((_request, n) => {
+  // the auto-thinking judge is a System One model on the same mock server; its calls are not chat requests
+  let chatN = 0
+  const server = await mockServer(request => {
+    if (request.url === '/v1/systemone') return [200, { model: 'jev', answers: { answer: { choice: 'complex' } } }]
+    const n = ++chatN
     const calls = n === 1 ? [{ name: 'cache_capture', args: {} }] : n === 3
       ? [{ name: 'cache_side_effect', args: {} }, { name: 'send_image', args: { path: '/work/agy/aabbccddee/out/result.png' } }] : []
     const text = n === 2 ? 'Working on it' : n === 4 ? 'Here is the result' : ''
@@ -24,7 +28,7 @@ for (const protocol of ['openai', 'openai-responses'] as const) it(`reuses the i
     return [200, { choices: [{ message: { role: 'assistant', content: text, ...(calls.length ? { tool_calls: calls.map((call, i) => ({ id: `call-${n}-${i}`, type: 'function', function: { name: call.name, arguments: JSON.stringify(call.args) } })) } : {}) }, finish_reason: calls.length ? 'tool_calls' : 'stop' }], usage: { prompt_tokens: 100, completion_tokens: 10 } }]
   })
   try {
-    writeUserConfig(`providers:\n  mock: { type: ${protocol}, baseUrl: '${server.url}', apiKey: original-key, promptCacheKey: true, serverState: ${protocol === 'openai-responses'}, maxRetries: 0 }\nmodels:\n  - { id: main, provider: mock, model: original-model, thinking: auto, temperature: 0.3, maxTokens: 2345 }\ndefaultModel: main\nfallbackModels: []\nchat:\n  summarize: false\n  autoThinking: { casual: low, question: medium, complex: high }\n  thinkingJudge: { mode: heuristic }\nmemory: { enable: false }\nsticker: { enable: false }\ntools:\n  webSearch: { enable: false }\n`)
+    writeUserConfig(`providers:\n  mock: { type: ${protocol}, baseUrl: '${server.url}', apiKey: original-key, promptCacheKey: true, serverState: ${protocol === 'openai-responses'}, maxRetries: 0 }\n  judge: { type: systemone, baseUrl: '${server.url}/v1' }\nmodels:\n  - { id: main, provider: mock, model: original-model, thinking: auto, temperature: 0.3, maxTokens: 2345 }\ndefaultModel: main\nfallbackModels: []\nsystemoneModels:\n  - { id: jevmock, provider: judge, model: jev }\nautoThinking: { judge: jevmock, levels: { casual: low, question: medium, complex: high } }\nchat:\n  summarize: false\nmemory: { enable: false }\nsticker: { enable: false }\ntools:\n  webSearch: { enable: false }\n`)
     config.load()
     const e = fakeEvent().e, eff = config.effective(), convKey = sessionKey(e, eff.chat.sessionScope)
     const first = await runTurn({ e, eff, convKey, isAdmin: true, input: { text: 'hello there', images: [], imageSegments: [] } })
@@ -43,12 +47,14 @@ for (const protocol of ['openai', 'openai-responses'] as const) it(`reuses the i
       })
     assert.ok(delivered)
     assert.equal(sideEffects, 1, 'worker completion can invoke tools')
-    assert.equal(server.requests.length, 4, 'completion reuses resolved thinking instead of invoking another judge')
-    const original = server.requests[1].body, completion = server.requests[2].body
+    const chats = server.requests.filter(request => request.url !== '/v1/systemone')
+    assert.equal(chats.length, 4)
+    assert.equal(server.requests.length - chats.length, 1, 'completion reuses resolved thinking instead of invoking another judge')
+    const original = chats[1].body, completion = chats[2].body
     assert.deepEqual(completion.tools, original.tools)
     assert.equal(completion.prompt_cache_key, original.prompt_cache_key)
     assert.equal(completion.model, 'original-model')
-    assert.equal(server.requests[2].headers.authorization, 'Bearer original-key')
+    assert.equal(chats[2].headers.authorization, 'Bearer original-key')
     assert.equal(completion.temperature, original.temperature)
     if (protocol === 'openai-responses') {
       assert.equal(completion.instructions, original.instructions)

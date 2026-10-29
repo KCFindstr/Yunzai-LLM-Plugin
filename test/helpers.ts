@@ -34,6 +34,31 @@ export function writeUserConfig(yaml: string) {
   fs.writeFileSync(path.join(TMP, 'config', 'config.yaml'), yaml, 'utf8')
 }
 
+export interface TestEmbedding {
+  enable?: boolean
+  type?: 'voyage' | 'openai'
+  baseUrl?: string
+  apiKey?: string
+  model?: string
+  dimensions?: number
+  minScore?: number
+}
+
+/**
+ * Point recall at a test embedding endpoint in memory (a provider plus an embeddingModels entry, as the config now
+ * stores them). Fields left out keep their current values.
+ */
+export function setEmbedding(config: { get(): any }, e: TestEmbedding) {
+  const c = config.get()
+  const cur = c.embeddingModels.find((m: any) => m.id === c.memory.embedding.model)
+  const prov = cur ? c.providers[cur.provider] : undefined
+  const type = e.type ?? (prov ? (prov.type === 'voyage' ? 'voyage' : 'openai') : 'voyage')
+  c.providers.__test_embedding = { type, baseUrl: e.baseUrl ?? prov?.baseUrl, apiKey: 'apiKey' in e ? e.apiKey : prov?.apiKey, timeout: 10, maxRetries: 1 }
+  c.embeddingModels = [...c.embeddingModels.filter((m: any) => m.id !== '__test_embedding'),
+    { id: '__test_embedding', provider: '__test_embedding', model: e.model ?? cur?.model ?? 'voyage-4-lite', dimensions: e.dimensions ?? cur?.dimensions ?? 512 }]
+  c.memory.embedding = { enable: e.enable ?? c.memory.embedding.enable, model: '__test_embedding', minScore: e.minScore ?? c.memory.embedding.minScore }
+}
+
 export interface Captured {
   method: string
   url: string
@@ -74,7 +99,7 @@ export function fakeEvent(over: Record<string, any> = {}) {
     group_id: 30001,
     group_name: '测试群',
     message_id: 'm1',
-    sender: { user_id: 20001, nickname: '小明', card: '小明' },
+    sender: { user_id: 20001, nickname: '岛风', card: '岛风' },
     message: [{ type: 'at', qq: 10000 }, { type: 'text', text: ' 你好' }],
     msg: '你好',
     atBot: true,

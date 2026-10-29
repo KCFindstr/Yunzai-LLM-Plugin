@@ -106,10 +106,12 @@ export function searchReady(eff: EffectiveConfig, model?: ModelConfig): boolean 
 export async function setupStatus(force = false) {
   const c = config.get(), eff = config.effective(), id = config.defaultModelId(), model = config.getModel(id)
   const modelReady = (id: string) => { const m = config.getModel(id); return Boolean(m?.model && config.hasKey(c.providers[m.provider]) && httpUrl(c.providers[m.provider]?.baseUrl ?? '')) }
-  const embedding = c.memory.embedding, judge = c.chat.thinkingJudge
-  const typesafe = (() => { try { return new URL(judge.url).hostname.endsWith('typesafe.ai') } catch { return false } })()
-  const judgeReady = judge.mode === 'heuristic' || (judge.mode === 'model' ? modelReady(judge.model || c.utilityModel || id)
-    : httpUrl(judge.url) && Boolean(judge.systemoneModel) && (!typesafe || resolveKeys(judge.apiKey).length > 0))
+  const embedding = c.memory.embedding, judge = c.autoThinking.judge
+  const embeddingModel = config.getEmbeddingModel(embedding.model), embeddingProvider = embeddingModel && c.providers[embeddingModel.provider]
+  const systemone = config.getSystemoneModel(judge), systemoneProvider = systemone && c.providers[systemone.provider]
+  const typesafe = /typesafe\.ai/i.test(systemoneProvider?.baseUrl ?? '')
+  const judgeReady = systemone ? Boolean(systemoneProvider && httpUrl(systemoneProvider.baseUrl ?? '') && (!typesafe || resolveKeys(systemoneProvider.apiKey).length > 0))
+    : modelReady(judge || c.utilityModel || id)
   const automatic = (model?.thinking ?? c.chat.thinking) === 'auto'
   const [sandbox, agy, computer, lens] = await Promise.all((['sandbox', 'agy', 'computer', 'lens'] as const).map(kind => checkRuntime(kind, eff, force)))
   const computerReady = computerModelReady(eff)
@@ -123,8 +125,9 @@ export async function setupStatus(force = false) {
     search: { ready: eff.tools.enable && (eff.tools.webSearch.enable && eff.tools.webSearch.provider !== 'none' ? searchReady(eff, model) : eff.tools.webFetch.enable),
       detail: eff.tools.webSearch.enable && eff.tools.webSearch.provider !== 'none' ? `搜索：${eff.tools.webSearch.provider}${searchReady(eff, model) ? '' : ' · 缺少密钥、地址或模型不支持'}` : '搜索未开启，可单独启用网页读取' },
     budgets: { ready: limitedModels > 0, detail: limitedModels ? `${limitedModels} 个模型已设置额度` : '尚未设置额度，可按模型限制每人、每群和全局用量' },
-    embedding: { ready: embedding.enable && c.memory.enable && httpUrl(embedding.baseUrl) && Boolean(embedding.model) && resolveKeys(embedding.apiKey).length > 0, detail: embedding.model || '用于检索旧聊天' },
-    jev: { ready: automatic && judgeReady, detail: `${judge.mode === 'systemone' ? judge.systemoneModel : judge.mode === 'model' ? '小模型判断' : '关键词规则'}${automatic ? '' : ' · 默认模型尚未启用自动思考强度'}` },
+    embedding: { ready: embedding.enable && c.memory.enable && Boolean(embeddingProvider && httpUrl(embeddingProvider.baseUrl ?? '') && resolveKeys(embeddingProvider.apiKey).length > 0),
+      detail: embeddingModel ? `${embeddingModel.id} · ${embeddingModel.model}` : '用于检索旧聊天' },
+    jev: { ready: automatic && judgeReady, detail: `${systemone ? `System One ${systemone.id}` : `小模型判断 ${judge || c.utilityModel || id}`}${automatic ? '' : ' · 默认模型尚未启用自动思考强度'}` },
     sandbox: { ...sandbox, enabled: eff.tools.exec.enable }, agy: { ...agy, enabled: eff.tools.agy.enable },
     computer: { ...computer, ready: computer.ready && computerReady, checks: [...computer.checks, { label: '可用视觉 / 工具模型', ok: computerReady }], enabled: eff.tools.computer.enable }, lens: { ...lens, enabled: eff.tools.googleLens.enable },
   }

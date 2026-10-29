@@ -4,7 +4,10 @@ import YAML from 'yaml'
 import { CONFIG_DIR, CONFIG_FILE, DEFAULT_CONFIG_FILE } from './paths.ts'
 import { log } from './log.ts'
 import { deepMerge, getPath, isPlainObject } from './util.ts'
-import type { EffectiveConfig, ModelConfig, PluginConfig, ProviderConfig } from './configTypes.ts'
+import type { EffectiveConfig, EmbeddingModelConfig, ModelConfig, PluginConfig, ProviderConfig, SystemOneModelConfig, ThinkingLevel } from './configTypes.ts'
+// shared with the terminal and web editors, which migrate the same way before validating
+import { migrateConfig } from '../../cli/migrate.mjs'
+import { dropRetired } from '../../cli/schema.mjs'
 
 type Listener = (cfg: PluginConfig) => void
 
@@ -40,10 +43,31 @@ class ConfigManager {
     return YAML.parse(fs.readFileSync(file, 'utf8')) || {}
   }
 
+  /** User config, upgraded in place (with a backup) when it still uses settings from an older version. */
+  private readUser(def: any): any {
+    if (!fs.existsSync(CONFIG_FILE)) return {}
+    const text = fs.readFileSync(CONFIG_FILE, 'utf8')
+    const doc = YAML.parseDocument(text)
+    if (doc.errors.length) throw doc.errors[0]
+    const notes = [...migrateConfig(doc, def), ...dropRetired(doc).map((p: string) => `${p} 已移除`)]
+    if (notes.length) {
+      try {
+        const backup = `${CONFIG_FILE}.pre-migration-${Date.now()}.bak`
+        fs.writeFileSync(backup, text, 'utf8')
+        this.selfWriteAt = Date.now()
+        fs.writeFileSync(CONFIG_FILE, doc.toString({ lineWidth: 0 }), 'utf8')
+        log.mark(`config.yaml 已升级到新版配置（原文件备份为 ${path.basename(backup)}）：\n- ${notes.join('\n- ')}`)
+      } catch (err: any) {
+        log.warn(`config.yaml 升级后写回失败（本次使用升级后的设置）: ${err.message}`)
+      }
+    }
+    return doc.toJS() || {}
+  }
+
   load(): boolean {
     try {
       const def = this.readYaml(DEFAULT_CONFIG_FILE)
-      const user = this.readYaml(CONFIG_FILE)
+      const user = this.readUser(def)
       this.cfg = normalize(deepMerge(def, user))
       this.version++
       this.effectiveCache.clear()
@@ -185,6 +209,24 @@ class ConfigManager {
     return this.cfg.providers[name]
   }
 
+  getEmbeddingModel(id?: string): EmbeddingModelConfig | undefined {
+    return id ? this.cfg.embeddingModels.find(m => m.id === id) : undefined
+  }
+
+  getSystemoneModel(id?: string): SystemOneModelConfig | undefined {
+    return id ? this.cfg.systemoneModels.find(m => m.id === id) : undefined
+  }
+
+  /** thinking=auto: this model's level for an auto-thinking category. */
+  autoLevel(model: ModelConfig | undefined, category: string): ThinkingLevel {
+    return model?.autoThinking?.[category] ?? this.cfg.autoThinking.levels[category] ?? 'low'
+  }
+
+  /** Level for calls that can't be judged (background jobs): that of the first auto-thinking category. */
+  fallbackLevel(model: ModelConfig | undefined): ThinkingLevel {
+    return this.autoLevel(model, this.cfg.autoThinking.categories[0]?.name ?? '')
+  }
+
   hasKey(provider?: ProviderConfig): boolean {
     if (!provider) return false
     return resolveKeys(provider.apiKey).length > 0
@@ -218,6 +260,7 @@ class ConfigManager {
     let personaPrompt = c.persona.presets[personaKey]
     if (personaPrompt == null)
       personaPrompt = g.persona && g.persona.length > 15 ? g.persona : (c.persona.presets.default ?? '')
+    const proactive: any = deepMerge({ ...c.proactive, enable: false }, isPlainObject(g.proactive) ? g.proactive : {})
     const eff: EffectiveConfig = {
       enable: c.enable && g.enable !== false,
       model: (g.model && this.getModel(g.model)?.id) || this.defaultModelId(),
@@ -226,6 +269,7 @@ class ConfigManager {
       reply: deepMerge(c.reply, g.reply ?? {}),
       sticker: deepMerge(c.sticker, g.sticker ?? {}),
       tools: deepMerge(c.tools, g.tools ?? {}),
+      proactive: { ...normalizeProactive(proactive), enable: groupId != null && proactive.enable === true },
     }
     this.effectiveCache.set(key, eff)
     return eff
@@ -263,6 +307,28 @@ export function deepseekToolKey(apiKey?: string): string {
   return resolveKeys(apiKey)[0] ?? resolveKeys(config.getProvider('deepseek')?.apiKey)[0] ?? ''
 }
 
+const CATEGORY = /^[\p{L}\p{N}_-]{1,32}$/u
+const LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']
+
+/** category -> level, dropping malformed entries */
+function levelMap(v: any): Record<string, ThinkingLevel> {
+  return Object.fromEntries(Object.entries(isPlainObject(v) ? v : {}).filter(([k, x]) => CATEGORY.test(k) && LEVELS.includes(String(x)))) as Record<string, ThinkingLevel>
+}
+
+export function normalizeProactive(p: any): PluginConfig['proactive'] {
+  const num = (v: any, d: number, min: number, max: number) => Math.min(max, Math.max(min, v != null && Number.isFinite(Number(v)) ? Number(v) : d))
+  const t = isPlainObject(p.threshold) ? p.threshold : {}
+  const k = isPlainObject(p.criteria) ? p.criteria : {}
+  return {
+    probability: num(p.probability, 0.3, 0, 1),
+    window: Math.floor(num(p.window, 60, 5, 3600)),
+    judge: typeof p.judge === 'string' ? p.judge : '',
+    context: Math.floor(num(p.context, 12, 1, 50)),
+    criteria: { reply: String(k.reply ?? ''), skip: String(k.skip ?? '') },
+    threshold: { start: num(t.start, 0.95, 0, 1), end: num(t.end, 0.6, 0, 1), halfLife: Math.floor(num(t.halfLife, 900, 1, 86400)) },
+  }
+}
+
 function asArray<T>(v: any): T[] {
   if (Array.isArray(v)) return v
   if (v == null || v === '') return []
@@ -280,7 +346,13 @@ export function normalize(raw: any): PluginConfig {
   }
   c.models = asArray<any>(c.models)
     .filter(m => isPlainObject(m) && m.model && m.provider)
-    .map(m => ({ ...m, id: String(m.id ?? m.model) }))
+    .map(m => ({ ...m, id: String(m.id ?? m.model), ...(isPlainObject(m.autoThinking) ? { autoThinking: levelMap(m.autoThinking) } : {}) }))
+  c.embeddingModels = asArray<any>(c.embeddingModels)
+    .filter(m => isPlainObject(m) && m.model && m.provider)
+    .map(m => ({ id: String(m.id ?? m.model), provider: String(m.provider), model: String(m.model), dimensions: Math.min(4096, Math.max(64, Math.floor(Number(m.dimensions) || 512))) }))
+  c.systemoneModels = asArray<any>(c.systemoneModels)
+    .filter(m => isPlainObject(m) && m.model && m.provider)
+    .map(m => ({ id: String(m.id ?? m.model), provider: String(m.provider), model: String(m.model) }))
   c.defaultModel = String(c.defaultModel ?? '')
   c.fallbackModels = asArray<string>(c.fallbackModels).map(String)
   c.utilityModel = String(c.utilityModel ?? '')
@@ -310,16 +382,22 @@ export function normalize(raw: any): PluginConfig {
   c.reply.markdown = c.reply.markdown === 'auto' ? 'auto' : c.reply.markdown === true
   c.chat.maxPending = Math.min(100, Math.max(1, Number(c.chat.maxPending) || 20))
   c.chat.rosterSize = Math.min(30, Math.max(0, Number(c.chat.rosterSize ?? 12) || 0))
-  c.chat.autoThinking = { casual: 'low', question: 'medium', complex: 'high', ...(isPlainObject(c.chat.autoThinking) ? c.chat.autoThinking : {}) }
-  const tj = isPlainObject(c.chat.thinkingJudge) ? c.chat.thinkingJudge : {}
-  c.chat.thinkingJudge = {
-    mode: ['heuristic', 'model', 'systemone'].includes(tj.mode) ? tj.mode : 'model',
-    model: typeof tj.model === 'string' ? tj.model : '',
-    url: typeof tj.url === 'string' && tj.url ? tj.url : 'https://api.typesafe.ai/v1/systemone',
-    apiKey: typeof tj.apiKey === 'string' ? tj.apiKey : '',
-    systemoneModel: typeof tj.systemoneModel === 'string' && tj.systemoneModel ? tj.systemoneModel : 'jev-latest',
-    timeoutMs: Math.min(10000, Math.max(200, Number(tj.timeoutMs) || 5000)),
+  delete c.chat.autoThinking
+  delete c.chat.thinkingJudge
+  const at = isPlainObject(c.autoThinking) ? c.autoThinking : {}
+  const seen = new Set<string>()
+  const categories = asArray<any>(at.categories)
+    .filter(k => isPlainObject(k) && CATEGORY.test(String(k.name ?? '')) && !seen.has(String(k.name)) && seen.add(String(k.name)))
+    .map(k => ({ name: String(k.name), description: String(k.description ?? '').trim() }))
+  c.autoThinking = {
+    judge: typeof at.judge === 'string' ? at.judge : '',
+    timeoutMs: Math.min(10000, Math.max(200, Number(at.timeoutMs) || 5000)),
+    context: Math.min(30, Math.max(0, Math.floor(Number(at.context ?? 6) || 0))),
+    levels: levelMap(at.levels),
+    categories: categories.length ? categories
+      : [{ name: 'casual', description: '闲聊、寒暄、简单请求' }, { name: 'question', description: '一两步就能回答的问题' }, { name: 'complex', description: '需要多步推理、计算、写代码或查资料' }],
   }
+  c.proactive = normalizeProactive(isPlainObject(c.proactive) ? c.proactive : {})
   c.sticker = isPlainObject(c.sticker) ? c.sticker : {}
   c.tools = isPlainObject(c.tools) ? c.tools : {}
   // read_image became read_file; an older tools.readImage limit still applies until the file is saved again
@@ -422,15 +500,9 @@ export function normalize(raw: any): PluginConfig {
     recallLimit: Math.min(100, Math.max(1, Math.floor(Number(m.recallLimit) || 5))),
     embedding: (() => {
       const em = isPlainObject(m.embedding) ? m.embedding : {}
-      const type = em.type === 'openai' ? 'openai' : 'voyage'
       return {
         enable: em.enable === true,
-        type,
-        baseUrl: String(em.baseUrl || (type === 'voyage' ? 'https://api.voyageai.com/v1' : 'https://api.openai.com/v1')),
-        apiKey: em.apiKey,
-        model: String(em.model || (type === 'voyage' ? 'voyage-4-lite' : 'text-embedding-3-small')),
-        dimensions: Math.floor(n(em.dimensions, 512)),
-        timeout: n(em.timeout, 10),
+        model: typeof em.model === 'string' ? em.model : '',
         minScore: Number.isFinite(Number(em.minScore)) ? Number(em.minScore) : 0.5,
       }
     })(),

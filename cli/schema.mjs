@@ -9,18 +9,56 @@
  * `values` / `suggest` may be functions of the effective config (provider names, model ids, ...).
  */
 
-export const PROVIDER_TYPES = ['openai', 'openai-responses', 'anthropic', 'gemini']
+/** Provider types that serve chat models (src/llm adapters). */
+export const CHAT_PROVIDER_TYPES = ['openai', 'openai-responses', 'anthropic', 'gemini']
+/** Provider types that serve embedding models: Voyage, or any OpenAI-compatible /embeddings endpoint. */
+export const EMBEDDING_PROVIDER_TYPES = ['voyage', 'openai', 'openai-responses']
+/** Every provider type: chat, embedding (voyage) and TypeSafe System One classifiers (Jev, self-hosted Kev). */
+export const PROVIDER_TYPES = [...CHAT_PROVIDER_TYPES, 'voyage', 'systemone']
 export const THINKING = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']
 export const THINKING_SETTING = [...THINKING, 'auto']
 /** model alias ids: any letters (incl. Chinese), digits, . _ -; no spaces, since commands split on whitespace */
 export const MODEL_ID = /^[\p{L}\p{N}_.-]+$/u
+/** auto-thinking category names: the judge model answers with one of them */
+export const CATEGORY_NAME = /^[\p{L}\p{N}_-]{1,32}$/u
 
-/** Official model ids per provider (checked 2026-10). Suggestions only; any id can be typed. */
+/** Official model ids per provider family (checked 2026-10-29). Suggestions only; any id can be typed. */
 export const KNOWN_MODELS = {
-  anthropic: ['claude-sonnet-5-5', 'claude-haiku-5-5', 'claude-opus-5-5', 'claude-fable-5-1'],
-  openai: ['gpt-6.1-sol', 'gpt-6-luna', 'gpt-6-astra'],
-  gemini: ['gemini-4-argon', 'gemini-3.8-flash', 'gemini-3.5-flash-lite', 'gemini-3.1-pro-preview', 'gemini-3.1-flash-lite'],
+  anthropic: ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5', 'claude-fable-5-1'],
+  openai: ['gpt-6.1-sol', 'gpt-6.1-terra', 'gpt-6-luna', 'gpt-6-astra'],
+  gemini: ['gemini-4-argon', 'gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-3.1-pro-preview', 'gemini-3.1-flash-lite'],
   deepseek: ['deepseek-flash', 'deepseek-v4-pro'],
+}
+export const KNOWN_EMBEDDING_MODELS = {
+  voyage: ['voyage-context-4', 'voyage-4-large', 'voyage-4', 'voyage-4-lite'],
+  openai: ['text-embedding-3-small', 'text-embedding-3-large'],
+}
+export const KNOWN_SYSTEMONE_MODELS = ['jev-latest']
+
+/**
+ * Capabilities a new model entry starts with, by upstream model name. DeepSeek (2026-10, Responses API):
+ * deepseek-flash takes images and tools but ignores the built-in web_search tool; deepseek-v4-pro searches but has
+ * no image input.
+ */
+export function modelDefaults(model) {
+  const m = String(model ?? '')
+  if (/^deepseek-v4-pro/i.test(m)) return { vision: false, toolUse: true, nativeSearch: true }
+  if (/^deepseek/i.test(m)) return { vision: true, toolUse: true, nativeSearch: false }
+  return { vision: true, toolUse: true, nativeSearch: true }
+}
+
+/**
+ * How each requested thinking level is actually sent to a provider (mirrors src/llm/common.ts); levels that map
+ * to the same effort behave identically there. DeepSeek: low / high / max (off = effort none).
+ */
+export function effectiveThinking(provider) {
+  const same = Object.fromEntries(THINKING.map(t => [t, t]))
+  if (!provider) return same
+  if (/deepseek\.com/.test(String(provider.baseUrl ?? ''))) return { ...same, minimal: 'low', medium: 'high', xhigh: 'high' }
+  if (provider.type === 'gemini') return { ...same, minimal: 'low', xhigh: 'high', max: 'high' }
+  if (provider.type === 'anthropic') return { ...same, minimal: 'low' }
+  if (provider.type === 'openai' || provider.type === 'openai-responses') return { ...same, max: 'xhigh' }
+  return same
 }
 
 /** Providers offered when adding one: [name, type, baseUrl]. */
@@ -28,29 +66,90 @@ export const PRESET_PROVIDERS = [
   ['Anthropic', 'anthropic', 'https://api.anthropic.com'],
   ['OpenAI', 'openai-responses', 'https://api.openai.com/v1'],
   ['Google Gemini', 'gemini', 'https://generativelanguage.googleapis.com'],
-  ['DeepSeek', 'openai', 'https://api.deepseek.com'],
+  ['DeepSeek', 'openai-responses', 'https://api.deepseek.com'],
   ['OpenRouter', 'openai', 'https://openrouter.ai/api/v1'],
   ['通义千问 (DashScope)', 'openai', 'https://dashscope.aliyuncs.com/compatible-mode/v1'],
   ['Moonshot / Kimi', 'openai', 'https://api.moonshot.cn/v1'],
   ['智谱 GLM', 'openai', 'https://open.bigmodel.cn/api/paas/v4'],
   ['SiliconFlow', 'openai', 'https://api.siliconflow.cn/v1'],
   ['Ollama (本地)', 'openai', 'http://127.0.0.1:11434/v1'],
+  ['Voyage AI（向量）', 'voyage', 'https://api.voyageai.com/v1'],
+  ['TypeSafe Jev（System One）', 'systemone', 'https://api.typesafe.ai/v1'],
+  ['Kev 自建（System One）', 'systemone', 'http://127.0.0.1:8009/v1'],
 ]
+
+const hasKey = p => (Array.isArray(p?.apiKey) ? p.apiKey.length > 0 : Boolean(p?.apiKey))
+const isKeyless = p => p?.type === 'systemone' && !/typesafe\.ai/i.test(String(p.baseUrl ?? ''))
 
 /** Problems that leave the config loadable but models unusable (CLI `check`, web config page). */
 export function configProblems(c) {
   const problems = []
   const providers = c.providers ?? {}
   const models = c.models ?? []
-  const hasKey = p => (Array.isArray(p?.apiKey) ? p.apiKey.length > 0 : Boolean(p?.apiKey))
-  for (const m of models) if (!providers[m.provider]) problems.push(`模型 ${m.id} 的提供商 ${m.provider} 不存在`)
+  const kindOf = (list, types, label) => {
+    for (const m of list) {
+      const p = providers[m.provider]
+      if (!p) problems.push(`${label} ${m.id} 的提供商 ${m.provider} 不存在`)
+      else if (!types.includes(p.type)) problems.push(`${label} ${m.id} 的提供商 ${m.provider}（${p.type}）不能提供${label}`)
+    }
+  }
+  kindOf(models, CHAT_PROVIDER_TYPES, '聊天模型')
+  kindOf(c.embeddingModels ?? [], EMBEDDING_PROVIDER_TYPES, '向量模型')
+  kindOf(c.systemoneModels ?? [], ['systemone'], 'System One 模型')
   for (const id of [...new Set([c.defaultModel, ...(c.fallbackModels ?? [])].filter(Boolean))]) {
     const m = models.find(x => x.id === id)
     if (!m) problems.push(`模型 ${id}（默认/备用）不存在`)
     else if (providers[m.provider] && !hasKey(providers[m.provider])) problems.push(`模型 ${id}（默认/备用）的提供商 ${m.provider} 未配置 Key，将被跳过`)
   }
   if (!models.some(m => hasKey(providers[m.provider]))) problems.push('没有任何可用模型（至少给一个提供商设置 Key）')
+  const ids = [...models, ...(c.embeddingModels ?? []), ...(c.systemoneModels ?? [])].map(m => m.id)
+  for (const id of new Set(ids.filter((id, i) => ids.indexOf(id) !== i))) problems.push(`模型别名 ${id} 在聊天 / 向量 / System One 模型中重复`)
+  const em = c.memory?.embedding
+  if (em?.enable && c.memory?.enable !== false) {
+    const m = (c.embeddingModels ?? []).find(x => x.id === em.model)
+    if (!em.model) problems.push('已启用向量检索，但没有选择向量模型（memory.embedding.model）')
+    else if (!m) problems.push(`向量模型 ${em.model} 不存在`)
+  }
+  for (const [label, id] of [['自动思考判断模型', c.autoThinking?.judge], ['主动发言判断模型', c.proactive?.judge]]) {
+    if (!id || (id === 'always' && label === '主动发言判断模型')) continue
+    const so = (c.systemoneModels ?? []).find(x => x.id === id)
+    if (!so && !models.some(x => x.id === id)) problems.push(`${label} ${id} 不存在`)
+    else if (so && providers[so.provider] && !hasKey(providers[so.provider]) && !isKeyless(providers[so.provider]))
+      problems.push(`${label} ${id} 的提供商 ${so.provider} 未配置 Key`)
+  }
+  if (!(c.autoThinking?.categories ?? []).length) problems.push('自动思考强度没有任何消息类别')
   return problems
+}
+
+/**
+ * Not errors, but settings that probably don't do what was meant: background roles (utility, vision, sticker
+ * indexing) on a model whose thinking is `auto` run at the level of its first auto-thinking category.
+ * Each notice names the config paths it is shown beside ({ paths, text }): the setting and the model it concerns.
+ */
+export function configNotices(c) {
+  const notices = []
+  const models = c.models ?? []
+  const first = c.autoThinking?.categories?.[0]?.name
+  const defaultId = c.defaultModel || models.find(m => hasKey(c.providers?.[m.provider]))?.id || models[0]?.id
+  const roles = [
+    ['后台任务模型（utilityModel）', c.utilityModel || defaultId, !c.utilityModel, 'utilityModel'],
+    ['识图模型（visionModel）', c.visionModel, false, 'visionModel'],
+    ['表情识别模型（sticker.indexModel）', c.sticker?.indexModel, false, 'sticker.indexModel'],
+  ]
+  for (const [label, id, implicit, path] of roles) {
+    const i = id ? models.findIndex(x => x.id === id) : -1
+    const m = models[i]
+    if (!m || (m.thinking ?? c.chat?.thinking) !== 'auto') continue
+    const level = m.autoThinking?.[first] ?? c.autoThinking?.levels?.[first] ?? 'low'
+    notices.push({ paths: [path, `models.${i}`], text: `${label}${implicit ? '未设置，使用默认模型' : ''} ${m.id} 的思考强度为 auto；后台调用不做消息判断，固定使用第一个类别「${first}」的强度 ${level}。` +
+      `如需其它强度，可另外添加一个固定思考强度的模型（可以是同一个上游模型 ${m.model}）专门用于这个角色。` })
+  }
+  const em = c.memory?.embedding
+  const j = em?.enable && c.memory?.enable !== false ? (c.embeddingModels ?? []).findIndex(x => x.id === em.model) : -1
+  const vec = c.embeddingModels?.[j]
+  if (vec && c.providers?.[vec.provider] && !hasKey(c.providers[vec.provider]))
+    notices.push({ paths: ['memory.embedding.model', `embeddingModels.${j}`, `providers.${vec.provider}`], text: `向量模型 ${vec.id} 的提供商 ${vec.provider} 还没有设置 Key，旧聊天暂时只用关键词检索` })
+  return notices
 }
 
 /** Model suggestions for a provider entry, based on its type / base URL. */
@@ -59,8 +158,15 @@ export function modelSuggestions(provider) {
   const url = String(provider.baseUrl ?? '')
   if (provider.type === 'anthropic') return KNOWN_MODELS.anthropic
   if (provider.type === 'gemini') return KNOWN_MODELS.gemini
+  if (provider.type === 'voyage' || provider.type === 'systemone') return []
   if (/deepseek\.com/.test(url)) return KNOWN_MODELS.deepseek
   if (!url || /api\.openai\.com/.test(url)) return KNOWN_MODELS.openai
+  return []
+}
+
+export function embeddingSuggestions(provider) {
+  if (provider?.type === 'voyage') return KNOWN_EMBEDDING_MODELS.voyage
+  if (provider && /api\.openai\.com/.test(String(provider.baseUrl ?? 'https://api.openai.com/v1'))) return KNOWN_EMBEDDING_MODELS.openai
   return []
 }
 
@@ -78,8 +184,11 @@ const obj = (fields, label, o = {}) => ({ t: 'obj', fields, label, ...o })
 const map = (value, label, o = {}) => ({ t: 'map', value, label, ...o })
 const arr = (item, label, o = {}) => ({ t: 'arr', item, label, ...o })
 
-const providerNames = c => Object.keys(c.providers ?? {})
+const providersOf = types => c => Object.entries(c.providers ?? {}).filter(([, p]) => types.includes(p?.type)).map(([name]) => name)
 const modelIds = c => (c.models ?? []).map(m => m.id).filter(Boolean)
+const embeddingIds = c => (c.embeddingModels ?? []).map(m => m.id).filter(Boolean)
+/** a judge is a chat model (asked for a label) or a System One classifier */
+const judgeIds = c => [...new Set([...(c.systemoneModels ?? []).map(m => m.id), ...modelIds(c)].filter(Boolean))]
 const presetNames = c => Object.keys(c.persona?.presets ?? {})
 const toolNames = c => [
   ...new Set(['web_search', 'web_fetch', 'run_bot_command', 'search_bot_commands', 'list_bot_commands', 'load_skill', 'memory', 'add_sticker', 'list_stickers', 'render_html', 'run_code', 'computer_task', 'agy', 'google_lens', ...(c.tools?.http ?? []).map(h => h.name).filter(Boolean), ...(c.tools?.disabled ?? [])]),
@@ -101,17 +210,21 @@ const provider = obj(
     cacheTtl: oneOf(['5m', '1h'], '提示缓存时长', { when: p => p.type === 'anthropic' }),
     serverState: bool('服务端会话状态', { when: p => p.type === 'gemini' || p.type === 'openai-responses' }),
     store: bool('服务端保存对话', { when: p => p.type === 'gemini' || p.type === 'openai-responses' }),
-    balance: oneOf(['none', 'deepseek', 'openrouter', 'moonshot', 'siliconflow'], '余额查询接口'),
+    balance: oneOf(['none', 'deepseek', 'openrouter', 'moonshot', 'siliconflow'], '余额查询接口', { when: p => CHAT_PROVIDER_TYPES.includes(p.type) }),
   },
   '提供商',
 )
 
+/** category -> thinking level; keys are autoThinking.categories names (unknown keys are kept but unused) */
+const levels = label => ({ t: 'levels', label })
+
 const model = obj(
   {
     id: str('别名 id（可用中文）', { required: true, pattern: MODEL_ID }),
-    provider: oneOf(providerNames, '提供商', { required: true }),
+    provider: oneOf(providersOf(CHAT_PROVIDER_TYPES), '提供商', { required: true }),
     model: str('上游模型名', { required: true, suggest: (c, item) => modelSuggestions(c.providers?.[item?.provider]) }),
     thinking: oneOf(THINKING_SETTING, '思考强度', { allowEmpty: true }),
+    autoThinking: levels('auto 时各类消息的思考强度（留空用 autoThinking.levels）'),
     vision: bool('支持图片输入'),
     toolUse: bool('支持工具调用'),
     nativeSearch: bool('使用模型自带搜索'),
@@ -137,6 +250,57 @@ const model = obj(
   '模型',
 )
 
+const embeddingModel = obj(
+  {
+    id: str('别名 id', { required: true, pattern: MODEL_ID }),
+    provider: oneOf(providersOf(EMBEDDING_PROVIDER_TYPES), '提供商（voyage 或 OpenAI 兼容）', { required: true }),
+    model: str('上游模型名', { required: true, suggest: (c, item) => embeddingSuggestions(c.providers?.[item?.provider]) }),
+    dimensions: int('向量维度（改动后旧向量自动重建）', { min: 64, max: 4096 }),
+  },
+  '向量模型',
+)
+
+const systemoneModel = obj(
+  {
+    id: str('别名 id', { required: true, pattern: MODEL_ID }),
+    provider: oneOf(providersOf(['systemone']), '提供商（systemone）', { required: true }),
+    model: str('上游模型名', { required: true, suggest: () => KNOWN_SYSTEMONE_MODELS }),
+  },
+  'System One 模型',
+)
+
+const autoThinking = obj(
+  {
+    judge: oneOf(judgeIds, '判断模型（聊天模型或 System One 模型；空=后台任务模型→默认模型）', { allowEmpty: true }),
+    timeoutMs: int('超时（毫秒，超时或出错使用第一个类别）', { min: 200, max: 10000 }),
+    context: int('附带最近消息条数（判断模型只评估最后一条）', { min: 0, max: 30 }),
+    levels: levels('各类消息的默认思考强度（每个模型可单独覆盖）'),
+    categories: arr(
+      obj({ name: str('类别名（判断模型输出它）', { required: true, pattern: CATEGORY_NAME }), description: text('描述（给判断模型看）') }, '消息类别'),
+      '消息类别（第一个也是出错时的后备类别）',
+      { itemLabel: k => k.name, create: ['name', 'description'] },
+    ),
+  },
+  '自动思考强度',
+)
+
+const proactiveFields = {
+  probability: num('第 1 层：每条消息被抽中的概率（抽中后还要通过判断模型）', { min: 0, max: 1 }),
+  window: int('判断间隔（秒）：窗口内有消息被抽中时，结束时判断一次', { min: 5, max: 3600 }),
+  judge: oneOf(c => ['always', ...judgeIds(c)], '判断模型（always=不判断，抽中即回复；空=自动思考判断模型→后台任务模型）', { allowEmpty: true }),
+  context: int('附带最近群聊条数', { min: 1, max: 50 }),
+  criteria: obj({ reply: text('适合插话的情况'), skip: text('不该插话的情况') }, '判断标准（给判断模型看）'),
+  threshold: obj(
+    {
+      start: num('机器人刚回复过时的阈值', { min: 0, max: 1 }),
+      end: num('机器人很久没回复时的阈值', { min: 0, max: 1 }),
+      halfLife: int('半衰期（秒）', { min: 1, max: 86400 }),
+    },
+    '回复阈值曲线（随距机器人自己上次回复的时间衰减）',
+  ),
+}
+const proactive = obj(proactiveFields, '主动发言')
+
 const chat = obj(
   {
     sessionScope: oneOf(['user', 'group'], '记忆范围'),
@@ -154,21 +318,6 @@ const chat = obj(
     maxOutputTokens: int('最大输出 token', { min: 64 }),
     temperature: num('温度', { min: 0, max: 2, nullable: true }),
     thinking: oneOf(THINKING_SETTING, '默认思考强度'),
-    autoThinking: obj(
-      { casual: oneOf(THINKING, '闲聊'), question: oneOf(THINKING, '普通提问'), complex: oneOf(THINKING, '复杂问题') },
-      'auto 模式的思考强度',
-    ),
-    thinkingJudge: obj(
-      {
-        mode: oneOf(['heuristic', 'model', 'systemone'], '判断方式（heuristic=关键词 / model=小模型 / systemone=Jev 或 Kev）'),
-        model: str('判断用的模型 id（空=utilityModel→默认模型）', { suggest: c => (c.models ?? []).map(m => m.id) }),
-        url: str('System One 接口地址', { pattern: /^https?:\/\/\S+$/ }),
-        apiKey: secret('System One API Key'),
-        systemoneModel: str('System One 模型名'),
-        timeoutMs: int('超时（毫秒，超时退回关键词规则）', { min: 200, max: 10000 }),
-      },
-      'auto 模式的消息判断',
-    ),
     includeImages: bool('识别图片'),
     maxImages: int('每次最多图片数', { min: 0, max: 5 }),
     includeQuoted: bool('读取引用的消息'),
@@ -349,13 +498,8 @@ const memory = obj(
     recallLimit: int('每次检索旧聊天最多返回几条', { min: 1, max: 100 }),
     embedding: obj(
       {
-        enable: bool('旧聊天向量检索（需 API Key）'),
-        type: oneOf(['voyage', 'openai'], '接口类型'),
-        baseUrl: str('接口地址', { pattern: /^https?:\/\/\S+$/ }),
-        apiKey: secret('API Key（env:变量名 读取环境变量）'),
-        model: str('向量模型'),
-        dimensions: int('向量维度', { min: 64, max: 4096 }),
-        timeout: int('超时（秒）', { min: 1, max: 120 }),
+        enable: bool('旧聊天向量检索（需向量模型及其提供商 Key）'),
+        model: oneOf(embeddingIds, '向量模型（在「模型」中管理）', { allowEmpty: true }),
         minScore: num('相似度阈值', { min: 0, max: 1 }),
       },
       '向量检索',
@@ -373,6 +517,7 @@ const groupOverride = obj(
     chat: { ...chat, label: '对话（覆盖）' },
     reply: { ...reply, label: '回复（覆盖）' },
     sticker: { ...sticker, label: '表情包（覆盖）' },
+    proactive: obj({ enable: bool('在本群启用主动发言'), ...proactiveFields }, '主动发言（本群）'),
     names: map(str('称呼'), '本群称呼（覆盖全局称呼）', { keyLabel: '平台ID', keyPattern: /^[\w-]{1,64}$/ }),
   },
   '群设置',
@@ -383,7 +528,9 @@ export const SCHEMA = obj(
     enable: bool('总开关'),
     admins: list('插件管理员 QQ'),
     providers: map(provider, '提供商', { keyLabel: '提供商名称（英文）', keyPattern: /^[\w-]+$/ }),
-    models: arr(model, '模型', { itemLabel: m => `${m.id}  ${m.provider}/${m.model}`, create: ['provider', 'model', 'id'] }),
+    models: arr(model, '聊天模型', { itemLabel: m => `${m.id}  ${m.provider}/${m.model}`, create: ['provider', 'model', 'id'] }),
+    embeddingModels: arr(embeddingModel, '向量模型', { itemLabel: m => `${m.id}  ${m.provider}/${m.model}`, create: ['provider', 'model', 'id'] }),
+    systemoneModels: arr(systemoneModel, 'System One 模型', { itemLabel: m => `${m.id}  ${m.provider}/${m.model}`, create: ['provider', 'model', 'id'] }),
     defaultModel: oneOf(modelIds, '默认模型', { allowEmpty: true }),
     fallbackModels: multi(modelIds, '备用模型', { ordered: true }),
     utilityModel: oneOf(modelIds, '后台任务模型', { allowEmpty: true }),
@@ -401,7 +548,6 @@ export const SCHEMA = obj(
         alias: bool('Yunzai 别名前缀触发'),
         prefixes: list('额外触发前缀'),
         private: oneOf(['off', 'master', 'all'], '私聊'),
-        emptyAtReply: bool('只@时回一句'),
         groupWhitelist: list('群白名单'),
         groupBlacklist: list('群黑名单'),
         userBlacklist: list('用户黑名单'),
@@ -411,6 +557,8 @@ export const SCHEMA = obj(
       '触发方式',
     ),
     chat,
+    autoThinking,
+    proactive,
     quota: obj(
       { defaultScope: oneOf(['user', 'group', 'global'], '简写额度的默认范围'), exemptAdmins: bool('管理员不受个人/群额度限制'), notifyCooldown: int('额度提示冷却（秒）', { min: 0 }) },
       '额度',
@@ -448,6 +596,7 @@ export const PRICING_FIELDS = obj(
 )
 
 const isObj = v => v && typeof v === 'object' && !Array.isArray(v)
+const LEVEL = oneOf(THINKING, '思考强度')
 
 /** Schema node for a key path, or undefined if the path isn't a valid config key. */
 export function schemaAt(keys) {
@@ -458,6 +607,7 @@ export function schemaAt(keys) {
     else if (node.t === 'map') node = node.value
     else if (node.t === 'arr') node = typeof k === 'number' || /^\d+$/.test(String(k)) ? node.item : undefined
     else if (node.t === 'pricing') node = PRICING_FIELDS.fields[k]
+    else if (node.t === 'levels') node = CATEGORY_NAME.test(String(k)) ? LEVEL : undefined
     else return undefined
   }
   return node
@@ -467,6 +617,7 @@ export function schemaAt(keys) {
 export const RETIRED_PATHS = [
   ['tools', 'agy', 'distro'], // AGY runs on the host since it stopped using the WSL sandbox
   ['tools', 'readImage'], // renamed to tools.readFile with the read_file tool; config.ts carries the old value over
+  ['trigger', 'emptyAtReply'], // an empty @ now goes to the model (it may ask the bot to answer an earlier message)
 ]
 
 /** Remove retired settings from a YAML document in place. Returns the dotted paths that were removed. */
@@ -527,6 +678,14 @@ export function validate(node, v, cfg, ctx) {
       if (v === 'auto') return undefined
       if (!isObj(v)) return '应为 auto 或价格对象'
       return validate(PRICING_FIELDS, v, cfg, ctx)
+    case 'levels': {
+      if (!isObj(v)) return '应为 类别: 思考强度 的对象'
+      for (const [k, x] of Object.entries(v)) {
+        if (!CATEGORY_NAME.test(k)) return `类别名格式不正确：${k}`
+        if (!THINKING.includes(x)) return `${k}: 可选值：${THINKING.join(' / ')}`
+      }
+      return undefined
+    }
     case 'obj': {
       if (!isObj(v)) return '应为对象'
       for (const [k, x] of Object.entries(v)) {

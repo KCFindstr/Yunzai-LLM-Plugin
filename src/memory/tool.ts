@@ -47,7 +47,7 @@ export function registerMemoryTool() {
     parameters: {
       type: 'object',
       properties: {
-        query: { type: 'string', description: '要找的事、话题或旧对话的简短描述，尽量带上可能出现的人名、游戏名等关键词，如「阿明 周六 看猫的约定」；只按日期查时可留空' },
+        query: { type: 'string', description: '要找的事、话题或旧对话的简短描述，尽量带上可能出现的人名、游戏名等关键词，如「岛风 周六 看猫的约定」；只按日期查时可留空' },
         date: { type: 'string', description: '只看某一天：YYYY-MM-DD，或「昨天」「上周六」「10月20日」这类说法' },
         from: { type: 'string', description: '日期范围起点 YYYY-MM-DD（含）' },
         to: { type: 'string', description: '日期范围终点 YYYY-MM-DD（含）' },

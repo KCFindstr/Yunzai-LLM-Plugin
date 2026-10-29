@@ -207,41 +207,93 @@ export function setupWizard(initialData, onChange) {
       }, '保存预算')]
   }
 
+  /** A provider of one of `types` at `baseUrl`, or a new one named after `base`: [name, changes]. */
+  function providerFor(types, type, baseUrl, base) {
+    const providers = data.effective.providers ?? {}
+    const same = (a, b) => String(a ?? '').replace(/\/+$/, '').toLowerCase() === String(b ?? '').replace(/\/+$/, '').toLowerCase()
+    const hit = Object.entries(providers).find(([, p]) => types.includes(p.type) && same(p.baseUrl, baseUrl))
+    if (hit) return [hit[0], []]
+    let name = base, n = 2
+    while (name in providers) name = `${base}${n++}`
+    return [name, [change(`providers.${name}`, { type, baseUrl })]]
+  }
+  /** Index of the `list` entry for provider/model (appended when missing) and its id: [index, id, changes]. */
+  function modelEntry(list, entry, base) {
+    const c = data.effective, items = c[list] ?? []
+    const index = items.findIndex(m => m.provider === entry.provider && m.model === entry.model)
+    if (index >= 0) return [index, items[index].id, [change(`${list}.${index}`, { ...items[index], ...entry })]]
+    const ids = ['models', 'embeddingModels', 'systemoneModels'].flatMap(k => (c[k] ?? []).map(m => m.id))
+    let id = String(base).replace(/^.*\//, '').replace(/[^\p{L}\p{N}_.-]+/gu, '-') || 'model', n = 2
+    while (ids.includes(id)) id = `${base}-${n++}`
+    return [items.length, id, [change(`${list}.${items.length}`, { id, ...entry })]]
+  }
+
+  /** Model-name dropdown (known names, plus the provider's own list once it exists), with free input. */
+  const modelField = (label, list, value) => {
+    const control = combo(list, value, { placeholder: '填写上游模型名称' })
+    return { control, view: h('label', { class: 'setup-field' }, h('span', label), control) }
+  }
+  const liveNames = (provider, kind, control) => provider && get(`/api/providers/${encodeURIComponent(provider)}/models?kind=${kind}`)
+    .then(r => { const v = control.value; control.setOptions(r.models); control.value = v }).catch(() => {})
+  const sameUrl = (a, b) => String(a ?? '').replace(/\/+$/, '').toLowerCase() === String(b ?? '').replace(/\/+$/, '').toLowerCase()
+
   function embeddingStep() {
-    const c = data.effective.memory.embedding
-    const type = field('接口类型', c.type, { options: [['voyage', 'Voyage'], ['openai', 'OpenAI 兼容']] })
-    const url = field('接口地址', c.baseUrl, { type: 'url', required: true })
-    const model = field('向量模型', c.model, { required: true })
-    const dimensions = field('向量维度', c.dimensions, { type: 'number', min: 64, max: 4096, required: true })
-    const key = secret('向量 API Key', c.apiKey)
-    key.control.required = !c.apiKey?.set
-    return [h('p', { class: 'muted' }, '用于语义检索旧聊天。向量模型与维度需要匹配；可跳过，稍后配置。'), form(
+    const c = data.effective, em = c.memory.embedding
+    const current = (c.embeddingModels ?? []).find(m => m.id === em.model)
+    const cp = current ? c.providers[current.provider] : c.providers.voyage
+    const type = field('接口类型', cp?.type === 'voyage' || !cp ? 'voyage' : 'openai', { options: [['voyage', 'Voyage'], ['openai', 'OpenAI 兼容']] })
+    const url = field('接口地址', cp?.baseUrl ?? 'https://api.voyageai.com/v1', { type: 'url', required: true })
+    const known = t => data.knownEmbeddingModels?.[t === 'voyage' ? 'voyage' : 'openai'] ?? []
+    const model = modelField('向量模型', known(type.control.value), current?.model ?? 'voyage-context-4')
+    const refresh = () => {
+      const t = type.control.value
+      model.control.setOptions(known(t))
+      const types = t === 'voyage' ? ['voyage'] : ['openai', 'openai-responses']
+      const existing = Object.entries(c.providers ?? {}).find(([, p]) => types.includes(p.type) && sameUrl(p.baseUrl, url.control.value.trim()))?.[0]
+      liveNames(existing, 'embedding', model.control)
+    }
+    type.control.addEventListener('change', () => {
+      if (!url.control.value || /voyageai\.com|api\.openai\.com/.test(url.control.value)) url.control.value = type.control.value === 'voyage' ? 'https://api.voyageai.com/v1' : 'https://api.openai.com/v1'
+      refresh()
+    })
+    url.control.addEventListener('change', refresh)
+    refresh()
+    const dimensions = field('向量维度', current?.dimensions ?? 512, { type: 'number', min: 64, max: 4096, required: true })
+    const key = secret('向量 API Key', cp?.apiKey)
+    key.control.required = !cp?.apiKey?.set
+    return [h('p', { class: 'muted' }, '用于语义检索旧聊天。向量模型与维度需要匹配；可跳过，稍后在「配置 → 模型 / 提供商」调整。'), form(
       grid(type.view, url.view, model.view, dimensions.view, key.view), async () => {
-        const changes = [change('memory.enable', true), change('memory.embedding.enable', true), change('memory.embedding.type', type.control.value),
-          change('memory.embedding.baseUrl', url.control.value.trim()), change('memory.embedding.model', model.control.value.trim()), change('memory.embedding.dimensions', Number(dimensions.control.value))]
-        if (key.control.value.trim()) changes.push(change('memory.embedding.apiKey', keyValue(key.control.value.trim())))
-        await save(changes)
+        const t = type.control.value
+        const [provider, changes] = providerFor(t === 'voyage' ? ['voyage'] : ['openai', 'openai-responses'], t, url.control.value.trim(), t === 'voyage' ? 'voyage' : 'embedding')
+        if (key.control.value.trim()) changes.push(change(`providers.${provider}.apiKey`, keyValue(key.control.value.trim())))
+        const [, id, entry] = modelEntry('embeddingModels', { provider, model: model.control.value.trim(), dimensions: Number(dimensions.control.value) }, model.control.value.trim())
+        await save([...changes, ...entry, change('memory.enable', true), change('memory.embedding.enable', true), change('memory.embedding.model', id)])
       }, '保存并启用向量检索')]
   }
 
   function jevStep() {
-    const c = data.effective.chat.thinkingJudge
-    const mode = field('判断方式', c.mode, { options: [['systemone', 'Jev / System One'], ['model', '聊天小模型'], ['heuristic', '关键词规则（无需接口）']] })
-    const url = field('System One 接口地址', c.url, { type: 'url', required: true })
-    const model = field('System One 模型', c.systemoneModel, { required: true })
-    const key = secret('System One API Key', c.apiKey)
-    const judgeModel = field('判断用的聊天模型', c.model || '', { options: [['', '辅助模型 / 默认模型'], ...data.effective.models.map(m => [m.id, m.id])] })
+    const c = data.effective, at = c.autoThinking
+    const so = (c.systemoneModels ?? []).find(m => m.id === at.judge)
+    const sop = so ? c.providers[so.provider] : c.providers.typesafe
+    const mode = field('判断方式', so || !at.judge ? 'systemone' : 'model', { options: [['systemone', 'Jev / System One'], ['model', '聊天小模型']] })
+    const url = field('System One 接口地址', sop?.baseUrl ?? 'https://api.typesafe.ai/v1', { type: 'url', required: true })
+    const model = modelField('System One 模型', data.knownSystemoneModels ?? ['jev-latest'], so?.model ?? 'jev-latest')
+    const key = secret('System One API Key', sop?.apiKey)
+    const judgeModel = field('判断用的聊天模型', so ? '' : at.judge || '', { options: [['', '后台任务模型 / 默认模型'], ...c.models.map(m => [m.id, m.id])] })
     const systemFields = h('fieldset', { class: 'setup-provider' }, grid(url.view, model.view, key.view))
     const sync = () => { systemFields.hidden = mode.control.value !== 'systemone'; systemFields.disabled = systemFields.hidden; judgeModel.view.hidden = mode.control.value !== 'model' }
     mode.control.addEventListener('change', sync); sync()
-    return [h('p', { class: 'muted' }, '按消息复杂度自动选择思考强度。保存后会为默认聊天模型启用自动思考；也可以使用无需 Key 的关键词规则。'),
+    return [h('p', { class: 'muted' }, '按消息类别自动选择思考强度（类别和各模型的强度在「配置 → 自动思考强度」与「模型」里调整）。保存后会为默认聊天模型启用自动思考。'),
       form([mode.view, systemFields, judgeModel.view], async () => {
-        const changes = [change('chat.thinking', 'auto'), change('chat.thinkingJudge.mode', mode.control.value)]
+        const changes = [change('chat.thinking', 'auto')]
         if (mode.control.value === 'systemone') {
-          changes.push(change('chat.thinkingJudge.url', url.control.value.trim()), change('chat.thinkingJudge.systemoneModel', model.control.value.trim()))
-          if (key.control.value.trim()) changes.push(change('chat.thinkingJudge.apiKey', keyValue(key.control.value.trim())))
-        } else if (mode.control.value === 'model') changes.push(change('chat.thinkingJudge.model', judgeModel.control.value))
-        const index = data.effective.models.findIndex(m => m.id === (status?.models.modelId || data.effective.defaultModel))
+          const [provider, providerChanges] = providerFor(['systemone'], 'systemone', url.control.value.trim().replace(/\/systemone\/?$/i, ''), /typesafe\.ai/i.test(url.control.value) ? 'typesafe' : 'systemone')
+          changes.push(...providerChanges)
+          if (key.control.value.trim()) changes.push(change(`providers.${provider}.apiKey`, keyValue(key.control.value.trim())))
+          const [, id, entry] = modelEntry('systemoneModels', { provider, model: model.control.value.trim() }, /typesafe\.ai/i.test(url.control.value) ? 'jev' : 'kev')
+          changes.push(...entry, change('autoThinking.judge', id))
+        } else changes.push(change('autoThinking.judge', judgeModel.control.value))
+        const index = c.models.findIndex(m => m.id === (status?.models.modelId || c.defaultModel))
         if (index >= 0) changes.push(change(`models.${index}.thinking`, 'auto'))
         await save(changes)
       }, '保存并启用自动思考')]

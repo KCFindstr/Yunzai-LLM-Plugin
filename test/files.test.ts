@@ -21,7 +21,7 @@ it('recognises video, audio, PDF and text by content, and refuses formats no mod
   assert.equal(detectFileMime(pdf), 'application/pdf')
   assert.equal(detectFileMime(Buffer.concat([Buffer.from('RIFF\0\0\0\0WAVEfmt '), Buffer.alloc(8)])), 'audio/wav')
   assert.equal(detectFileMime(Buffer.concat([Buffer.from('ID3'), Buffer.alloc(16, 1)])), 'audio/mpeg')
-  assert.equal(detectFileMime(Buffer.from('名字,分数\n小明,90\n'), 'scores.csv'), 'text/csv')
+  assert.equal(detectFileMime(Buffer.from('名字,分数\n岛风,90\n'), 'scores.csv'), 'text/csv')
   assert.equal(detectFileMime(Buffer.from('plain words here\n')), 'text/plain')
   assert.equal(detectFileMime(Buffer.concat([Buffer.from('#!SILK_V3'), Buffer.from([0, 1, 2, 3, 0xff, 0xfe])])), undefined, 'QQ silk voice')
   assert.equal(detectFileMime(Buffer.from('plain words'), 'tool.exe'), undefined)

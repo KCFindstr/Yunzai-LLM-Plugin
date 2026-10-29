@@ -8,10 +8,10 @@ const server = await mockServer(async request => {
   const system = String(request.body.messages[0]?.content ?? '')
   prompts.push(system)
   const content = system.includes('普通群聊记录')
-    ? '阿明和小红在群里约好周末一起去看猫展'
+    ? '岛风和雪风在群里约好周末一起去看猫展'
     : system.includes('这一天的概要')
-      ? '这天阿明和小红约好周末看猫展，还讨论了原神配队'
-      : '片段：阿明问了原神配队\n摘要：阿明在研究原神配队'
+      ? '这天岛风和雪风约好周末看猫展，还讨论了原神配队'
+      : '片段：岛风问了原神配队\n摘要：岛风在研究原神配队'
   return [200, { choices: [{ message: { role: 'assistant', content }, finish_reason: 'stop' }], usage: { prompt_tokens: 10, completion_tokens: 5 } }]
 })
 after(server.close)
@@ -136,7 +136,7 @@ describe('group chatter', () => {
     await maintainArchive('10000:g82001')
     const entry = peekSession('10000:g82001')!.archive!.at(-1)!
     assert.equal(entry.raw, undefined)
-    assert.match(entry.text, /^【群聊】阿明和小红/)
+    assert.match(entry.text, /^【群聊】岛风和雪风/)
     assert.ok(prompts.some(p => p.includes('普通群聊记录')))
     // the bot's rolling summary is untouched by chatter
     assert.equal(peekSession('10000:g82001')!.summary, undefined)

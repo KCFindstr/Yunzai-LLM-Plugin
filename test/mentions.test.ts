@@ -10,7 +10,7 @@ import { limiter } from '../src/chat/ratelimit.ts'
 import { extractInput, segmentsToText } from '../src/chat/message.ts'
 
 const event = (over: Record<string, any> = {}) => fakeEvent({
-  message: [{ type: 'at', qq: 10000 }, { type: 'text', text: '提醒她' }, { type: 'at', qq: 20002, name: '小红' }],
+  message: [{ type: 'at', qq: 10000 }, { type: 'text', text: '提醒她' }, { type: 'at', qq: 20002, name: '雪风' }],
   ...over,
 })
 const targets = (message: any) => Array.isArray(message) ? message.filter(item => item.type === 'at').map(item => String(item.qq)) : []
@@ -66,7 +66,7 @@ describe('explicit reply mentions', () => {
 
   it('does not turn plain at-text, at-all, the bot, or malformed markers into pings', () => {
     const { e } = event()
-    for (const text of ['@20002 @小红', '[at:all]', '[at:you]', '[at:10000]', '[at:20002,qq=all]', '[CQ:at,qq=20002]', '[艾特:20002]'])
+    for (const text of ['@20002 @雪风', '[at:all]', '[at:you]', '[at:10000]', '[at:20002,qq=all]', '[CQ:at,qq=20002]', '[艾特:20002]'])
       assert.equal(replyMentions(text, e), text)
   })
 
@@ -101,7 +101,7 @@ describe('explicit reply mentions', () => {
     assert.match(prompt, /不限制艾特对象/)
     assert.doesNotMatch(prompt, /近期成员参考|成员名单/)
     assert.doesNotMatch(prompt, /只使用本次|必须是列表里/)
-    assert.doesNotMatch(prompt, /20002|小红/)
+    assert.doesNotMatch(prompt, /20002|雪风/)
     assert.doesNotMatch(buildSystemPrompt({ ...base, isGroup: false }), /# 群内艾特/)
   })
 

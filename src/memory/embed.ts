@@ -1,7 +1,22 @@
 import { config, resolveKeys } from '../core/config.ts'
-import type { ProviderConfig } from '../core/configTypes.ts'
+import type { EmbeddingModelConfig, ProviderConfig } from '../core/configTypes.ts'
 import { log } from '../core/log.ts'
 import { requestJson } from '../llm/http.ts'
+
+interface Target {
+  model: EmbeddingModelConfig
+  provider: ProviderConfig
+  /** request shape: Voyage's, or OpenAI-compatible /embeddings */
+  kind: 'voyage' | 'openai'
+}
+
+/** memory.embedding.model (or `id`) resolved to its embeddingModels entry and provider. */
+function target(id = config.get().memory.embedding.model): Target | undefined {
+  const model = config.getEmbeddingModel(id)
+  const provider = model && config.getProvider(model.provider)
+  if (!model || !provider || !['voyage', 'openai', 'openai-responses'].includes(provider.type)) return undefined
+  return { model, provider, kind: provider.type === 'voyage' ? 'voyage' : 'openai' }
+}
 
 /**
  * Text embeddings for recall. `voyage` speaks Voyage's /embeddings (input_type + output_dimension), or, for
@@ -10,20 +25,24 @@ import { requestJson } from '../llm/http.ts'
  * Vectors come back L2-normalized, so dot = cosine.
  */
 export function embeddingReady(): boolean {
-  const c = config.get().memory.embedding
-  return c.enable && resolveKeys(c.apiKey).length > 0
+  const t = target()
+  return config.get().memory.embedding.enable && Boolean(t && resolveKeys(t.provider.apiKey).length > 0)
 }
 
-/** Identifies the vector space; stored vectors with another tag are discarded. */
+/** Identifies the vector space; stored vectors with another tag are discarded. Unchanged by the config migration. */
 export function embeddingTag(): string {
-  const c = config.get().memory.embedding
-  return `${c.type}:${c.model}:${c.dimensions}`
+  const t = target()
+  return t ? `${t.kind}:${t.model.model}:${t.model.dimensions}` : 'none'
+}
+
+/** Upstream model of memory.embedding.model, for display. */
+export function embeddingModelName(): string {
+  return target()?.model.model ?? config.get().memory.embedding.model
 }
 
 /** Contextualized chunk model: callers should embed related chunks as one group. */
-export function embeddingContextual(): boolean {
-  const c = config.get().memory.embedding
-  return c.type === 'voyage' && /^voyage-context/i.test(c.model)
+export function embeddingContextual(t = target()): boolean {
+  return t?.kind === 'voyage' && /^voyage-context/i.test(t.model.model)
 }
 
 // stay well under Voyage's per-request limits: 1000 inputs, 16K chunks, and for voyage-context-4 without
@@ -50,11 +69,16 @@ function batches(groups: string[][]): string[][][] {
   return out
 }
 
-async function request(path: string, body: any, signal?: AbortSignal): Promise<any> {
-  const c = config.get().memory.embedding
-  // requestJson only needs the transport fields; type is used for its key-rotation bucket
-  const provider = { type: c.type, baseUrl: c.baseUrl, apiKey: c.apiKey, timeout: c.timeout, maxRetries: 1 } as unknown as ProviderConfig
-  return requestJson(provider, key => ({ url: `${c.baseUrl.replace(/\/+$/, '')}${path}`, headers: { authorization: `Bearer ${key}` }, body }), signal)
+async function request(t: Target, path: string, body: any, signal?: AbortSignal): Promise<any> {
+  const base = (t.provider.baseUrl || (t.kind === 'voyage' ? 'https://api.voyageai.com/v1' : 'https://api.openai.com/v1')).replace(/\/+$/, '')
+  // embeddings sit on the recall path: a short timeout and one retry unless the provider says otherwise
+  const provider = { ...t.provider, timeout: t.provider.timeout ?? 10, maxRetries: t.provider.maxRetries ?? 1 }
+  return requestJson(provider, key => ({ url: `${base}${path}`, headers: { ...t.provider.headers, authorization: `Bearer ${key}` }, body }), signal)
+}
+
+function need(t: Target | undefined): Target {
+  if (!t) throw new Error(`向量模型 ${config.get().memory.embedding.model || '（未选择）'} 不存在或其提供商不支持向量`)
+  return t
 }
 
 /**
@@ -64,8 +88,9 @@ async function request(path: string, body: any, signal?: AbortSignal): Promise<a
 export async function embedGroups(groups: string[][], kind: 'query' | 'document', signal?: AbortSignal): Promise<Float32Array[][]> {
   groups = groups.filter(g => g.length)
   if (!groups.length) return []
-  const c = config.get().memory.embedding
-  if (!embeddingContextual()) {
+  const t = need(target())
+  const c = t.model
+  if (!embeddingContextual(t)) {
     const flat = await embed(groups.flat(), kind, signal)
     let i = 0
     return groups.map(g => g.map(() => flat[i++]))
@@ -88,7 +113,7 @@ export async function embedGroups(groups: string[][], kind: 'query' | 'document'
   })
   const flat: Float32Array[][] = []
   for (const batch of batches(parts.map(p => p.texts))) {
-    const json = await request('/contextualizedembeddings', { inputs: batch, model: c.model, input_type: kind, output_dimension: c.dimensions }, signal)
+    const json = await request(t, '/contextualizedembeddings', { inputs: batch, model: c.model, input_type: kind, output_dimension: c.dimensions }, signal)
     const docs: any[] = Array.isArray(json?.data) ? [...json.data].sort((a, b) => a.index - b.index) : []
     if (docs.length !== batch.length) throw new Error(`embedding 返回 ${docs.length} 组，应为 ${batch.length} 组`)
     docs.forEach((doc, i) => {
@@ -107,12 +132,28 @@ export async function embed(texts: string[], kind: 'query' | 'document', signal?
   if (!texts.length) return []
   // contextualized models: each text on its own (a query is a single-chunk input)
   if (embeddingContextual()) return (await embedGroups(texts.map(t => [t]), kind, signal)).map(g => g[0])
-  const c = config.get().memory.embedding
+  return embedWith(need(target()), texts, kind, signal)
+}
+
+/** Embed with a specific embedding model id (connection test): returns the vectors' dimension and latency. */
+export async function testEmbedding(id: string): Promise<{ dimensions: number; ms: number }> {
+  const t = target(id)
+  if (!t) throw new Error(`向量模型 ${id} 不存在或其提供商不支持向量`)
+  const started = Date.now()
+  const [v] = embeddingContextual(t)
+    ? (await request(t, '/contextualizedembeddings', { inputs: [['测试 test']], model: t.model.model, input_type: 'query', output_dimension: t.model.dimensions })).data?.[0]?.data?.map((d: any) => d.embedding) ?? []
+    : (await embedWith(t, ['测试 test'], 'query'))
+  if (!v?.length) throw new Error('接口没有返回向量')
+  return { dimensions: v.length, ms: Date.now() - started }
+}
+
+async function embedWith(t: Target, texts: string[], kind: 'query' | 'document', signal?: AbortSignal): Promise<Float32Array[]> {
+  const c = t.model
   const body =
-    c.type === 'voyage'
+    t.kind === 'voyage'
       ? { input: texts, model: c.model, input_type: kind, output_dimension: c.dimensions }
       : { input: texts, model: c.model, dimensions: c.dimensions }
-  const json = await request('/embeddings', body, signal)
+  const json = await request(t, '/embeddings', body, signal)
   const data: any[] = Array.isArray(json?.data) ? [...json.data].sort((a, b) => a.index - b.index) : []
   if (data.length !== texts.length) throw new Error(`embedding 返回 ${data.length} 条，应为 ${texts.length} 条`)
   log.debug(`embedding ${c.model} ${kind} ${texts.length}条 tokens=${json?.usage?.total_tokens ?? '?'}`)

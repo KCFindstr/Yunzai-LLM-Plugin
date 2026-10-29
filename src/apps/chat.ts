@@ -13,27 +13,33 @@ import { pickModel } from '../chat/utility.ts'
 import { BasePlugin } from './base.ts'
 import { conversationLocks as locks } from '../chat/coordination.ts'
 import { observeUsers } from '../chat/roster.ts'
+import { considerProactive } from '../chat/proactive.ts'
 
 const userCd = new Cooldown()
 const quotaNotice = new Cooldown()
 const errorNotice = new Cooldown()
 
-const EMPTY_AT = ['在呢', '嗯？', '怎么啦', '咋了', '我在~', '？']
 const ERROR_LINES = ['唔，我这边网络有点问题，等会儿再试试吧', '脑子卡住了…稍后再问我一次吧', '刚刚走神了，过会儿再来找我吧']
 
 type Reason = 'at' | 'alias' | 'prefix' | 'reply' | 'private'
 
 const inList = (list: (string | number)[], v: any) => list.some(x => String(x) === String(v))
 
+/** Whether the plugin may act on this message at all (enabled, not from the bot, not blacklisted). */
+function allowed(e: any, cfg: PluginConfig): boolean {
+  if (e[DISPATCHED] || !cfg.enable) return false
+  if (String(e.user_id) === String(e.self_id)) return false
+  if (inList(cfg.trigger.userBlacklist, e.user_id)) return false
+  if (!e.group_id) return true
+  if (cfg.trigger.groupWhitelist.length && !inList(cfg.trigger.groupWhitelist, e.group_id)) return false
+  if (inList(cfg.trigger.groupBlacklist, e.group_id)) return false
+  return config.effective(e.group_id).enable
+}
+
 /** Decide whether this message is addressed to us. Only explicit invocations count. */
 export async function triggerReason(e: any, cfg: PluginConfig): Promise<Reason | undefined> {
-  if (e[DISPATCHED] || !cfg.enable) return undefined
-  if (String(e.user_id) === String(e.self_id)) return undefined
-  if (inList(cfg.trigger.userBlacklist, e.user_id)) return undefined
+  if (!allowed(e, cfg)) return undefined
   if (e.group_id) {
-    if (cfg.trigger.groupWhitelist.length && !inList(cfg.trigger.groupWhitelist, e.group_id)) return undefined
-    if (inList(cfg.trigger.groupBlacklist, e.group_id)) return undefined
-    if (!config.effective(e.group_id).enable) return undefined
     if (cfg.trigger.at && e.atBot) return 'at'
     if (cfg.trigger.alias && e.hasAlias) return 'alias'
     if (e.msg && cfg.trigger.prefixes.some(p => p && e.msg.startsWith(p))) return 'prefix'
@@ -93,16 +99,14 @@ export class LLMChat extends BasePlugin {
     observeUsers(e)
     const cfg = config.get()
     const reason = await triggerReason(e, cfg)
-    if (!reason) return false
+    if (!reason) {
+      // nobody called us: in groups that enable it, maybe speak up anyway (never claims the message)
+      if (e.group_id && allowed(e, cfg) && hasContent(e)) considerProactive(e, target => this.proactiveReply(target))
+      return false
+    }
 
     const eff = config.effective(e.group_id)
     const isAdmin = config.isAdmin(e)
-    if (!hasContent(e) && !e.reply_id) {
-      const usable = Boolean(pickModel([eff.model, ...cfg.fallbackModels]))
-      if (usable && cfg.trigger.emptyAtReply && reason === 'at' && userCd.pass(`empty:${e.self_id}:${e.user_id}`, 30))
-        await e.reply(pick(EMPTY_AT))
-      return true
-    }
     const convKey = sessionKey(e, eff.chat.sessionScope)
     if (locks.pending(convKey) >= eff.chat.maxPending) {
       if (errorNotice.pass(`busy:${convKey}`, 15)) await e.reply('这会儿消息有点多，稍后再叫我一下吧')
@@ -151,5 +155,30 @@ export class LLMChat extends BasePlugin {
       }
     })
     return true
+  }
+
+  /** Speak up on `e` without being asked (proactive reply); silent on quota, errors, or when the model passes. */
+  async proactiveReply(e: any): Promise<void> {
+    const eff = config.effective(e.group_id)
+    const convKey = sessionKey(e, eff.chat.sessionScope)
+    if (locks.pending(convKey) > 0) return
+    await locks.run(convKey, async () => {
+      const startedAt = Date.now()
+      let afterReply: (() => void)[] | undefined
+      try {
+        const model = pickModel([eff.model, ...config.get().fallbackModels])?.model
+        const input = await extractInput(e, { includeImages: eff.chat.includeImages, maxImages: eff.chat.maxImages, includeQuoted: eff.chat.includeQuoted, vision: model?.vision !== false })
+        const out = await runTurn({ e, eff, input, isAdmin: false, convKey, proactive: true })
+        afterReply = out.afterReply
+        if (out.kind !== 'reply') return log.info(`主动发言未发送（${out.kind === 'quota' ? '额度已用完' : out.message}）`)
+        if (out.skipped) return log.info(`主动发言：模型选择不接话（群${e.group_id}）`)
+        await deliver(e, out.text, eff, { startedAt, convKey, suppressText: Boolean(out.dispatched) && !eff.tools.botCommand.ack, images: out.images })
+        await compactSession(convKey, eff, { groupId: e.group_id, isAdmin: false })
+      } catch (err: any) {
+        log.error('主动发言失败', err)
+      } finally {
+        for (const start of afterReply ?? []) start()
+      }
+    })
   }
 }

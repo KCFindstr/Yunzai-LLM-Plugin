@@ -7,7 +7,7 @@ const running = new Set<string>()
 
 const PROMPT = (max: number, chars: number) =>
   `你在整理聊天机器人的长期记忆。合并重复或相近的条目，删除过时、琐碎或互相矛盾中较旧的信息，保留对以后聊天有用的事实。
-要求：每条一句话，不超过${chars}字；最多保留${max}条；不要编造新信息。只输出一个 JSON 字符串数组，例如 ["喜欢被叫阿明","主玩原神，常用胡桃"]。`
+要求：每条一句话，不超过${chars}字；最多保留${max}条；不要编造新信息。只输出一个 JSON 字符串数组，例如 ["喜欢被叫岛风","主玩原神，常用胡桃"]。`
 
 /**
  * Consolidate a memory list once it passes `threshold` of its budget, targeting ~60% so new facts fit.

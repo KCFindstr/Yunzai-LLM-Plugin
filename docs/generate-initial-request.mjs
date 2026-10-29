@@ -64,12 +64,12 @@ try {
   const event = {
     self_id: 100000000, user_id: 1001, group_id: groupId, group_name: '示例群',
     message_id: 'example-initial', message_type: 'group', adapter_name: 'OneBotv11',
-    sender: { nickname: '阿明', card: '阿明' }, isMaster: isAdmin,
+    sender: { nickname: '岛风', card: '岛风' }, isMaster: isAdmin,
     message: [{ type: 'at', qq: 100000000 }, { type: 'text', text: '截一下你的桌面给我看看' }],
   }
-  recordGroupMessage({ ...event, user_id: 1002, message_id: 'example-earlier', sender: { nickname: '小红' }, message: [{ type: 'text', text: '周六一起看猫吧' }] })
+  recordGroupMessage({ ...event, user_id: 1002, message_id: 'example-earlier', sender: { nickname: '雪风' }, message: [{ type: 'text', text: '周六一起看猫吧' }] })
   recordGroupMessage(event)
-  addMemory('user', '1001', '喜欢被叫阿明')
+  addMemory('user', '1001', '喜欢被叫岛风')
   addMemory('group', groupId, '群友约好周六一起看猫')
   const input = { text: '[at:you] 截一下你的桌面给我看看', images: [], imageSegments: [] }
   const ctx = { e: event, eff, model, isAdmin, turn: { commands: 0, searches: 0, fetches: 0, images: [] } }
@@ -88,8 +88,8 @@ try {
   const messages = []
   if (memoryPrefix) messages.push({ role: 'user', content: [{ type: 'text', text: memoryPrefix }] })
   messages.push(
-    { role: 'user', content: [{ type: 'text', text: '【之前对话的摘要】\n阿明问过桌面是否会保留文件，已说明它是独立的持久角色PC。' }] },
-    { role: 'user', content: [{ type: 'text', text: '【私有示例历史｜发言人 阿明(平台ID 1001)】\n你的电脑叫什么？' }] },
+    { role: 'user', content: [{ type: 'text', text: '【之前对话的摘要】\n岛风问过桌面是否会保留文件，已说明它是独立的持久角色PC。' }] },
+    { role: 'user', content: [{ type: 'text', text: '【私有示例历史｜发言人 岛风(平台ID 1001)】\n你的电脑叫什么？' }] },
     { role: 'assistant', content: '叫 Amatsukaze 喵！' },
     { role: 'user', content: [{ type: 'text', text: header.sent + input.text }] },
   )

@@ -52,7 +52,7 @@ export interface Rollout {
   createdAt: number
   updatedAt: number
   status: 'queued' | 'running' | 'completed' | 'failed' | 'blocked' | 'interrupted' | 'waiting_callback'
-  source: 'chat' | 'agy' | 'computer'
+  source: 'chat' | 'agy' | 'computer' | 'proactive'
   jobId?: string
   input: string
   reply?: string
@@ -155,6 +155,8 @@ function cleanJudgeResponse(judge: JudgeResponse): string {
   const number = (value: unknown) => typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined
   const probability = (value: unknown) => { const n = number(value); return n != null && n <= 1 ? n : undefined }
   const probabilities = answer.probabilities
+  const names = (p: any): string[] => (Array.isArray(p) ? p.map((entry: any) => entry?.choice ?? entry?.name) : p && typeof p === 'object' ? Object.keys(p) : [])
+    .filter((name: unknown): name is string => typeof name === 'string' && name.length > 0).slice(0, 20)
   const score = (name: string) => {
     const entry = Array.isArray(probabilities) ? probabilities.find((p: any) => (p?.choice ?? p?.name) === name) : probabilities?.[name]
     return probability(entry && typeof entry === 'object' ? entry.probability ?? entry.score ?? entry.prob : entry)
@@ -165,7 +167,8 @@ function cleanJudgeResponse(judge: JudgeResponse): string {
     answers: { kind: {
       choice: typeof answer.choice === 'string' ? agyHistoryText(answer.choice, undefined, 100) : undefined,
       confidence: probability(answer.confidence),
-      probabilities: Object.fromEntries(['casual', 'question', 'complex'].map(name => [name, score(name)]).filter(([, value]) => value != null)),
+      // category names are configurable: keep whichever names the judge reported, as short labels
+      probabilities: Object.fromEntries(names(probabilities).map(name => [agyHistoryText(name, undefined, 32), score(name)]).filter(([, value]) => value != null)),
     } },
     usage: { input_tokens: number(judge.inputTokens) ?? number(response.usage?.input_tokens), output_tokens: number(judge.outputTokens) ?? number(response.usage?.output_tokens) },
     cost: number(judge.cost) ?? number(response.cost),

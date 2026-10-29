@@ -1,4 +1,4 @@
-import { mockServer, writeUserConfig } from './helpers.ts'
+import { mockServer, setEmbedding, writeUserConfig } from './helpers.ts'
 import assert from 'node:assert/strict'
 import { after, beforeEach, describe, it } from 'node:test'
 
@@ -20,7 +20,7 @@ config.load()
 const { embed, embedGroups, embeddingContextual } = await import('../src/memory/embed.ts')
 const { appendTurn, clearSession, indexArchive, peekSession, recallSession, reindexAll, sessionsMissingVectors, truncateIfNeeded } = await import('../src/chat/session.ts')
 
-const useModel = (model: string) => { config.get().memory.embedding = { ...config.get().memory.embedding, model } }
+const useModel = (model: string) => setEmbedding(config, { model })
 const calls = (path: string) => server.requests.filter(r => r.url.endsWith(path))
 const DAY = 86400_000
 

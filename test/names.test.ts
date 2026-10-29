@@ -2,7 +2,7 @@ import { fakeEvent, writeUserConfig } from './helpers.ts'
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-writeUserConfig(`names:\n  '40001': 阿明\n  'A1B2C3D4E5': 小红\ngroups:\n  '50001':\n    names:\n      '40001': 明哥\n`)
+writeUserConfig(`names:\n  '40001': 岛风\n  'A1B2C3D4E5': 雪风\ngroups:\n  '50001':\n    names:\n      '40001': 明哥\n`)
 const { config } = await import('../src/core/config.ts')
 config.load()
 const { configuredName, knownName, observeUsers, recentMessages, rememberMessage, rosterLines, rosterSnapshot } = await import('../src/chat/roster.ts')
@@ -19,11 +19,11 @@ const withCache = (over: Record<string, any>) => {
 describe('configured names', () => {
   it('prefers the group name, then the global name, then the adapter, then what messages said', () => {
     assert.equal(configuredName('40001', 50001), '明哥')
-    assert.equal(configuredName('40001', 50002), '阿明')
-    assert.equal(configuredName('40001'), '阿明')
+    assert.equal(configuredName('40001', 50002), '岛风')
+    assert.equal(configuredName('40001'), '岛风')
     assert.equal(configuredName('99999', 50001), undefined)
     assert.equal(knownName(withCache({ group_id: 50001, user_id: 40001 })), '明哥')
-    assert.equal(knownName(withCache({ group_id: 50002, user_id: 40001 })), '阿明')
+    assert.equal(knownName(withCache({ group_id: 50002, user_id: 40001 })), '岛风')
     // no configured name: the adapter's card still wins over the raw nickname
     config.get().names = {}
     try {
@@ -36,18 +36,18 @@ describe('configured names', () => {
   it('names QQBot-style opaque IDs that the adapter reports nothing for', () => {
     const e = fakeEvent({ group_id: 50003, user_id: 'A1B2C3D4E5', sender: { user_id: 'A1B2C3D4E5' } }).e
     observeUsers(e)
-    assert.equal(senderName(e), '小红')
-    assert.match(buildHeader(e, config.effective('50003'), { text: '你好', images: [], imageSegments: [] } as any, false).sent, /小红\(平台ID A1B2C3D4E5\)/)
-    assert.match(rosterLines(e, 10).join('\n'), /小红 \[at:A1B2C3D4E5\]/)
+    assert.equal(senderName(e), '雪风')
+    assert.match(buildHeader(e, config.effective('50003'), { text: '你好', images: [], imageSegments: [] } as any, false).sent, /雪风\(平台ID A1B2C3D4E5\)/)
+    assert.match(rosterLines(e, 10).join('\n'), /雪风 \[at:A1B2C3D4E5\]/)
     const scope = rosterSnapshot().find(r => r.groupId === '50003')!
-    assert.deepEqual(scope.people.find(p => p.id === 'A1B2C3D4E5')?.global, '小红')
+    assert.deepEqual(scope.people.find(p => p.id === 'A1B2C3D4E5')?.global, '雪风')
   })
 
   it('validates names with the shared schema, including per-group names', () => {
     assert.equal(validatePath(['names', 'A1B2C3D4E5']), undefined)
     assert.ok(validatePath(['names', 'bad id with spaces']))
     assert.equal(schemaAt(['groups', '50001', 'names', '40001'])?.t, 'str')
-    assert.equal(validate(SCHEMA, { names: { '40001': '阿明' }, groups: { '50001': { names: { '40001': '明哥' } } } }, config.get(), config.get()), undefined)
+    assert.equal(validate(SCHEMA, { names: { '40001': '岛风' }, groups: { '50001': { names: { '40001': '明哥' } } } }, config.get(), config.get()), undefined)
   })
 
   it('accepts group IDs of any digit length without numeric conversion', () => {

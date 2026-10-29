@@ -2,7 +2,8 @@ import fs from 'node:fs'
 import path from 'node:path'
 import YAML from 'yaml'
 // shared with the terminal config editor, so both validate writes the same way
-import { configProblems, dropRetired, modelSuggestions, PRESET_PROVIDERS, PRICING_FIELDS, SCHEMA, schemaAt, THINKING, validate, validatePath, valuesOf } from '../../cli/schema.mjs'
+import { configNotices, configProblems, dropRetired, effectiveThinking, embeddingSuggestions, KNOWN_EMBEDDING_MODELS, KNOWN_MODELS, KNOWN_SYSTEMONE_MODELS, modelDefaults, modelSuggestions, PRESET_PROVIDERS, PRICING_FIELDS, PROVIDER_TYPES, SCHEMA, schemaAt, THINKING, validate, validatePath, valuesOf } from '../../cli/schema.mjs'
+import { migrateConfig } from '../../cli/migrate.mjs'
 import { queryBalance } from '../billing/balance.ts'
 import { queryUsageCalls } from '../billing/history.ts'
 import { daily, incompleteUsageModels, limitsFor, resetStats, resetUsage, summarize, topUsers, totals, WINDOW_5H, WINDOW_WEEK } from '../billing/ledger.ts'
@@ -11,7 +12,7 @@ import { catalogEntries, catalogInfo, scanCatalog } from '../commands/catalog.ts
 import { config, normalize, personaText, resolveKeys } from '../core/config.ts'
 import { recentLogs } from '../core/log.ts'
 import { CONFIG_DIR, DATA_DIR, DEFAULT_CONFIG_FILE } from '../core/paths.ts'
-import { deepMerge, detectImageMime, formatDuration, isPlainObject, maskSecret, truncate } from '../core/util.ts'
+import { deepMerge, detectImageMime, formatDuration, formatNow, isPlainObject, maskSecret, truncate } from '../core/util.ts'
 import { allVectors, archiveInfo, clearSession, dayInfo, deleteArchiveEntry, listSessions, peekSession, setSummary, updateArchiveEntry, updateHistoryMessage } from '../chat/session.ts'
 import { historyError, historyText, regenerateHistory, vectorizeHistory } from '../chat/history.ts'
 import { recentTurns } from '../chat/turnLog.ts'
@@ -20,7 +21,12 @@ import { configuredName, recentMessages, rosterSnapshot } from '../chat/roster.t
 import { utilityChat } from '../chat/utility.ts'
 import { partsToText } from '../llm/types.ts'
 import { clusterVectors, maxK, type Clustering } from '../memory/cluster.ts'
-import { dot, embed, embeddingReady, embeddingTag } from '../memory/embed.ts'
+import { dot, embed, embeddingModelName, embeddingReady, embeddingTag, testEmbedding } from '../memory/embed.ts'
+import { systemoneChoice } from '../llm/systemone.ts'
+import { judgeMessage, judgePrompt } from '../chat/thinking.ts'
+import { botLine, renderTranscript, type JudgeTranscript } from '../chat/judge.ts'
+import { judgeProactive, proactivePrompt, recentProactive } from '../chat/proactive.ts'
+import { liveModels } from './upstreamModels.ts'
 import { addMemory, clearMemory, deleteMemory, listMemory, memoryOwners, memoryStats, updateMemory, usage as memUsage, type MemScope } from '../memory/store.ts'
 import { indexSticker, stickerIncomplete } from '../stickers/indexer.ts'
 import { addImageSticker, listStickers, removeSticker, stickerFile, updateSticker, type Sticker } from '../stickers/store.ts'
@@ -117,7 +123,7 @@ function serializeSchema(node: any, cfg: any): any {
     else out.suggest = node.suggest(cfg)
   }
   // `when` gates provider fields by the provider's type: send the list of types it applies to
-  if (typeof node.when === 'function') out.whenTypes = ['openai', 'openai-responses', 'anthropic', 'gemini'].filter(type => node.when({ type }))
+  if (typeof node.when === 'function') out.whenTypes = PROVIDER_TYPES.filter((type: string) => node.when({ type }))
   if (node.t === 'obj') out.fields = Object.fromEntries(Object.entries(node.fields).map(([k, v]) => [k, serializeSchema(v, cfg)]))
   if (node.t === 'map') out.value = serializeSchema(node.value, cfg)
   if (node.t === 'arr') out.item = serializeSchema(node.item, cfg)
@@ -177,6 +183,39 @@ function keysOf(p: string): (string | number)[] {
     out.push(parent?.t === 'arr' && /^\d+$/.test(seg) ? Number(seg) : seg)
   }
   return out
+}
+
+/** Validate a whole user config (as YAML text) the way a save would: older settings migrated first. */
+function checkedUserDoc(text: string): { doc: YAML.Document; changed: boolean } {
+  const doc = YAML.parseDocument(text)
+  if (doc.errors.length) throw fail(`YAML 语法错误：${doc.errors[0].message}`)
+  const defaults = YAML.parse(fs.readFileSync(DEFAULT_CONFIG_FILE, 'utf8')) ?? {}
+  const changed = migrateConfig(doc, defaults).length + dropRetired(doc).length > 0
+  const user = doc.toJS() ?? {}
+  if (!isPlainObject(user)) throw fail('配置顶层应为对象')
+  // enum choices (model ids, presets) come from the config being written, not the current one
+  const merged = normalize(deepMerge(defaults, structuredClone(user)))
+  const err = validate(SCHEMA, user, merged, merged)
+  if (err) throw fail(err)
+  return { doc, changed }
+}
+
+/** Handwritten playground lines ("名字: 内容" per line) as numbered group-chat lines. */
+function playgroundLines(text: unknown): string[] {
+  const now = formatNow()
+  return String(text ?? '').split('\n').map(line => line.trim()).filter(Boolean).slice(-50)
+    .map((line, i) => `${i + 1}. [${now}] ${line.replace(/^([^:：]{1,24})[:：]\s*/, '$1: ')}`)
+}
+
+function playgroundTranscript(body: any): JudgeTranscript {
+  const sender = String(body.sender ?? '').trim() || '群友'
+  return {
+    bot: botLine(String(body.botName ?? '').trim() || config.get().persona.botName || '机器人'),
+    history: String(body.history ?? '').split('\n').map(line => line.trim()).filter(Boolean).slice(-30),
+    recent: playgroundLines(body.recent),
+    heading: `【消息｜${formatNow()}｜群「测试群」｜发言人 ${sender}】`,
+    text: String(body.message ?? '').slice(0, 2000),
+  }
 }
 
 function setConfig(p: string, value: any) {
@@ -320,7 +359,7 @@ export const routes: Route[] = [
         stickers: stickers.length, skills: listSkills().length, tools: registry.all().length, groups: Object.keys(c.groups).length,
       },
       today: { turns: today.length, errors: today.filter(t => t.error).length, cost: today.reduce((a, t) => a + t.cost, 0), avgMs: today.length ? Math.round(today.reduce((a, t) => a + t.ms, 0) / today.length) : 0 },
-      embedding: { ready: embeddingReady(), model: c.memory.embedding.model },
+      embedding: { ready: embeddingReady(), model: embeddingModelName() },
       catalog: ci,
       prices: { count: pc.count, age: pc.fetchedAt ? formatDuration(Date.now() - pc.fetchedAt) : '' },
       recentErrors: recentLogs(0, 'error').slice(-5),
@@ -366,8 +405,15 @@ export const routes: Route[] = [
 
   R('GET', '/api/config', () => {
     const cfg = config.get()
+    const known = Object.values(KNOWN_MODELS).flat() as string[]
     return { schema: serializeSchema(SCHEMA, cfg), effective: maskSecrets(SCHEMA, cfg), overridden: overriddenPaths(), descriptions: configDescriptions(), groups: groupList(),
-      presets: PRESET_PROVIDERS, presetModels: PRESET_PROVIDERS.map(([, type, baseUrl]) => modelSuggestions({ type, baseUrl })), thinking: THINKING, problems: configProblems(cfg) }
+      presets: PRESET_PROVIDERS,
+      presetModels: PRESET_PROVIDERS.map(([, type, baseUrl]: string[]) => (type === 'voyage' ? KNOWN_EMBEDDING_MODELS.voyage : type === 'systemone' ? KNOWN_SYSTEMONE_MODELS : modelSuggestions({ type, baseUrl }))),
+      knownEmbeddingModels: KNOWN_EMBEDDING_MODELS, knownSystemoneModels: KNOWN_SYSTEMONE_MODELS,
+      embeddingSuggestions: Object.fromEntries(Object.entries(cfg.providers).map(([name, p]) => [name, embeddingSuggestions(p)])),
+      modelDefaults: Object.fromEntries(known.map(m => [m, modelDefaults(m)])),
+      effectiveThinking: Object.fromEntries(Object.entries(cfg.providers).map(([name, p]) => [name, effectiveThinking(p)])),
+      thinking: THINKING, problems: configProblems(cfg), notices: configNotices(cfg) }
   }),
   R('PUT', '/api/config', ({ body }) => setConfig(String(body.path ?? ''), body.value)),
   R('GET', '/api/setup', ({ query }) => {
@@ -380,14 +426,16 @@ export const routes: Route[] = [
   R('PUT', '/api/setup', ({ body }) => {
     if (!Array.isArray(body.changes) || !body.changes.length || body.changes.length > 30) throw fail('请提供有效的设置项')
     const doc = YAML.parseDocument(config.readRaw())
+    migrateConfig(doc, YAML.parse(fs.readFileSync(DEFAULT_CONFIG_FILE, 'utf8')) ?? {})
     dropRetired(doc)
     for (const change of body.changes) {
       const p = String(change.path ?? ''), keys = keysOf(p)
-      if (!/^(providers\.|models\.|defaultModel$|utilityModel$|visionModel$|fallbackModels$|memory\.(enable$|embedding\.)|chat\.(thinking$|thinkingJudge\.)|tools\.(exec|agy|computer|googleLens|webSearch|webFetch)\.)/.test(p) || !schemaAt(keys)) throw fail('设置向导不支持此配置项')
+      if (!/^(providers\.|models\.|embeddingModels\.|systemoneModels\.|defaultModel$|utilityModel$|visionModel$|fallbackModels$|memory\.(enable$|embedding\.)|chat\.thinking$|autoThinking\.|tools\.(exec|agy|computer|googleLens|webSearch|webFetch)\.)/.test(p) || !schemaAt(keys)) throw fail('设置向导不支持此配置项')
       const error = validatePath(keys)
       if (error) throw fail(error)
       for (let i = 1; i < keys.length; i++) {
-        if (typeof keys[i] === 'number' && !doc.hasIn(keys.slice(0, i))) doc.setIn(keys.slice(0, i), config.read(keys.slice(0, i).join('.')) ?? [])
+        // copy a list that only exists in the defaults in as a YAML node, so deeper paths can be set inside it
+        if (typeof keys[i] === 'number' && !doc.hasIn(keys.slice(0, i))) doc.setIn(keys.slice(0, i), doc.createNode(structuredClone(config.read(keys.slice(0, i).join('.')) ?? [])))
       }
       doc.setIn(keys, change.value)
     }
@@ -405,16 +453,8 @@ export const routes: Route[] = [
   R('GET', '/api/config/raw', () => ({ text: config.readRaw() })),
   R('PUT', '/api/config/raw', ({ body }) => {
     const text = String(body.text ?? '')
-    const doc = YAML.parseDocument(text)
-    if (doc.errors.length) throw fail(`YAML 语法错误：${doc.errors[0].message}`)
-    const retired = dropRetired(doc).length > 0
-    const user = doc.toJS() ?? {}
-    if (!isPlainObject(user)) throw fail('配置顶层应为对象')
-    // enum choices (model ids, presets) come from the config being written, not the current one
-    const merged = normalize(deepMerge(YAML.parse(fs.readFileSync(DEFAULT_CONFIG_FILE, 'utf8')) ?? {}, structuredClone(user)))
-    const err = validate(SCHEMA, user, merged, merged)
-    if (err) throw fail(err)
-    config.writeRaw(retired ? String(doc) : text)
+    const { doc, changed } = checkedUserDoc(text)
+    config.writeRaw(changed ? String(doc) : text)
   }),
 
   R('GET', '/api/models', () => {
@@ -423,19 +463,63 @@ export const routes: Route[] = [
       defaultModel: config.defaultModelId(),
       providers: Object.entries(c.providers).map(([name, p]) => ({ name, type: p.type, baseUrl: p.baseUrl, hasKey: config.hasKey(p), balance: p.balance })),
       models: c.models.map(m => ({ ...m, hasKey: config.hasKey(c.providers[m.provider]), price: resolvePrice(m) })),
+      embeddingModels: c.embeddingModels.map(m => ({ ...m, hasKey: config.hasKey(c.providers[m.provider]), active: c.memory.embedding.model === m.id })),
+      systemoneModels: c.systemoneModels.map(m => ({ ...m, hasKey: config.hasKey(c.providers[m.provider]), judge: c.autoThinking.judge === m.id })),
+      judge: c.autoThinking.judge,
+      notices: configNotices(c),
     }
   }),
-  R('POST', '/api/models/:id/test', async ({ params }) => {
-    const m = config.getModel(params[0])
-    if (!m) throw fail('没有这个模型', 404)
+  // kind: chat (default) / embedding / systemone — ids are only unique within a kind
+  R('POST', '/api/models/:id/test', async ({ params, query }) => {
+    const kind = query.get('kind') || 'chat'
+    const lookup = kind === 'embedding' ? config.getEmbeddingModel(params[0]) : kind === 'systemone' ? config.getSystemoneModel(params[0]) : config.getModel(params[0])
+    if (!lookup) throw fail('没有这个模型', 404)
     const start = Date.now()
     try {
-      const { text } = await utilityChat({ candidates: [m.id], system: '你是一个测试助手。', user: [{ type: 'text', text: '请只回复：OK' }], maxTokens: 50, quotaCtx: { isAdmin: true } })
+      if (kind === 'embedding') {
+        const r = await testEmbedding(params[0])
+        return { ok: true, ms: r.ms, text: `${r.dimensions} 维向量` }
+      }
+      if (kind === 'systemone') {
+        const r = await systemoneChoice(lookup as any, '【待评估的消息】\n今天天气真好', { instructions: '这条消息是什么类型？', criteria: { chat: '闲聊', question: '提问' } }, 10_000)
+        return { ok: true, ms: Date.now() - start, text: `choice=${r.choice ?? '?'}` }
+      }
+      const { text } = await utilityChat({ candidates: [lookup.id], system: '你是一个测试助手。', user: [{ type: 'text', text: '请只回复：OK' }], maxTokens: 50, quotaCtx: { isAdmin: true } })
       return { ok: true, ms: Date.now() - start, text: truncate(text, 200) }
     } catch (err: any) {
       return { ok: false, ms: Date.now() - start, error: truncate(err?.message ?? String(err), 500) }
     }
   }),
+  // upstream model names for the model-name dropdown: the provider's own list merged with the known ones
+  R('GET', '/api/providers/:name/models', async ({ params, query }) => {
+    const p = config.getProvider(params[0])
+    if (!p) throw fail('没有这个提供商', 404)
+    return liveModels(params[0], p, query.get('kind') === 'embedding' ? 'embedding' : 'chat', query.get('refresh') === '1')
+  }),
+  R('POST', '/api/playground/thinking', async ({ body }) => {
+    const cfg = { ...config.get().autoThinking, ...(typeof body.judge === 'string' ? { judge: body.judge } : {}) }
+    const transcript = playgroundTranscript(body)
+    const j = await judgeMessage(transcript, { isAdmin: true }, cfg)
+    const model = config.getModel(String(body.model ?? '')) ?? config.getModel(config.defaultModelId())
+    return {
+      ...j, level: config.autoLevel(model, j.kind), model: model?.id,
+      prompt: { system: config.getSystemoneModel(cfg.judge) ? '（System One：类别描述作为 criteria 发送）' : judgePrompt(cfg), user: renderTranscript(transcript) },
+    }
+  }),
+  R('POST', '/api/playground/proactive', async ({ body }) => {
+    const groupId = /^\d+$/.test(String(body.groupId ?? '')) ? String(body.groupId) : undefined
+    const base = config.effective(groupId).proactive
+    const cfg = { ...base, ...(typeof body.judge === 'string' ? { judge: body.judge } : {}) }
+    const since = body.sinceLast === null || body.sinceLast === '' || body.sinceLast === undefined ? undefined : Number(body.sinceLast)
+    const transcript = playgroundTranscript(body)
+    const v = await judgeProactive(transcript, cfg, since != null && Number.isFinite(since) ? since : undefined, { isAdmin: true })
+    const systemone = config.getSystemoneModel(cfg.judge || config.get().autoThinking.judge)
+    return { ...v, prompt: { system: systemone ? '（System One：适合/不该插话的标准作为 criteria 发送）' : proactivePrompt(cfg), user: renderTranscript(transcript) } }
+  }),
+  R('GET', '/api/proactive', () => ({
+    recent: recentProactive(),
+    groups: Object.entries(config.get().groups).filter(([, g]) => g.proactive?.enable).map(([id]) => ({ id, name: nameOf('group', id), ...config.effective(id).proactive })),
+  })),
   R('POST', '/api/providers/:name/balance', async ({ params }) => {
     const p = config.getProvider(params[0])
     if (!p) throw fail('没有这个提供商', 404)

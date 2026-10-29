@@ -99,7 +99,8 @@ Only erasable TS syntax (no enums/parameter properties/namespaces) — `erasable
   - `render_html` tool (`src/tools/render.ts`, `src/render/browser.ts`): uses Yunzai's puppeteer renderer
     (`lib/puppeteer/puppeteer.js#browserInit`, own Chromium only outside Yunzai); JS disabled + CSP, requests only
     to public hosts (SSRF guard), height-capped; images go to `turn.images` and are sent after the text.
-  - `thinking: auto` (`src/chat/thinking.ts`): local heuristic → `chat.autoThinking.{casual,question,complex}`.
+  - `thinking: auto` (`src/chat/thinking.ts`): judge picks an `autoThinking.categories` name → the model's level for
+    it (`models[].autoThinking`, then `autoThinking.levels`). See "Unified models, configurable judges" below.
     On Anthropic an effort change invalidates the cached message prefix; Gemini/OpenAI unaffected.
   - Persona presets may be `file:PERSONA.md` (config dir only; .md/.txt changes hot-reload). PERSONA.md rewritten:
     research-first for real questions, long answers allowed, render_html for structured content.
@@ -144,6 +145,27 @@ Only erasable TS syntax (no enums/parameter properties/namespaces) — `erasable
   - Fixed along the way: `thinking: off` sent nothing, so DeepSeek still reasoned (now `thinking: {type: disabled}`);
     Gemini one-shot calls (utilityChat) now use `store: false` (no server state; ~2x faster for the judge).
     Gemini 3.8 flash rejects `thinking_level: minimal`.
+- Unified models, configurable judges (2026-10-29):
+  - Config: one `providers` map (new types `voyage`, `systemone`) and three model lists — `models` (chat),
+    `embeddingModels`, `systemoneModels`. `memory.embedding.model` names an embedding model; `autoThinking.judge` /
+    `proactive.judge` name a chat or System One model (`src/chat/judge.ts#judgeTarget`). Older config.yaml files are
+    upgraded on load by `cli/migrate.mjs` (backup `config.yaml.pre-migration-<ts>.bak`); the terminal editor and the
+    web raw-YAML save run the same migration. The embedding vector-space tag keeps its old form
+    (`voyage|openai:<model>:<dims>`), so stored vectors survive the move.
+  - Auto thinking: categories, descriptions and levels are configuration; per-model levels because providers support
+    different sets (`cli/schema.mjs#effectiveThinking` shows what each level becomes). No keyword heuristic and no
+    hard-coded shortcuts (bare picture → question, short message → casual): those live in category descriptions. The
+    judge sees `renderTranscript()` — a bot line (name, ID, what `[at:you]` means), recent session turns and group lines,
+    then 【待评估的消息】 — and is told to evaluate only that. Failure → first category. `utilityChat` on an `auto`
+    model uses the first category's level (`config.fallbackLevel`), and `configNotices` warns about such roles.
+  - Proactive replies (`src/chat/proactive.ts`), only in groups with `groups.<id>.proactive.enable`: probability mode, or
+    judge mode — each message sampled with p; at the end of a `window`-second window with a sampled message one judge
+    call scores the newest message 0–1 (chat model: 0–100 integer; System One: P(reply)); reply when
+    score ≥ end + (start − end)·0.5^(t/halfLife), t = seconds since the bot last spoke there. The reply is a normal
+    turn with `proactive: true` (no user quota, may answer `[skip]`, which stores nothing).
+  - DeepSeek defaults to the Responses API: `deepseek-flash` takes images and tools but ignores `web_search`;
+    `deepseek-v4-pro` searches (usage `server_tool_use.tool_search`). Only `reasoning.effort: none` disables thinking
+    there (`thinking: {type: disabled}` is ignored) — verified with live calls 2026-10-29.
 - Prompt trim (2026-10-21): PERSONA.md keeps only character/voice; research and format rules live in prompt.ts
   (merged duplicate chit-chat / don't-invent lines, condensed command + sticker sections). Prompt 5034 → 3956 chars.
 - Model ids may contain Chinese (`MODEL_ID` in cli/schema.mjs); the runtime never restricted them, only the CLI.

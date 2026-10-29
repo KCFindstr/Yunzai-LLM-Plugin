@@ -41,7 +41,7 @@ memory:
   s.summary = '已有的滚动摘要'
   s.archive = [
     { id: 'legacy', day: yesterday, at: Date.now() - 86460000, text: '旧版截断的档案，仅剩人物称呼' },
-    { id: 'episode', day: yesterday, at: Date.now() - 86400000, text: '阿明和小红约好周日看猫展', sourceText: '原始聊天：阿明问周日看猫展，小红答应了。' },
+    { id: 'episode', day: yesterday, at: Date.now() - 86400000, text: '岛风和雪风约好周日看猫展', sourceText: '原始聊天：岛风问周日看猫展，雪风答应了。' },
   ]
   s.days = [{ id: 'digest', day: yesterday, at: Date.now(), sources: ['episode'], text: `${yesterday}，群内要事及闲聊如下：\n1.` }]
   const base = `http://127.0.0.1:${port}`
@@ -92,7 +92,7 @@ memory:
       await submit('保存')
       await page.waitForFunction((text: string) => document.querySelector('.rollout-detail')?.textContent?.includes(text), {}, text)
     }
-    await edit('每日概要', '修正后的完整每日概要：阿明和小红约好周日看猫展。')
+    await edit('每日概要', '修正后的完整每日概要：岛风和雪风约好周日看猫展。')
     assert.ok(dayInfo(key)[0].vector)
     await action('每日概要', '重新生成')
     await page.select('.modal select', 'selected')

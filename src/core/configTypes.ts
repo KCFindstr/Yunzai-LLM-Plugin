@@ -1,11 +1,14 @@
+/** Provider types with a chat adapter in src/llm. */
 export type ProviderType = 'openai' | 'openai-responses' | 'anthropic' | 'gemini'
+/** Any provider: chat, Voyage embeddings, or a TypeSafe System One classifier (Jev / self-hosted Kev). */
+export type AnyProviderType = ProviderType | 'voyage' | 'systemone'
 export type ThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
-/** `auto` picks a level per message (see chat.autoThinking). */
+/** `auto` picks a level per message (see autoThinking). */
 export type ThinkingSetting = ThinkingLevel | 'auto'
 export type QuotaScope = 'user' | 'group' | 'global'
 
 export interface ProviderConfig {
-  type: ProviderType
+  type: AnyProviderType
   baseUrl?: string
   /** One key or several (rotated on 401/429). `env:NAME` reads process.env.NAME. */
   apiKey?: string | string[]
@@ -60,6 +63,8 @@ export interface ModelConfig {
   model: string
   vision?: boolean
   thinking?: ThinkingSetting
+  /** thinking=auto: level per auto-thinking category, overriding autoThinking.levels */
+  autoThinking?: Record<string, ThinkingLevel>
   temperature?: number | null
   topP?: number | null
   maxTokens?: number
@@ -80,21 +85,24 @@ export interface ModelConfig {
   serverState?: boolean
 }
 
+/** Embedding model for recall over the chat archive (provider type voyage or OpenAI-compatible). */
+export interface EmbeddingModelConfig {
+  id: string
+  provider: string
+  model: string
+  dimensions: number
+}
+
+/** TypeSafe System One classifier (Jev, or a self-hosted Kev), usable as a judge. */
+export interface SystemOneModelConfig {
+  id: string
+  provider: string
+  model: string
+}
+
 export interface RateConfig {
   count: number
   perSeconds: number
-}
-
-export interface ThinkingJudgeConfig {
-  /** heuristic = local keyword rules; model = a cheap configured model; systemone = Jev (TypeSafe) or self-hosted Kev */
-  mode: 'heuristic' | 'model' | 'systemone'
-  /** mode=model: model id (empty = utilityModel, then the default model) */
-  model: string
-  /** mode=systemone: endpoint, API key and model name */
-  url: string
-  apiKey: string
-  systemoneModel: string
-  timeoutMs: number
 }
 
 export interface ChatSection {
@@ -115,13 +123,43 @@ export interface ChatSection {
   maxOutputTokens: number
   temperature: number | null
   thinking: ThinkingSetting
-  /** levels used by thinking=auto for casual chat / questions / complex requests */
-  autoThinking: { casual: ThinkingLevel; question: ThinkingLevel; complex: ThinkingLevel }
-  /** how thinking=auto classifies a message; falls back to the keyword heuristic on error/timeout */
-  thinkingJudge: ThinkingJudgeConfig
   includeImages: boolean
   maxImages: number
   includeQuoted: boolean
+}
+
+export interface AutoThinkingCategory {
+  /** what the judge answers with */
+  name: string
+  /** shown to the judge */
+  description: string
+}
+
+/** thinking=auto: a judge sorts each message into a category; the model's level for it is used. */
+export interface AutoThinkingSection {
+  /** chat model id or System One model id; empty = utilityModel, then the default model */
+  judge: string
+  timeoutMs: number
+  /** recent messages (this conversation and the group chat, each) shown to the judge for context */
+  context: number
+  /** default level per category; models[].autoThinking overrides */
+  levels: Record<string, ThinkingLevel>
+  /** in order; the first one is also the fallback when judging fails */
+  categories: AutoThinkingCategory[]
+}
+
+/** Speaking up in groups without being addressed. Enabled per group (groups.<id>.proactive.enable). */
+export interface ProactiveSection {
+  /** first gate: each message is sampled with this probability; only sampled windows reach the judge */
+  probability: number
+  /** seconds; at most one judge call per window, at its end, if a message in it was sampled */
+  window: number
+  /** chat or System One model id; 'always' = no judge, a sampled window replies; empty = autoThinking.judge, then utilityModel / default model */
+  judge: string
+  context: number
+  criteria: { reply: string; skip: string }
+  /** second gate: reply when the judge's score >= end + (start - end) * 0.5^(t / halfLife), t = seconds since the bot last replied in the group */
+  threshold: { start: number; end: number; halfLife: number }
 }
 
 export interface ReplySection {
@@ -256,7 +294,6 @@ export interface TriggerSection {
   alias: boolean
   prefixes: string[]
   private: 'off' | 'master' | 'all'
-  emptyAtReply: boolean
   groupWhitelist: (string | number)[]
   groupBlacklist: (string | number)[]
   userBlacklist: (string | number)[]
@@ -292,17 +329,11 @@ export interface MemorySection {
   embedding: EmbeddingSection
 }
 
-/** Embedding model for recall over the chat archive (independent of the chat providers). */
+/** Recall over the chat archive by embeddings. */
 export interface EmbeddingSection {
   enable: boolean
-  type: 'voyage' | 'openai'
-  baseUrl: string
-  /** Same forms as a provider key: one, several, or `env:NAME`. */
-  apiKey?: string | string[]
+  /** embeddingModels id */
   model: string
-  dimensions: number
-  /** Seconds. */
-  timeout: number
   /** Cosine similarity at which an archive entry counts as relevant even without shared keywords. */
   minScore: number
 }
@@ -316,6 +347,7 @@ export interface GroupOverride {
   reply?: Partial<ReplySection>
   sticker?: Partial<StickerSection>
   tools?: Partial<ToolsSection>
+  proactive?: Partial<ProactiveSection> & { enable?: boolean }
   /** Names in this group (platform ID -> name), overriding the global `names`. */
   names?: Record<string, string>
 }
@@ -325,6 +357,8 @@ export interface PluginConfig {
   admins: (string | number)[]
   providers: Record<string, ProviderConfig>
   models: ModelConfig[]
+  embeddingModels: EmbeddingModelConfig[]
+  systemoneModels: SystemOneModelConfig[]
   defaultModel: string
   fallbackModels: string[]
   utilityModel: string
@@ -335,6 +369,9 @@ export interface PluginConfig {
   names: Record<string, string>
   trigger: TriggerSection
   chat: ChatSection
+  autoThinking: AutoThinkingSection
+  /** defaults for groups that enable proactive replies */
+  proactive: ProactiveSection
   quota: { defaultScope: QuotaScope; exemptAdmins: boolean; notifyCooldown: number }
   reply: ReplySection
   sticker: StickerSection
@@ -363,4 +400,6 @@ export interface EffectiveConfig {
   reply: ReplySection
   sticker: StickerSection
   tools: ToolsSection
+  /** enabled only by groups.<id>.proactive.enable */
+  proactive: ProactiveSection & { enable: boolean }
 }

@@ -4,7 +4,7 @@ import { daily, incompleteUsageModels, limitsFor, resetUsage, summarize, topUser
 import { priceCacheInfo, refreshPrices, resolvePrice } from '../billing/pricing.ts'
 import { catalogEntries, catalogInfo, displayCmd, ensureCatalog, formatCommandCatalog, matchRule, scanCatalog, searchCommands } from '../commands/catalog.ts'
 import { config, resolveKeys } from '../core/config.ts'
-import type { ModelConfig, ProviderType, QuotaScope, ThinkingLevel } from '../core/configTypes.ts'
+import type { AnyProviderType, ModelConfig, QuotaScope, ThinkingLevel } from '../core/configTypes.ts'
 import { log } from '../core/log.ts'
 import { fetchBuffer, formatDuration, formatUsd, isPlainObject, maskSecret, truncate } from '../core/util.ts'
 import { botNickname, sendApi } from '../core/yunzai.ts'
@@ -12,7 +12,8 @@ import { clearSession, clearSessionsWhere, peekSession, sessionKey, sessionStats
 import { getQuoted } from '../chat/message.ts'
 import { pickModel, utilityChat } from '../chat/utility.ts'
 import * as help from '../help.ts'
-import { PROVIDER_TYPES } from '../llm/index.ts'
+// every provider type, including voyage (embeddings) and systemone (judges)
+import { CHAT_PROVIDER_TYPES, modelDefaults, PROVIDER_TYPES } from '../../cli/schema.mjs'
 import { addStickersFrom, collectImages } from '../stickers/add.ts'
 import { indexSticker, stickerIncomplete } from '../stickers/indexer.ts'
 import { sendSticker } from '../stickers/picker.ts'
@@ -436,9 +437,11 @@ const COMMANDS: Cmd[] = [
     async run({ e, args }) {
       const [id, provider, model] = args.split(/\s+/)
       if (!id || !provider || !model) return e.reply('格式：#llm添加模型 <id> <提供商> <模型名>')
-      if (!config.getProvider(provider)) return e.reply(`提供商「${provider}」不存在，先 #llm添加提供商`)
+      const p = config.getProvider(provider)
+      if (!p) return e.reply(`提供商「${provider}」不存在，先 #llm添加提供商`)
+      if (!CHAT_PROVIDER_TYPES.includes(p.type)) return e.reply(`提供商「${provider}」是 ${p.type} 类型，不能提供聊天模型；向量和 System One 模型请在网页面板「配置 → 模型」添加`)
       if (config.getModel(id)?.id === id) return e.reply(`模型 id「${id}」已存在`)
-      updateModels(ms => ms.push({ id, provider, model, pricing: 'auto' } as ModelConfig))
+      updateModels(ms => ms.push({ id, provider, model, pricing: 'auto', ...modelDefaults(model) } as ModelConfig))
       const m = config.getModel(id)!
       return e.reply(`✅ 已添加模型 ${id}\n价格：${priceLine(m)}\n可用 #llm模型设置 ${id} thinking low 等调整参数`)
     },
@@ -529,7 +532,7 @@ const COMMANDS: Cmd[] = [
     level: 'admin',
     async run({ e, args }) {
       const [name, type, baseUrl, key] = args.split(/\s+/)
-      if (!name || !PROVIDER_TYPES.includes(type as ProviderType))
+      if (!name || !PROVIDER_TYPES.includes(type as AnyProviderType))
         return e.reply(`格式：#llm添加提供商 <名称> <类型> [地址]\n类型：${PROVIDER_TYPES.join(' / ')}`)
       if (key && e.group_id) {
         await e.recall?.().catch?.(() => {})

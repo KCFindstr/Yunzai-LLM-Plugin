@@ -62,10 +62,14 @@ it('saves wizard changes atomically and keeps stored keys when omitted', async (
   const route = routes.find(r => r.method === 'PUT' && r.pattern.test('/api/setup'))!
   const apply = (changes: any[]) => route.run({ params: [], query: new URLSearchParams(), body: { changes } })
   const before = config.readRaw()
-  await assert.rejects(Promise.resolve().then(() => apply([{ path: 'memory.embedding.model', value: 'changed' }, { path: 'memory.embedding.dimensions', value: 1 }])) )
+  // the old memory.embedding / chat.thinkingJudge keys in `base` were migrated when the config loaded
+  assert.equal(config.get().memory.embedding.model, 'voyage-context-4')
+  assert.equal(config.get().autoThinking.judge, 'jev')
+  await assert.rejects(Promise.resolve().then(() => apply([{ path: 'embeddingModels.0.model', value: 'changed' }, { path: 'embeddingModels.0.dimensions', value: 1 }])) )
   assert.equal(config.readRaw(), before)
-  await apply([{ path: 'memory.embedding.model', value: 'changed' }, { path: 'memory.embedding.dimensions', value: 512 }])
-  assert.equal(config.get().memory.embedding.apiKey, 'test-vector-secret')
+  await apply([{ path: 'embeddingModels.0.model', value: 'changed' }, { path: 'embeddingModels.0.dimensions', value: 512 }])
+  assert.equal(config.getEmbeddingModel('voyage-context-4')!.model, 'changed')
+  assert.equal(config.getProvider('voyage')!.apiKey, 'test-vector-secret')
   await apply([{ path: 'providers.new', value: { type: 'openai', baseUrl: 'https://example.invalid/v1', apiKey: 'new-secret' } },
     { path: 'models.1', value: { id: 'second', provider: 'new', model: 'example-2' } }, { path: 'defaultModel', value: 'second' }])
   assert.equal(config.defaultModelId(), 'second')
@@ -222,8 +226,9 @@ it('walks existing configuration, saves embeddings, preserves keys and skips opt
     assert.equal(keyInput.value, ''); assert.match(keyInput.placeholder, /已配置/)
     await page.$eval('.setup-step input[type=number]', (el: HTMLInputElement) => { el.value = '512' })
     await submit()
-    assert.equal(config.get().memory.embedding.dimensions, 512)
-    assert.equal(config.get().memory.embedding.apiKey, 'test-vector-secret')
+    const embedding = config.getEmbeddingModel(config.get().memory.embedding.model)!
+    assert.equal(embedding.dimensions, 512)
+    assert.equal(config.getProvider(embedding.provider)!.apiKey, 'test-vector-secret')
     await go('sandbox')
     await page.waitForSelector('[data-setup-step="sandbox"]')
     assert.equal(await page.evaluate(() => Array.from(document.querySelectorAll<HTMLButtonElement>('.setup-step button')).find(b => b.textContent === '启用')!.disabled), true)

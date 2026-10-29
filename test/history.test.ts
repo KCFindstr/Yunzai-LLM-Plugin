@@ -1,4 +1,4 @@
-import { fakeEvent, mockServer, writeUserConfig } from './helpers.ts'
+import { fakeEvent, mockServer, setEmbedding, writeUserConfig } from './helpers.ts'
 import assert from 'node:assert/strict'
 import { after, beforeEach, describe, it } from 'node:test'
 
@@ -52,7 +52,7 @@ function seed() {
   s.summary = '之前的滚动摘要'
   s.state = { key: 'provider', previousId: 'old', len: 2 }
   s.archive = [
-    { id: 'episode', day: yesterday, at: Date.now() - 86400000, text: '讨论原神配队', sourceText: '原文：阿明问原神配队，小红建议双火。' },
+    { id: 'episode', day: yesterday, at: Date.now() - 86400000, text: '讨论原神配队', sourceText: '原文：岛风问原神配队，雪风建议双火。' },
     { id: 'neighbour', day: yesterday, at: Date.now() - 86400000, text: '周末约好看猫展' },
   ]
   s.days = [{ id: 'digest', day: yesterday, at: Date.now(), text: '旧的每日概要', sources: ['episode', 'neighbour'] }]
@@ -89,10 +89,10 @@ describe('history configuration and generation budgets', () => {
       assert.equal(server.requests.at(-1)!.body.max_tokens, 10000)
       const chatterKey = '10000:g19982'
       clearSession(chatterKey)
-      archiveChatter(chatterKey, localDay(), '阿明：周末看猫展', Date.now())
+      archiveChatter(chatterKey, localDay(), '岛风：周末看猫展', Date.now())
       await maintainArchive(chatterKey)
       assert.ok(server.requests.some(r => String(r.body.messages?.[0]?.content).includes('普通群聊记录') && r.body.max_tokens === 10000))
-      reply = '片段：阿明聊了猫\n摘要：阿明喜欢猫'
+      reply = '片段：岛风聊了猫\n摘要：岛风喜欢猫'
       appendTurn(key, { role: 'user', content: [{ type: 'text', text: '再聊猫' }] }, { role: 'assistant', content: '好' })
       await compactSession(key, { ...config.effective(), chat: { ...config.effective().chat, historyMaxTurns: 1 } }, {})
       assert.ok(server.requests.some(r => String(r.body.messages?.[0]?.content).includes('严格按两段输出') && r.body.max_tokens === 10000))
@@ -138,7 +138,7 @@ describe('history edits and regeneration', () => {
   it('regenerates an archive from its retained original text', async () => {
     await call('POST', `${base}/archive/episode/regenerate`, { model: 'main' })
     const request = server.requests.find(r => r.url.endsWith('/chat/completions'))!
-    assert.match(JSON.stringify(request.body.messages[1].content), /小红建议双火/)
+    assert.match(JSON.stringify(request.body.messages[1].content), /雪风建议双火/)
     assert.equal(archiveInfo(key)[0].text, reply)
     assert.ok(archiveInfo(key)[0].vector)
   })
@@ -269,7 +269,7 @@ describe('history vector refresh safety', () => {
   })
 
   it('re-embeds contextual neighbours when an archive fragment changes', async () => {
-    Object.assign(config.get().memory.embedding, { type: 'voyage', model: 'voyage-context-test' })
+    setEmbedding(config, { type: 'voyage', model: 'voyage-context-test' })
     await indexArchive(key)
     server.requests.length = 0
     await call('PUT', `${base}/archive/episode`, { text: '改约猫展' })
@@ -279,7 +279,7 @@ describe('history vector refresh safety', () => {
   })
 
   it('saves edits without a configured embedding key and reports that vectors are disabled', async () => {
-    config.get().memory.embedding.apiKey = ''
+    setEmbedding(config, { apiKey: '' })
     assert.equal((await call('PUT', `${base}/archive/digest`, { text: '手动修正' })).vectorStatus, 'disabled')
     assert.equal(dayInfo(key)[0].text, '手动修正')
   })

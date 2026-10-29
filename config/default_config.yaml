@@ -13,10 +13,12 @@ admins: []
 
 # --------------------------------------------------------------------------
 # 提供商：type 可选
-#   openai            OpenAI Chat Completions 兼容接口（DeepSeek/通义/Kimi/智谱/OpenRouter/Ollama 等绝大多数）
-#   openai-responses  OpenAI Responses API（/v1/responses）
+#   openai            OpenAI Chat Completions 兼容接口（通义/Kimi/智谱/OpenRouter/Ollama 等绝大多数）；也可提供 /embeddings 向量模型
+#   openai-responses  OpenAI Responses API（/v1/responses，OpenAI 与 DeepSeek）
 #   anthropic         Anthropic Messages API 及兼容接口（/v1/messages）
 #   gemini            Gemini Interactions API（/v1beta/interactions）
+#   voyage            Voyage AI 向量接口（只用于向量模型）
+#   systemone         TypeSafe System One 分类接口（Jev，或自建 Kev 填 http://127.0.0.1:8009/v1），用于判断模型
 # apiKey 可以是字符串或列表（多个 Key 自动轮换）；写成 env:变量名 则从环境变量读取。
 # 建议私聊机器人发送 #llm设置密钥 <提供商> <Key> 设置，不要在群里发 Key。
 # --------------------------------------------------------------------------
@@ -51,18 +53,37 @@ providers:
     serverState: true
   # DeepSeek 提供商配置
   deepseek:
-    # 使用 OpenAI Chat Completions 兼容协议
-    type: openai
+    # Responses API：支持工具调用、图片输入（deepseek-flash）和自带联网搜索（deepseek-v4-pro）
+    type: openai-responses
     # API 根地址
     baseUrl: https://api.deepseek.com
     # 服务密钥；支持列表和 env:变量名
     apiKey: ''
     # 余额查询适配器；可选 deepseek/openrouter/moonshot/siliconflow/none
     balance: deepseek
+  # Voyage AI 向量服务（旧聊天向量检索）
+  voyage:
+    # 向量接口
+    type: voyage
+    # API 根地址
+    baseUrl: https://api.voyageai.com/v1
+    # 服务密钥；支持 env:变量名
+    apiKey: ''
+    # 单次向量请求超时，单位秒
+    timeout: 10
+  # TypeSafe System One（Jev），用于自动思考强度和主动发言的判断
+  typesafe:
+    # System One 分类接口；自建 Kev 另加一个 systemone 提供商，地址填 http://127.0.0.1:8009/v1
+    type: systemone
+    # API 根地址（请求发往 <地址>/systemone）
+    baseUrl: https://api.typesafe.ai/v1
+    # Jev 服务密钥（需申请）；支持 env:变量名
+    apiKey: ''
 
 # --------------------------------------------------------------------------
-# 模型列表。id 是在指令里使用的别名。
-#   thinking:  off / minimal / low / medium / high / xhigh / max（不写则用 chat.thinking）
+# 聊天模型列表。id 是在指令里使用的别名（与向量模型、System One 模型的 id 不能重复）。
+#   thinking:  off / minimal / low / medium / high / xhigh / max / auto（不写则用 chat.thinking）
+#   autoThinking: thinking 为 auto 时，各消息类别使用的思考强度（不写的类别用 autoThinking.levels）
 #   vision:    是否支持图片输入（默认 true）
 #   nativeSearch: 联网搜索设为 native 时，是否使用该模型自带的搜索（默认 true）
 #   pricing:   auto（自动从价格表获取）或 {input, output, cacheRead, cacheWrite} 单位：美元/百万token
@@ -71,28 +92,82 @@ providers:
 #              也可分别设置 {user: {...}, group: {...}, global: {...}}，0 或不写表示不限
 #   extraBody: 原样合并进请求体的额外参数（用于各家特有参数）
 # --------------------------------------------------------------------------
-# 模型名均为各家官方 API 的模型 ID（2026-10 核对）；价格自动从价格表获取。
+# 模型名均为各家官方 API 的模型 ID（2026-10-29 核对）；价格自动从价格表获取。
 models:
-  # DeepSeek：deepseek-flash（便宜，分峰谷计价，按高峰价统计）、deepseek-v4-pro
+  # DeepSeek：deepseek-flash（V4.1，便宜，分峰谷计价，按高峰价统计；支持图片和工具，不支持自带搜索）
   # 本地模型别名
   - id: deepseek
     # 提供商配置名称
     provider: deepseek
     # 上游 API 的模型 ID
     model: deepseek-flash
-    # 关闭思考；off 必须保留为字符串
+    # 按消息自动选择思考强度（见 autoThinking）；DeepSeek 实际只区分 off / low / high / max
     thinking: auto
+    # thinking 为 auto 时各类消息的思考强度
+    autoThinking:
+      casual: 'off'
+      question: low
+      complex: high
     pricing: auto
     # 是否允许使用工具调用
     toolUse: true
     # 是否支持直接图片输入
     vision: true
+    # deepseek-flash 会忽略自带搜索工具（只有 deepseek-v4-pro 支持）
+    nativeSearch: false
+  # DeepSeek V4 Pro：工具调用和自带联网搜索；不支持图片输入
+  - id: deepseek-pro
+    # 提供商配置名称
+    provider: deepseek
+    # 上游 API 的模型 ID
+    model: deepseek-v4-pro
+    # 按消息自动选择思考强度
+    thinking: auto
+    # thinking 为 auto 时各类消息的思考强度
+    autoThinking:
+      casual: low
+      question: high
+      complex: max
+    pricing: auto
+    # 是否允许使用工具调用
+    toolUse: true
+    # 是否支持直接图片输入
+    vision: false
+    # 使用 DeepSeek 服务端联网搜索
+    nativeSearch: true
+
+# --------------------------------------------------------------------------
+# 向量模型（旧聊天向量检索，memory.embedding.model 选择其中一个 id）。
+#   provider 为 voyage 或 OpenAI 兼容（openai / openai-responses，请求 <地址>/embeddings）的提供商
+#   dimensions: voyage-4 系列支持 256 / 512 / 1024 / 2048；改模型或维度后旧向量会自动重建
+# --------------------------------------------------------------------------
+embeddingModels:
+  # Voyage 上下文向量模型（同一天的片段一起编码）
+  - id: voyage-context-4
+    # 提供商配置名称
+    provider: voyage
+    # 上游 API 的模型 ID
+    model: voyage-context-4
+    # 向量维度
+    dimensions: 512
+
+# --------------------------------------------------------------------------
+# System One 分类模型（可作为 autoThinking.judge / proactive.judge 的判断模型）
+# --------------------------------------------------------------------------
+systemoneModels:
+  # TypeSafe Jev
+  - id: jev
+    # 提供商配置名称
+    provider: typesafe
+    # 上游模型名
+    model: jev-latest
 
 # 默认模型 id。留空 = 自动选择第一个配置了 Key 的模型
 defaultModel: ''
 # 默认模型额度用完/不可用时依次尝试的模型
 fallbackModels: [deepseek]
-# 后台任务（对话摘要、表情识别）使用的便宜模型；留空 = 默认模型
+# 后台任务（对话摘要、表情识别）使用的便宜模型；留空 = 默认模型。
+# 这类调用不做消息判断：若该模型的思考强度为 auto，固定使用 autoThinking 第一个类别的强度
 utilityModel: ''
 # 默认模型不支持图片时用于识图的模型（表情识别也会优先用它）
 visionModel: ''
@@ -114,7 +189,8 @@ persona:
       别人请你帮忙时认真靠谱；开玩笑时也能接梗。被问到身份时可以坦然说自己是群里的AI助手。
 
 # --------------------------------------------------------------------------
-# 分群设置：键为群号，可覆盖 enable / model / persona / thinking / chat / reply / sticker / tools
+# 分群设置：键为群号，可覆盖 enable / model / persona / thinking / chat / reply / sticker / tools / proactive
+# 主动发言只能在这里按群开启（proactive.enable），其余参数默认取顶层 proactive。
 # 例：
 # groups:
 #   '123456789':
@@ -123,6 +199,7 @@ persona:
 #     model: haiku
 #     persona: default
 #     sticker: { probability: 0.3 }
+#     proactive: { enable: true, probability: 0.3 }
 # --------------------------------------------------------------------------
 groups: {}
 
@@ -131,13 +208,13 @@ groups: {}
 # 用于对话里的发言人、最近群友、群聊记录和长期记忆的称呼。某个群里单独的称呼写在 groups.<群号>.names。
 # 例：
 # names:
-#   '123456789': 阿明
-#   'A1B2C3D4E5F6': 小红        # QQBot 的用户 ID
+#   '123456789': 岛风
+#   'A1B2C3D4E5F6': 天津风       # QQBot 的用户 ID
 # --------------------------------------------------------------------------
 names: {}
 
 # --------------------------------------------------------------------------
-# 触发方式：只有被明确呼叫时才会回复，永不主动发言
+# 触发方式：被明确呼叫时回复；主动发言需在群设置里单独开启（见 proactive）
 # --------------------------------------------------------------------------
 trigger:
   # 群里 @机器人
@@ -150,8 +227,6 @@ trigger:
   prefixes: []
   # 私聊：off 关闭 / master 仅主人和插件管理员 / all 所有人
   private: master
-  # 只@不说话时随机回一句“在呢”之类（不消耗 token）
-  emptyAtReply: true
   # 仅允许这些群触发；空列表表示不限制
   groupWhitelist: []
   # 禁止触发的群号，优先于白名单
@@ -197,39 +272,81 @@ chat:
   # 温度，null = 不发送该参数（推荐，部分新模型不支持自定义温度）
   temperature: null
   # 默认思考强度（模型可单独设置）：off / minimal / low / medium / high / xhigh / max，
-  # 或 auto = 按消息自动选择（闲聊用 casual，提问用 question，需要分析/计算/写代码/查资料用 complex）
+  # 或 auto = 由判断模型按消息类别自动选择（见 autoThinking）
   thinking: low
-  # 自动判断的消息类型 -> 实际思考强度
-  autoThinking:
-    # 闲聊、寒暄
-    casual: low
-    # 普通提问
-    question: medium
-    # 复杂分析、计算、编程或检索
-    complex: high
-  # auto 模式怎样判断消息类型（出错或超时自动退回 heuristic）：
-  #   heuristic = 本地关键词规则（零延迟、零成本，较粗糙）
-  #   model     = 用一个便宜的模型判断（约 0.6~1s，每条约 200 token；推荐 gemini-3.5-flash-lite 或 deepseek-flash，关闭思考）
-  #   systemone = TypeSafe Jev（需申请 Key），或自建 Kev（url 填 http://127.0.0.1:8009/v1/systemone）
-  thinkingJudge:
-    # 判断方式：heuristic / model / systemone
-    mode: model
-    # 留空 = utilityModel → 默认模型
-    model: ''
-    # System One 分类接口的完整地址
-    url: https://api.typesafe.ai/v1/systemone
-    # Jev 服务密钥，支持 env:变量名；本地 Kev 可不需要
-    apiKey: ''
-    # System One 使用的分类模型名称
-    systemoneModel: jev-latest
-    # 分类请求超时，单位毫秒；失败自动退回关键词判断
-    timeoutMs: 5000
   # 是否把用户发的图片给模型看
   includeImages: true
   # 每轮最多传给模型几张图片（含引用图片）
   maxImages: 2
   # 是否读取用户引用的那条消息
   includeQuoted: true
+
+# --------------------------------------------------------------------------
+# 自动思考强度：模型的 thinking 为 auto 时，先由判断模型把消息归入一个类别，再用该模型为这个类别设置的思考强度
+# （models[].autoThinking，未设置的类别用这里的 levels）。判断模型只评估最后一条消息，最近聊天只用于理解语境。
+# 判断出错或超时时使用第一个类别。后台任务（摘要、识图等）不做判断，也固定使用第一个类别的强度。
+# --------------------------------------------------------------------------
+autoThinking:
+  # 判断模型：聊天模型 id（约 0.6~1s，每条约 300 token；建议关闭思考的便宜模型）或 System One 模型 id（如 jev）。
+  # 留空 = utilityModel → 默认模型
+  judge: ''
+  # 判断请求超时，单位毫秒；超时或出错使用第一个类别
+  timeoutMs: 5000
+  # 附带的最近消息条数（本会话的对话和最近群聊各取这么多），帮助判断“那第二个呢”这类追问；0 = 只看当前消息
+  context: 6
+  # 各类别的默认思考强度；每个模型可在 models[].autoThinking 覆盖
+  levels:
+    casual: low
+    question: medium
+    complex: high
+  # 消息类别：判断模型按描述选一个，输出类别名。可增删改；第一个类别也是出错时的后备类别
+  categories:
+    # 闲聊
+    - name: casual
+      # 给判断模型看的描述
+      description: 闲聊、打招呼、玩梗、逗机器人、问机器人自己（你是谁/你喜欢什么/你觉得呢）、让机器人执行查询指令（查面板、深渊、体力等）、让机器人记住某事或发表情；只发表情包或梗图配一句玩笑；只@机器人没说话。
+    # 普通问题
+    - name: question
+      # 给判断模型看的描述
+      description: 有明确答案、一两步就能答的问题：一个事实、定义、日期、价格、版本、属性、简单用法、短句翻译、常识科普；附带需要看懂的图片（不是表情包）时至少属于这一类：这是什么、图里写了什么、认出角色/物品/地点。
+    # 复杂问题
+    - name: complex
+      # 给判断模型看的描述
+      description: 需要多步推理或综合信息：配队/抽卡/资源规划、比较分析、写代码或排查报错、计算、写文章、制定计划、整理攻略、汇总多个来源的新闻、根据对方给出的条件出主意；看图分析：截图里的报错/代码/题目/图表数据、根据图片给建议、一张图问多件事。
+
+# --------------------------------------------------------------------------
+# 主动发言：在没有被@的群聊里自己接话。只在群设置 groups.<群号>.proactive.enable 开启的群生效；
+# 这里是各群共用的默认参数，群设置里可单独覆盖。要发出一条主动回复需要依次通过两层：
+#   1. 概率：每条新消息独立按 probability 抽签；window 秒的窗口里至少一条抽中，窗口结束时才进入第 2 层
+#   2. 判断模型：对窗口里最新的一条消息给出 0~1 的“该接话”分数，分数 ≥ 阈值曲线才回复
+#      （judge 设为 always 时跳过这一层：抽中即回复，纯按概率）
+#   阈值曲线：threshold(t) = end + (start - end) × 0.5^(t / halfLife)，
+#             t = 距机器人自己上次在本群回复的秒数（任何回复都算；与群里其他人发言无关）
+# 主动回复不计入发言人的个人额度（群/全局额度照常）；模型认为没必要接话时可以不发
+# --------------------------------------------------------------------------
+proactive:
+  # 第 1 层：每条消息被抽中的概率
+  probability: 0.3
+  # 判断间隔（秒）：窗口内无论多少条消息被抽中，最多判断一次
+  window: 60
+  # 判断模型（聊天模型或 System One 模型 id）；always = 不调用判断模型，抽中即回复；留空 = autoThinking.judge → utilityModel → 默认模型
+  judge: ''
+  # 附带的最近群聊条数（最后一条是要评估的消息）
+  context: 12
+  # 给判断模型看的标准
+  criteria:
+    # 适合插话的情况
+    reply: 有人在问一个你能回答而还没人回答的问题；话题和你的人设、兴趣或之前聊过的内容有关，你能自然地接上一句；有人提到你但没有@你；气氛热闹、接一句玩笑很自然。
+    # 不该插话的情况
+    skip: 两三个人之间的私人对话；和你无关或你插不上话的话题；问题已经有人回答；刷屏、纯表情或无意义的消息；严肃或敏感的讨论；你刚说过话、再说会显得话多。
+  # 回复阈值曲线：第 2 层分数 ≥ 阈值才回复；横轴是距机器人自己上次在本群回复的时间
+  threshold:
+    # 机器人刚回复过时的阈值（越高越不容易连续插话）
+    start: 0.95
+    # 机器人很久没回复时的阈值
+    end: 0.6
+    # 阈值从 start 降到一半距离所需的秒数
+    halfLife: 900
 
 # --------------------------------------------------------------------------
 # 额度（按实际计费换算的美元金额，5小时 / 7天滚动窗口；具体数额在每个模型的 quota 里设置）
@@ -506,22 +623,12 @@ memory:
   # 每次检索旧聊天（recall 工具、每轮自动回忆、网页面板的向量查询）最多返回几条，1-100。
   # 越大模型看到的旧聊天越多，但每轮的 token 也越多；自动回忆另外只取 2-3 条，无明确主题时跳过
   recallLimit: 5
-  # 旧聊天档案优先按向量相似度检索；未配置 Key 或向量接口失败时退回关键词检索
+  # 旧聊天档案优先按向量相似度检索；向量模型的提供商未配置 Key 或接口失败时退回关键词检索
   embedding:
     # 是否优先使用向量检索旧聊天；关闭后仍可用关键词
     enable: true
-    # voyage = Voyage AI；openai = OpenAI 兼容的 /embeddings
-    type: voyage
-    # 向量服务的 API 根地址
-    baseUrl: https://api.voyageai.com/v1
-    # 可写 env:VOYAGE_API_KEY 从环境变量读取
-    apiKey: ''
-    # 向量模型 ID，独立于聊天模型
+    # 向量模型 id（embeddingModels 中的别名）；Key 在对应提供商里设置
     model: voyage-context-4
-    # voyage-4 系列支持 256 / 512 / 1024 / 2048；改模型或维度后旧向量会自动重建
-    dimensions: 512
-    # 单次向量请求超时，单位秒
-    timeout: 10
     # 余弦相似度达到此值即视为相关（即使没有共同关键词）
     minScore: 0.3
 

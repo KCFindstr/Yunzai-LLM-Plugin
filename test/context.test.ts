@@ -1,4 +1,4 @@
-import { fakeEvent, mockServer, writeUserConfig } from './helpers.ts'
+import { fakeEvent, mockServer, setEmbedding, writeUserConfig } from './helpers.ts'
 import assert from 'node:assert/strict'
 import { after, beforeEach, describe, it } from 'node:test'
 import { config } from '../src/core/config.ts'
@@ -103,10 +103,10 @@ describe('message scheduling', () => {
 
 describe('recent identities and conversation layers', () => {
   it('retains real names when later events supply numeric placeholders and reads cached OneBot profiles', () => {
-    const { e } = fakeEvent({ group_id: 62001, user_id: 1, sender: { nickname: '阿明' }, message: [{ type: 'at', qq: 7, name: '大肥鱼' }] })
+    const { e } = fakeEvent({ group_id: 62001, user_id: 1, sender: { nickname: '岛风' }, message: [{ type: 'at', qq: 7, name: '大肥鱼' }] })
     observeUsers(e)
     observeUsers({ ...e, sender: { nickname: '1' }, message: [] })
-    assert.equal(knownName(e), '阿明')
+    assert.equal(knownName(e), '岛风')
     assert.ok(rosterLines(e, 12).some(line => line.includes('大肥鱼 [at:7]')))
     const cached = { ...e, user_id: 2, sender: { nickname: '2' }, bot: { gml: new Map([[62001, new Map([[2, { card: '群名片' }]])]]) } }
     observeUsers(cached)
@@ -131,12 +131,12 @@ describe('recent identities and conversation layers', () => {
     const key = '10000:g64001'
     clearSession(key)
     const add = (text: string) => appendTurn(key, { role: 'user', content: [{ type: 'text', text }] }, { role: 'assistant', content: '记住了' })
-    add('周六一起看薄荷猫视频，称呼叫阿明')
+    add('周六一起看薄荷猫视频，称呼叫岛风')
     add('password=not-for-archive')
     add('最新消息')
     const dropped = truncateIfNeeded(key, { ...config.effective().chat, historyMaxTurns: 1 })
     assert.equal(dropped.length, 4)
-    assert.match((await recallSession(key, '薄荷猫')).join(''), /阿明/)
+    assert.match((await recallSession(key, '薄荷猫')).join(''), /岛风/)
     assert.doesNotMatch((await recallSession(key, '')).join(''), /password/)
     assert.deepEqual(await recallSession('10000:g64002', ''), [])
     clearSession(key)
@@ -211,7 +211,7 @@ describe('recent identities and conversation layers', () => {
 })
 
 describe('vector recall', () => {
-  const embeddingConfig = () => ({ ...config.get().memory.embedding, enable: true, type: 'voyage' as const, baseUrl: server.url, apiKey: 'voyage-test', model: 'voyage-4-lite', dimensions: 512, minScore: 0.5 })
+  const embeddingConfig = () => ({ enable: true, type: 'voyage' as const, baseUrl: server.url, apiKey: 'voyage-test', model: 'voyage-4-lite', dimensions: 512, minScore: 0.5 })
   // two separate archive entries: one per truncation
   const seed = (key: string) => {
     clearSession(key)
@@ -228,9 +228,9 @@ describe('vector recall', () => {
   it('finds an episode by meaning when no words are shared, and only with embeddings enabled', async () => {
     const key = '10000:p70001'
     seed(key)
-    config.get().memory.embedding = { ...embeddingConfig(), enable: false }
+    setEmbedding(config, { ...embeddingConfig(), enable: false })
     assert.deepEqual(await recallSession(key, '周末那个约定'), [])
-    config.get().memory.embedding = embeddingConfig()
+    setEmbedding(config, embeddingConfig())
     const hits = await recallSession(key, '周末那个约定')
     assert.equal(hits.length, 1)
     assert.match(hits[0], /薄荷猫/)
@@ -239,7 +239,7 @@ describe('vector recall', () => {
   it('sends Voyage request fields and embeds each archive entry only once', async () => {
     const key = '10000:p70002'
     seed(key)
-    config.get().memory.embedding = embeddingConfig()
+    setEmbedding(config, embeddingConfig())
     const before = server.requests.length
     await recallSession(key, '周末')
     await recallSession(key, '显卡')
@@ -257,7 +257,7 @@ describe('vector recall', () => {
     const archive = peekSession(key)!.archive!
     // A long unrelated keyword dominates the old additive lexical score, while vectors prefer the topic.
     archive[1].text = '显卡驱动怎么装 unrelated-keyword'
-    config.get().memory.embedding = embeddingConfig()
+    setEmbedding(config, embeddingConfig())
     const hits = await recallSession(key, '周末 unrelated-keyword', 3)
     assert.equal(hits.length, 1)
     assert.match(hits[0], /薄荷猫/)
@@ -267,7 +267,7 @@ describe('vector recall', () => {
   it('falls back to keyword matching when the embedding API fails', async () => {
     const key = '10000:p70003'
     seed(key)
-    config.get().memory.embedding = embeddingConfig()
+    setEmbedding(config, embeddingConfig())
     embedFail = true
     assert.match((await recallSession(key, '显卡驱动')).join(''), /显卡/)
     assert.deepEqual(await recallSession(key, '周末那个约定'), [])

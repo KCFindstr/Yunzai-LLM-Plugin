@@ -9,6 +9,8 @@ export const openaiResponses: Adapter = {
   async chat(p: ChatParams): Promise<ChatResult> {
     const base = p.provider.baseUrl || 'https://api.openai.com/v1'
     const official = /api\.openai\.com/i.test(base)
+    // DeepSeek's Responses endpoint thinks by default; only effort "none" turns it off (checked 2026-10)
+    const deepseek = /deepseek\.com/i.test(base)
     const vision = p.model.vision !== false
     const store = p.provider.store ?? p.provider.serverState ?? false
     const msgs = p.state ? p.messages.slice(p.state.skip) : p.messages
@@ -56,7 +58,7 @@ export const openaiResponses: Adapter = {
     if (effort) {
       body.reasoning = { effort, summary: 'auto' }
       if (!store) body.include = ['reasoning.encrypted_content']
-    }
+    } else if (deepseek) body.reasoning = { effort: 'none' }
     if (p.temperature != null) body.temperature = p.temperature
     if (p.model.topP != null) body.top_p = p.model.topP
     if ((p.provider.promptCacheKey ?? official) && p.cacheKey) body.prompt_cache_key = p.cacheKey
@@ -97,7 +99,8 @@ export const openaiResponses: Adapter = {
         cacheWrite1h: 0,
         output: u.output_tokens ?? 0,
         reasoning: u.output_tokens_details?.reasoning_tokens ?? 0,
-        webSearches: searches,
+        // DeepSeek reports the searches it ran (a web_search_call item may hold several, or a fetch)
+        webSearches: typeof u.server_tool_use?.tool_search === 'number' ? u.server_tool_use.tool_search : searches,
       },
       native: { provider: 'openai-responses', model: p.model.model, data: output },
       stopReason: res?.status === 'incomplete' ? `incomplete:${res?.incomplete_details?.reason ?? ''}` : (res?.status ?? 'unknown'),

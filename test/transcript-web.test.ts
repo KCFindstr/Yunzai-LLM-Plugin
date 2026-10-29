@@ -13,8 +13,8 @@ it('renders safe Markdown and mention chips with independent response switches, 
   const port = await new Promise<number>(resolve => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const p = (s.address() as net.AddressInfo).port; s.close(() => resolve(p)) }) })
   writeUserConfig(`web: { host: 127.0.0.1, port: ${port}, password: fixture-password }\n`); config.load()
   fs.cpSync(path.join(PLUGIN_ROOT, 'web'), path.join(TMP, 'web'), { recursive: true })
-  const text = '## 核对结果\n\n[at:you] **已确认**，请 [at:A1B2](阿明) 查看。\n\n- 第一条结果\n- 第二条结果\n\n| 模型 | 结果 |\n| --- | --- |\n| 示例 | 通过 |\n\n```js\nconst id = "[at:code]";\n```\n\n[公开资料](https://example.invalid/source)\n\n[危险链接](javascript:alert(1))\n\n<img src=x onerror="window.__transcript_xss=true">\n\n![远程图片](https://example.invalid/do-not-load.png)'
-  const id = startRollout({ conv: 'bot:p60001', input: '[at:you] 请向 [at:A1B2](阿明) 说明结果', source: 'chat', inputImageCount: 0 })
+  const text = '## 核对结果\n\n[at:you] **已确认**，请 [at:A1B2](岛风) 查看。\n\n- 第一条结果\n- 第二条结果\n\n| 模型 | 结果 |\n| --- | --- |\n| 示例 | 通过 |\n\n```js\nconst id = "[at:code]";\n```\n\n[公开资料](https://example.invalid/source)\n\n[危险链接](javascript:alert(1))\n\n<img src=x onerror="window.__transcript_xss=true">\n\n![远程图片](https://example.invalid/do-not-load.png)'
+  const id = startRollout({ conv: 'bot:p60001', input: '[at:you] 请向 [at:A1B2](岛风) 说明结果', source: 'chat', inputImageCount: 0 })
   recordRolloutEvent(id, { kind: 'response', text: '**检查完成** [at:A1B2]', step: 1 })
   updateRollout(id, { status: 'completed', reply: text, model: 'fixture-model' })
   log.info('fixture HEALTHY database')
@@ -56,7 +56,7 @@ it('renders safe Markdown and mention chips with independent response switches, 
     assert.equal(await page.$eval('.rollout-reply h2', (el: Element) => el.textContent), '核对结果')
     assert.equal(await page.$$eval('.rollout-reply .markdown-table tbody tr', (els: Element[]) => els.length), 1)
     assert.equal(await page.$$eval('.rollout-list strong .mention-chip', (els: Element[]) => els.length), 2)
-    assert.equal(await page.$eval('.rollout-reply .mention-chip[data-user-id=A1B2]', (el: Element) => el.textContent), '@阿明')
+    assert.equal(await page.$eval('.rollout-reply .mention-chip[data-user-id=A1B2]', (el: Element) => el.textContent), '@岛风')
     assert.equal(await page.$eval('.rollout-reply pre code', (el: Element) => el.textContent), 'const id = "[at:code]";')
     assert.equal(await page.$('.rollout-reply pre .mention-chip'), null)
     assert.equal(await page.$('.rollout-reply img, .rollout-reply script, .rollout-reply a[href^="javascript:"]'), null)

@@ -47,8 +47,8 @@ beforeEach(() => {
 describe('memory store bounds', () => {
   it('dedupes, enforces per-entry/entry-count/total limits and refuses sensitive data', () => {
     const k = 'u-bounds'
-    assert.equal(store.addMemory('user', k, '喜欢被叫阿明').ok, true)
-    const dup = store.addMemory('user', k, '喜欢被叫阿明哦')
+    assert.equal(store.addMemory('user', k, '喜欢被叫岛风').ok, true)
+    const dup = store.addMemory('user', k, '喜欢被叫岛风哦')
     assert.ok(dup.ok && dup.merged, 'near-duplicate merged instead of added')
     assert.equal(store.listMemory('user', k).length, 1)
     assert.match((store.addMemory('user', k, '这是一条非常非常非常非常长的超过二十个字的记忆内容') as any).reason, /最多 20 字/)
@@ -105,8 +105,8 @@ describe('memory in conversation', () => {
     const b1 = srv.requests[0].body
     const b3 = srv.requests[2].body
     assert.equal(b1.messages[0].content, b3.messages[0].content, 'system prompt byte-identical')
-    assert.match(b3.messages[1].content, /【长期记忆·关于 小明\(平台ID 50001\)】\n\[m\w+\] 喜欢被叫小龙/)
-    assert.match(b1.messages[1].content, /【长期记忆·关于 小明\(平台ID 50001\)】\n（还没有/, 'empty memory nudges the model to start recording')
+    assert.match(b3.messages[1].content, /【长期记忆·关于 岛风\(平台ID 50001\)】\n\[m\w+\] 喜欢被叫小龙/)
+    assert.match(b1.messages[1].content, /【长期记忆·关于 岛风\(平台ID 50001\)】\n（还没有/, 'empty memory nudges the model to start recording')
   })
 
   it('refuses group-memory writes from non-admins when groupWrite=admin', async () => {

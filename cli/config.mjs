@@ -12,7 +12,8 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import YAML from 'yaml'
-import { configProblems, dropRetired, MODEL_ID, modelSuggestions, PRESET_PROVIDERS, PRICING_FIELDS, PROVIDER_TYPES, schemaAt, SCHEMA, suggestKeys, THINKING, validate, validatePath, valuesOf } from './schema.mjs'
+import { CHAT_PROVIDER_TYPES, configNotices, configProblems, dropRetired, MODEL_ID, modelDefaults, modelSuggestions, PRESET_PROVIDERS, PRICING_FIELDS, PROVIDER_TYPES, schemaAt, SCHEMA, suggestKeys, THINKING_SETTING, validate, validatePath, valuesOf } from './schema.mjs'
+import { migrateConfig } from './migrate.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const CONFIG_DIR = process.env.YZ_LLM_CONFIG_DIR || path.resolve(here, '..', 'config')
@@ -30,8 +31,8 @@ const defaults = YAML.parse(fs.readFileSync(DEFAULT_FILE, 'utf8')) ?? {}
 const original = fs.existsSync(USER_FILE) ? fs.readFileSync(USER_FILE, 'utf8') : '# Yunzai-LLM-Plugin 用户配置（只写要覆盖的项）\n'
 const doc = YAML.parseDocument(original)
 if (!doc.contents) doc.contents = doc.createNode({})
-// removed with the next save, so a leftover setting never blocks validation
-const retired = dropRetired(doc)
+// older settings are upgraded (and retired ones removed) with the next save, so they never block validation
+const retired = [...migrateConfig(doc, defaults), ...dropRetired(doc)]
 let dirty = retired.length > 0
 
 const isObj = v => v && typeof v === 'object' && !Array.isArray(v)
@@ -289,6 +290,8 @@ async function promptFor(node, label, cur, { ctx, overridden = false, def } = {}
       const v = await guard(prompts.password({ message: label, mask: '*' }))
       return v ? parseKeys(String(v).trim()) : BACK
     }
+    // category -> level maps are edited as YAML too
+    case 'levels':
     case 'any': {
       if (overridden) {
         const a = await select(label, [{ name: '编辑 YAML', value: 'edit' }, ...resetChoice])
@@ -411,13 +414,14 @@ async function addProvider() {
   if (/deepseek\.com/.test(baseUrl)) p.balance = 'deepseek'
   set(['providers', name], p)
   console.log(C.ok(`✓ 已添加提供商 ${name}`))
-  if (modelSuggestions(p).length && (await confirm('现在为它添加一个模型？', true))) await addModel(name)
+  if (CHAT_PROVIDER_TYPES.includes(type) && (await confirm('现在为它添加一个模型？', true))) await addModel(name)
+  else if (!CHAT_PROVIDER_TYPES.includes(type)) console.log(C.dim(`${type} 提供商的模型在「${type === 'voyage' ? 'embeddingModels（向量模型）' : 'systemoneModels（System One 模型）'}」里添加`))
 }
 
 async function addModel(providerName) {
   const cfg = eff()
-  const providers = Object.keys(cfg.providers ?? {})
-  if (!providers.length) return console.log(C.err('请先添加提供商'))
+  const providers = Object.keys(cfg.providers ?? {}).filter(p => CHAT_PROVIDER_TYPES.includes(cfg.providers[p]?.type))
+  if (!providers.length) return console.log(C.err('请先添加聊天模型的提供商'))
   const provider = providerName ?? (await select('使用哪个提供商', providers.map(p => ({ name: `${p} ${C.dim(cfg.providers[p].type)}`, value: p }))))
   if (provider === BACK) return
   const sugg = modelSuggestions(cfg.providers[provider])
@@ -430,9 +434,10 @@ async function addModel(providerName) {
     default: ids.includes(defId) ? undefined : defId,
     validate: x => (!MODEL_ID.test(x.trim()) ? '只能包含中英文、数字和 . _ -（不能有空格）' : ids.includes(x.trim()) ? '已存在' : true),
   })
-  const thinking = await select('思考强度', THINKING.map(t => ({ name: t, value: t })), { back: false, defaultValue: 'low' })
-  const vision = await confirm('支持图片输入？', !/deepseek/.test(model))
-  const entry = { id, provider, model, thinking, pricing: 'auto', ...(vision ? {} : { vision: false }) }
+  const thinking = await select('思考强度（auto = 按消息自动选择）', THINKING_SETTING.map(t => ({ name: t, value: t })), { back: false, defaultValue: 'low' })
+  const caps = modelDefaults(model)
+  const vision = await confirm('支持图片输入？', caps.vision)
+  const entry = { id, provider, model, thinking, pricing: 'auto', ...caps, vision }
   set(['models'], [...(cfg.models ?? []), entry])
   console.log(C.ok(`✓ 已添加模型 ${id}`))
   if (await confirm('设为默认模型？', !cfg.defaultModel)) set(['defaultModel'], id)
@@ -551,7 +556,7 @@ function check() {
   const problems = []
   const userErr = validate(SCHEMA, doc.toJS() ?? {}, c, undefined)
   if (userErr) problems.push(`config.yaml 中有无效配置：${userErr}`)
-  problems.push(...configProblems(c))
+  problems.push(...configProblems(c), ...configNotices(c).map(n => `提示：${n.text}`))
   return problems
 }
 

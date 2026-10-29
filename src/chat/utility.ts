@@ -50,8 +50,10 @@ export async function utilityChat(opts: {
   if (!picked) throw new Error(opts.vision ? '没有可用的视觉模型（需配置 vision 模型及 API Key）' : '没有可用的模型')
   const block = checkQuota(picked.model, opts.quotaCtx)
   if (block) throw new Error(`模型 ${picked.model.id} 额度已用完`)
-  // background jobs (summaries, sticker naming) don't need per-message 'auto' selection
-  const thinking: ThinkingLevel = opts.thinking ?? (!picked.model.thinking || picked.model.thinking === 'auto' ? 'off' : picked.model.thinking)
+  // background jobs (summaries, sticker naming) aren't judged: 'auto' runs at the first category's level
+  // (a model without its own level stays off, unless the chat default it inherits is 'auto')
+  const setting = picked.model.thinking ?? (config.get().chat.thinking === 'auto' ? 'auto' : undefined)
+  const thinking: ThinkingLevel = opts.thinking ?? (!setting ? 'off' : setting === 'auto' ? config.fallbackLevel(picked.model) : setting)
   const call = (t: ThinkingLevel) =>
     chat({
       model: picked.model,

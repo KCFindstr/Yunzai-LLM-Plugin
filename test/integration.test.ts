@@ -265,12 +265,12 @@ describe('chat flow', () => {
   it('converts model mention markers into real group at segments end to end', async () => {
     srvReplies.push(textReply('好呀，[at:20010] 轮到你啦'))
     const { sent } = await trigger({ group_id: 30002, user_id: 20009, message_id: 'mention-turn', message: [
-      { type: 'at', qq: 10000 }, { type: 'text', text: '请提醒她' }, { type: 'at', qq: 20010, name: '小红' },
+      { type: 'at', qq: 10000 }, { type: 'text', text: '请提醒她' }, { type: 'at', qq: 20010, name: '雪风' },
     ] })
     assert.equal(sent.length, 1)
     assert.deepEqual(sent[0].msg.filter((item: any) => item.type === 'at').map((item: any) => item.qq), ['20010'])
     assert.match(srv.requests[0].body.messages[0].content, /\[at:ID\]/)
-    assert.match(srv.requests[0].body.messages[1].content, /\[at:20010\]\(小红\)/)
+    assert.match(srv.requests[0].body.messages[1].content, /\[at:20010\]\(雪风\)/)
   })
 
   it('allows a model to mention an identity from long-term memory absent from the recent roster', async () => {
@@ -303,10 +303,13 @@ describe('chat flow', () => {
     assert.match(stored, /\[at:7\] 你才是大肥鱼，\[at:you\] 是哈基米/)
   })
 
-  it('an empty self mention still uses the short acknowledgement without calling the model', async () => {
+  it('an empty self mention goes to the model (it may be a nudge to answer an earlier message)', async () => {
+    srvReplies.push(textReply('刚才的问题我来答'))
     const { handled, sent } = await trigger({ user_id: 20013, message_id: 'only-self-at', msg: '', message: [{ type: 'at', qq: 10000 }] })
     assert.equal(handled, true)
-    assert.equal(srv.requests.length, 0)
+    const main = srv.requests.filter((r: any) => !/消息分类器/.test(JSON.stringify(r.body.messages?.[0] ?? r.body.instructions ?? '')))
+    assert.equal(main.length, 1)
+    assert.ok(JSON.stringify(main[0].body).includes('发言人 岛风(平台ID 20013)】\\n[at:you]"'), 'the bare mention is the message')
     assert.equal(sent.length, 1)
   })
 

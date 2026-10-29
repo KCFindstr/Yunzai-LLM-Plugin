@@ -185,9 +185,14 @@ export function imageSender(e: any, paths: string[]): string | undefined {
   return senders.size === 1 ? [...senders][0] : undefined
 }
 
+/** When the bot last spoke in each bot/group (proactive replies wait longer right after it did). */
+const lastBotAt = new Map<string, number>()
+export const lastBotMessageAt = (e: any): number | undefined => lastBotAt.get(keyOf(e))
+
 export function recordBotMessage(e: any, text: string, conv?: string) {
   if (!e?.group_id || !text) return
   const key = keyOf(e)
+  lastBotAt.set(key, Date.now())
   const list = logs.get(key) ?? []
   list.push({ t: Date.now(), uid: String(e.self_id), name: '你', text: truncate(text.replace(/\s+/g, ' '), 200), bot: true, conv })
   if (list.length > MAX_LINES) list.splice(0, list.length - MAX_LINES)
@@ -238,4 +243,5 @@ export function cachedMessageSender(e: any, messageId: unknown): string | undefi
 
 export function clearGroupLogs() {
   logs.clear()
+  lastBotAt.clear()
 }

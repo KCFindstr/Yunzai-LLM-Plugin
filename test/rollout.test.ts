@@ -39,10 +39,10 @@ describe('complete initial prompt examples', () => {
     else assert.doesNotMatch(snapshot.initial.system, /computer-use：/)
     assert.equal(snapshot.initial.messages.length, 5)
     const input = snapshot.initial.messages.at(-1).content[0].text
-    assert.match(input, /阿明\(平台ID 1001\)［管理员］/)
+    assert.match(input, /岛风\(平台ID 1001\)［管理员］/)
     assert.match(input, /最近群友·仅身份参考/)
-    assert.match(input, /小红/)
-    assert.match(input, /喜欢被叫阿明/)
+    assert.match(input, /雪风/)
+    assert.match(input, /喜欢被叫岛风/)
     assert.match(input, /\[at:you\] 截一下你的桌面给我看看/)
     assert.ok(snapshot.initial.tools.every((tool: any) => tool.description && tool.parameters?.type === 'object'))
     assert.ok(snapshot.initial.tools.some((tool: any) => tool.name === 'example_http'))
