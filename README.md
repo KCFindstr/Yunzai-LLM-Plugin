@@ -114,7 +114,7 @@ pnpm install
 
 关于本插件的深度配置、Docusaurus 文档站点源码、各提供商高级缓存机制与 Windows 高级工具配置指南，请进入项目专属文档目录：
 
-👉 **[查看完整文档](docs/content/index.md)** (位于 [`docs/`](docs/) 目录)
+👉 **[查看完整文档](https://llmplugin.rabimimi.com/)** (位于 [`docs/`](docs/) 目录)
 
 在 `docs/` 目录下运行 `npm run start` 即可在本地启动完整的 Docusaurus 文档预览站点。
 
