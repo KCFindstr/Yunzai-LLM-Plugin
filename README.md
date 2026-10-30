@@ -5,7 +5,7 @@
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 [![Node: >=22.13](https://img.shields.io/badge/Node.js->=22.13-brightgreen.svg)](https://nodejs.org/)
-[![Documentation](https://img.shields.io/badge/Docs-Docusaurus-green.svg)](docs/)
+[![Documentation](https://img.shields.io/badge/Docs-Docusaurus-green.svg)](http://llmplugin.rabimimi.com/)
 
 ---
 
