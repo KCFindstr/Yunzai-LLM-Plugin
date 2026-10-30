@@ -1,16 +1,16 @@
 ---
 id: agy
-title: AGY 宿主机全能异步代理
+title: AGY 宿主机异步代理
 sidebar_label: AGY 异步代理
 ---
 
-# AGY 宿主机全能异步代理
+# AGY 宿主机异步代理
 
 :::warning 运行环境要求
 本工具直接调用 Windows 本机 Antigravity 宿主机 CLI，**当前仅支持 Windows 操作系统**。
 :::
 
-**AGY** 是专为管理员设计的高级特权代理工具。不同于受到严密隔离的 `run_code` 和 `computer_task` 沙盒，AGY 拥有**宿主机的真实运行环境与全盘读写权限**。
+**AGY** 是面向管理员的高权限代理工具。不同于隔离运行的 `run_code` 和 `computer_task` 沙盒，AGY 拥有**宿主机的真实运行环境与全盘读写权限**。
 
 ---
 

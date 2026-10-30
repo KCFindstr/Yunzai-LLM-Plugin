@@ -29,7 +29,7 @@ Yunzai-LLM-Plugin 为大模型封装了 **Google Lens 反向以图搜图工具**
 
 ---
 
-## 一键安装命令 (Windows)
+## 安装命令 (Windows)
 
 先按 [电脑使用](/tools/computer-use) 安装持久桌面（不需要开启 `tools.computer`），再安装 Lens 浏览器依赖：
 

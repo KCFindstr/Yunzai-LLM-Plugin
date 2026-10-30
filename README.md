@@ -1,7 +1,7 @@
 # Yunzai-LLM-Plugin
 
-> 🤖 **TRSS-Yunzai / Miao-Yunzai 的现代化大模型对话插件**  
-> 默认只在被 **@** 或引用时说话（可按群开启主动发言），轻扰动设计，绝不抢占群内任何已有插件的指令。
+> 🤖 **TRSS-Yunzai / Miao-Yunzai 的大模型对话插件**  
+> 默认只在被 **@** 或引用时说话（可按群开启主动发言），不会抢占群内已有插件的指令。
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 [![Node: >=22.13](https://img.shields.io/badge/Node.js->=22.13-brightgreen.svg)](https://nodejs.org/)
@@ -11,26 +11,26 @@
 
 ## 🎨 Web 管理面板一览
 
-插件启动即提供现代化的 Web 可视化管理工作区（默认监听 `0.0.0.0:6190`，支持本地与远程局域网/服务器 IP 直接访问），零基础也能轻松上手：
+插件启动后提供 Web 管理面板（默认监听 `0.0.0.0:6190`，可通过本机、局域网或服务器 IP 访问）：
 
 ![WebUI 概览](docs/static/img/webui-overview.png)
 
 ---
 
-## ✨ 核心亮点
+## ✨ 主要功能
 
-- 🌐 **全主流协议大模型支持**：
+- 🌐 **多协议模型支持**：
   - OpenAI 兼容接口（DeepSeek、通义千问、Kimi、智谱 GLM、SiliconFlow、OpenRouter、Ollama…）
   - OpenAI Responses API（OpenAI、DeepSeek）
-  - Anthropic Messages API（Claude，内置**显式提示词缓存断点**，输入费用立省高达 90%）
-  - Google Gemini Interactions API（原生直读高清图片、音频、长视频与 PDF）
-- 💳 **多维额度控制与平滑容灾**：
+  - Anthropic Messages API（Claude，支持**显式提示词缓存断点**，降低重复输入的费用）
+  - Google Gemini Interactions API（直接读取图片、音频、视频与 PDF）
+- 💳 **额度控制与备用模型**：
   - 每个模型独立支持「5 小时滚动额度」与「7 天滚动额度」（美元计价），细分单人、单群与全局控制。
-  - 自动同步 LiteLLM / OpenRouter 权威实时价格表，真实统计缓存与思考 Token。
-  - 主力模型额度用尽时**自动无感切换至备用模型**。
+  - 自动同步 LiteLLM / OpenRouter 价格表，统计缓存与思考 Token。
+  - 主力模型额度用尽或不可用时**自动切换到备用模型**。
 - 🧠 **分层记忆与 3D 向量空间**：
   - 上下文滑动窗口 + 滚动片段摘要 + 每日概要（保留 365 天）+ 长期事实自省。
-  - Voyage AI 等向量模型与关键词混合检索，Web 面板支持 3D PCA 降维点云交互探索。
+  - Voyage AI 等向量模型与关键词混合检索，Web 面板可用 3D PCA 投影浏览记忆。
 - 🎚️ **自动思考强度与主动发言**：
   - 判断模型按消息类别自动选择思考强度；可按群开启主动发言，在合适的时机自然接话。
 - ⏰ **定时任务**：
@@ -38,20 +38,20 @@
 - 🎭 **情境表情包与视觉打标**：
   - 管理员发送或引用图片即可收录，视觉模型自动解析命名并打标；聊天时按情境概率以 QQ 真实表情发送。
 - ⚡ **自然语言转机器人指令**：
-  - 自动扫描当前已启用的业务插件，用户用口语提问时自动识别并转为对应指令，以提问者原身份安全重分发。
+  - 自动扫描当前已启用的业务插件，用户用口语提问时自动识别并转为对应指令，以提问者身份执行。
 
 ---
 
 ## ⚠️ 平台兼容性说明（重要）
 
-- ✅ **基础全功能跨平台支持 (Windows / Linux 通用)**：
-  普通大模型对话、Web 管理面板、多提供商切换、额度控制、表情包、多层记忆与向量检索在 **Windows 和 Linux 系统上均可稳定运行**。
+- ✅ **基础功能跨平台 (Windows / Linux 通用)**：
+  普通大模型对话、Web 管理面板、多提供商切换、额度控制、表情包、多层记忆与向量检索在 **Windows 和 Linux 上均可运行**。
 - ⚠️ **高级系统级工具目前仅支持 Windows 宿主机**：
-  以下高级扩展环境深度依赖 Windows 宿主机与 WSL2 专用 Linux 虚拟子系统的安全沙盒联动，**当前阶段仅支持在 Windows 10/11 操作系统上部署**：
-  - **安全代码沙盒 (`run_code`)**：在 WSL2 + bubblewrap 隔离环境中安全运行 Python / Node / Bash（阻断 Windows 磁盘与局域网访问）。
+  以下工具依赖 Windows 宿主机与 WSL2 专用发行版，**当前阶段仅支持在 Windows 10/11 操作系统上部署**：
+  - **安全代码沙盒 (`run_code`)**：在 WSL2 + bubblewrap 隔离环境中运行 Python / Node / Bash（阻断 Windows 磁盘与局域网访问）。
   - **持久桌面电脑使用 (`computer_task`)**：大模型自主操作独立的虚拟桌面，实现自动鼠标点击、键盘输入与任务回报。
   - **Google Lens 视觉反向搜图 (`google_lens`)**：在持久桌面的浏览器中以图搜图。
-  - **RustDesk 远程控制与 AGY 宿主机全能代理**。
+  - **RustDesk 远程控制与 AGY 宿主机代理**。
 
 详细支持矩阵请参见 [平台支持说明](docs/content/tools/platform-support.md)。
 
@@ -72,12 +72,12 @@ cd ..
 pnpm install
 ```
 
-> 💡 **无需编译**：仓库内已自带构建完毕的 `dist/` 文件，安装依赖后直接启动机器人即可！
+> 💡 **无需编译**：仓库内已自带构建完毕的 `dist/` 文件，安装依赖后直接启动机器人即可。
 
 ### 3. 启动并接入第一个模型
 重启你的 Yunzai-Bot，任选以下一种方式完成初始化配置：
 
-- **方法 A：使用 Web 管理面板（最推荐）**  
+- **方法 A：使用 Web 管理面板（推荐）**  
   在浏览器打开 **`http://<服务器IP或127.0.0.1>:6190`**（默认监听 `0.0.0.0` 支持远程访问；初次启动密码打印于控制台，并保存在 `data/Yunzai-LLM-Plugin/web-auth.json`），首次打开会进入设置向导，按步骤填入 API Key 并选择默认模型。
 - **方法 B：私聊机器人快速配置**  
   管理员在私聊中直接发送：
@@ -112,7 +112,7 @@ pnpm install
 
 ## 📖 完整文档中心
 
-关于本插件的深度配置、Docusaurus 文档站点源码、各提供商高级缓存机制与 Windows 高级工具配置指南，请进入项目专属文档目录：
+详细配置、各提供商的缓存机制与 Windows 高级工具的安装说明见文档站：
 
 👉 **[查看完整文档](https://llmplugin.rabimimi.com/)** (位于 [`docs/`](docs/) 目录)
 

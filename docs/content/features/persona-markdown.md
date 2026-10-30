@@ -4,11 +4,11 @@ title: 人设系统与 Markdown 输出
 sidebar_label: 人设与排版
 ---
 
-# 人设系统与 Markdown 优雅排版
+# 人设系统与 Markdown 排版
 
 ## 独立的外部人设文件 (`file:PERSONA.md`)
 
-在传统配置中，长篇人设往往挤在 YAML 文件的多行字符串中，极易因缩进错误或特殊符号引发解析异常。
+在传统配置中，长篇人设往往挤在 YAML 文件的多行字符串中，容易因缩进错误或特殊符号引发解析错误。
 
 Yunzai-LLM-Plugin 支持人设预设引用独立的 Markdown 文件（路径相对于 `Yunzai/config/Yunzai-LLM-Plugin/`）：
 
@@ -19,7 +19,7 @@ persona:
     default: "file:PERSONA.md"
 ```
 
-### 核心优势
+### 特点
 1. **原文发送**：人设文件按原文发送给大模型，不做任何转义或反转义。人设中的 `{botName}` 会替换为机器人昵称。
 2. **随改随生效**：直接编辑 `Yunzai/config/Yunzai-LLM-Plugin/PERSONA.md`，保存即热加载。
 3. **分群独立人设**：在 `groups.<群号>.persona` 中填写人设预设名称，为不同群聊使用不同人设。也可在 Web 面板「人设」页面或用 `#llm切换人设` 管理。
@@ -30,7 +30,7 @@ persona:
 
 ---
 
-## 智能长短回复排版与自适应图片转换
+## 长短回复排版与图片转换
 
 在大模型日常输出中，不同类型的内容有截然不同的展示需求：
 

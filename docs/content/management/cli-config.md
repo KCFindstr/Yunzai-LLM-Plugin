@@ -6,9 +6,9 @@ sidebar_label: 命令行配置
 
 # 命令行交互配置工具
 
-除了 Web 面板与私聊指令外，Yunzai-LLM-Plugin 为纯终端或服务器运维用户提供了一个功能完备的命令行配置工具：`npm run config`。
+除了 Web 面板与私聊指令外，Yunzai-LLM-Plugin 为纯终端或服务器运维用户提供了命令行配置工具：`npm run config`。
 
-该工具具备严格的模式定义（Schema Validation），确保任何修改都不会损坏配置结构。
+该工具按配置的结构定义（Schema）校验输入，避免写入无效配置。
 
 ---
 

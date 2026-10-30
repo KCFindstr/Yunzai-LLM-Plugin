@@ -6,7 +6,7 @@ sidebar_label: Gemini 缓存机制
 
 # Google Gemini 会话与服务端缓存剖析
 
-Google Gemini 提供了强大的 Interactions API 与原生上下文缓存能力，但在实际对接与计费统计中具有特殊性。
+Google Gemini 提供 Interactions API 与上下文缓存，但在对接和计费统计上有一些特殊之处。
 
 ---
 

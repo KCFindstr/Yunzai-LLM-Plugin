@@ -66,4 +66,4 @@ pnpm start
 网页管理面板：http://<地址>:6190  初始密码：xxxxxxxx（可在 web.password 修改）
 ```
 
-恭喜！插件已成功安装并启动！接下来请前往 [首次配置与密钥设置](/getting-started/first-configuration) 完成你的第一个大模型接入。
+插件已安装并启动。接下来请前往 [首次配置与密钥设置](/getting-started/first-configuration) 完成你的第一个大模型接入。

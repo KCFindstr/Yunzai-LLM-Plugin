@@ -6,7 +6,7 @@ sidebar_label: 多协议支持
 
 # 多协议大模型支持
 
-Yunzai-LLM-Plugin 内置了一套高度抽象的统一大模型驱动内核，抹平了各上游厂商在数据格式、工具调用（Function Calling）、多模态文件输入、推理思考过程（Thinking/Reasoning）以及缓存机制上的差异。
+Yunzai-LLM-Plugin 用统一的接口对接各家模型，处理各厂商在数据格式、工具调用（Function Calling）、多模态文件输入、推理思考过程（Thinking/Reasoning）以及缓存机制上的差异。
 
 ---
 
@@ -17,7 +17,7 @@ Yunzai-LLM-Plugin 内置了一套高度抽象的统一大模型驱动内核，�
 | **`openai`** (Chat Completions) | DeepSeek、阿里云百炼 (通义千问)、月之暗面 (Kimi)、智谱 GLM、SiliconFlow、OpenRouter、Ollama 等 | 流式传输、标准工具调用、`<think>` / `reasoning_content` 推理链提取、OpenRouter 原生计费直通。 |
 | **`openai-responses`** | OpenAI 官方、DeepSeek | `reasoning.summary` 推理摘要提取、模型自带联网搜索。 |
 | **`anthropic`** | Anthropic 官方 Claude 及兼容接口 | **显式提示词缓存 (Prompt Caching)**、细粒度思考控制 (`thinking.display: summarized`)、PDF 原生解析。 |
-| **`gemini`** | Google AI Studio (Gemini 系列) | **多模态全能力**（原生直读高清图片、视频、音频、PDF）、服务端长会话状态保持 (Interactions API)。 |
+| **`gemini`** | Google AI Studio (Gemini 系列) | **多模态输入**（直接读取图片、视频、音频、PDF）、服务端长会话状态保持 (Interactions API)。 |
 | **`voyage`** | Voyage AI (`voyage-context-4`) | 只用于向量模型，支持上下文感知嵌入 (Contextualized Embeddings)。 |
 | **`systemone`** | TypeSafe Jev / 自建 Kev | 分类接口，可作为自动思考强度与主动发言的判断模型。 |
 
@@ -26,7 +26,7 @@ Yunzai-LLM-Plugin 内置了一套高度抽象的统一大模型驱动内核，�
 ## 典型配置示例
 
 ### 1. 接入 DeepSeek (深度求索)
-DeepSeek 拥有超高性价比与强大的推理思考能力，推荐作为主力模型之一（默认配置已包含，只需填写 `apiKey`）：
+DeepSeek 价格较低且支持推理思考，默认配置已包含，只需填写 `apiKey`：
 
 ```yaml
 providers:
@@ -37,7 +37,7 @@ providers:
 ```
 
 ### 2. 接入 Anthropic Claude (带缓存断点)
-Claude 的长文理解与编码能力顶尖。插件内置支持官方提示词缓存，大幅降低开销：
+插件支持 Anthropic 的提示词缓存，可降低重复输入的费用：
 
 ```yaml
 providers:
@@ -74,7 +74,7 @@ providers:
 
 ## 模型定义与备用容灾机制 (`fallbackModels`)
 
-在插件配置中，每一个模型都有唯一的 `id`，绑定到对应的 `provider`。聊天模型（`models`）、向量模型（`embeddingModels`）和 System One 模型（`systemoneModels`）分开配置，在 Web 面板「模型」页面中分别列出，每个都可单独测试。你可以配置备用模型列表，当主力模型因限额耗尽、网络抖动或上游服务异常时，系统会自动平滑降级到备用模型：
+在插件配置中，每一个模型都有唯一的 `id`，绑定到对应的 `provider`。聊天模型（`models`）、向量模型（`embeddingModels`）和 System One 模型（`systemoneModels`）分开配置，在 Web 面板「模型」页面中分别列出，每个都可单独测试。你可以配置备用模型列表，当主力模型因限额耗尽、网络抖动或上游服务异常时，系统会自动切换到备用模型：
 
 ```yaml
 defaultModel: deepseek         # 默认主力模型（留空 = 第一个配置了 Key 的模型）
