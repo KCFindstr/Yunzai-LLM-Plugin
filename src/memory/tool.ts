@@ -1,7 +1,7 @@
 import { config } from '../core/config.ts'
 import { registry } from '../tools/registry.ts'
 import { addMemory, deleteMemory, renderMemory, updateMemory, usage, type MemScope, type WriteResult } from './store.ts'
-import { groupSessionsFor, recallSession, sessionKey } from '../chat/session.ts'
+import { archiveOriginal, groupSessionsFor, recallSession, sessionKey } from '../chat/session.ts'
 import { localDay, parseDateHints, type DayRange } from '../chat/dates.ts'
 import { groupsWithUser } from '../chat/roster.ts'
 
@@ -27,6 +27,9 @@ function rangeOf(args: Record<string, any>): DayRange | undefined {
   return parseDateHints(String(args.query ?? ''))
 }
 
+/** Characters of an original chat returned per recall call; the rest is read on with offset. */
+const ORIGINAL_PAGE = 3000
+
 export function memoryKey(scope: MemScope, e: any): string | undefined {
   if (scope === 'user') return e?.user_id != null ? String(e.user_id) : undefined
   return e?.group_id != null ? String(e.group_id) : undefined
@@ -42,7 +45,7 @@ export function registerMemoryTool() {
     name: 'recall', source: 'builtin',
     // a getter: the registry reads it every turn, so it follows memory.recallLimit
     get description() {
-      return `检索当前会话更早的历史聊天记录（包含各阶段摘要与每日概要，语义与关键词综合匹配，可按日期筛选）。仅当前会话，最多返回${config.get().memory.recallLimit}条。`
+      return `检索当前会话更早的历史聊天记录（包含各阶段摘要与每日概要，语义与关键词综合匹配，可按日期筛选）。仅当前会话，最多返回${config.get().memory.recallLimit}条。摘要会省略细节；结果带「原文 id=…」时，可用 id 读取当时的聊天原文（含原话和图片路径），需要确切说法、细节或旧图片时使用，较长时用 offset 续读。`
     },
     parameters: {
       type: 'object',
@@ -52,9 +55,21 @@ export function registerMemoryTool() {
         from: { type: 'string', description: '日期范围起点 YYYY-MM-DD（含）' },
         to: { type: 'string', description: '日期范围终点 YYYY-MM-DD（含）' },
         count: { type: 'integer', description: '返回条数，默认3（不超过上面说的上限）' },
+        id: { type: 'string', description: '读取某条结果的聊天原文：填结果里「原文 id=」后的值；填写时忽略其他检索参数' },
+        offset: { type: 'integer', description: '读取原文时从第几个字开始，默认0' },
       },
     },
     async run(args, ctx) {
+      if (typeof args.id === 'string' && args.id.trim()) {
+        const keys = [sessionKey(ctx.e, ctx.eff.chat.sessionScope), ...recallSources(ctx.e, ctx.eff.chat.sessionScope).map(s => s.key)]
+        const original = archiveOriginal(keys, args.id.trim())
+        if (!original) return { content: `没有 id 为「${args.id}」的聊天原文（可能已过期，或该条只有摘要），请先检索再用结果里的 id`, isError: true }
+        const offset = Math.max(0, Math.floor(Number(args.offset) || 0))
+        const page = original.text.slice(offset, offset + ORIGINAL_PAGE)
+        const end = offset + page.length
+        const more = end < original.text.length ? `\n……（共 ${original.text.length} 字，已读到第 ${end} 字，继续读用 offset=${end}）` : ''
+        return `【${original.day} 聊天原文${offset ? `，从第 ${offset} 字起` : ''}】\n${page || '（已读完）'}${more}`
+      }
       const range = rangeOf(args)
       const hits = await recallSession(sessionKey(ctx.e, ctx.eff.chat.sessionScope), String(args.query ?? ''), Number(args.count) || 3, { range, extra: recallSources(ctx.e, ctx.eff.chat.sessionScope) })
       return hits.join('\n\n') || (range ? `${range.from === range.to ? range.from : `${range.from} 至 ${range.to}`} 没有找到旧聊天记录` : '没有匹配的旧聊天片段')

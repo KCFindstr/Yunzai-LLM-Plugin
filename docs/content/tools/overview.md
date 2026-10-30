@@ -20,7 +20,7 @@ Yunzai-LLM-Plugin 拥有一套严密、安全且支持渐进式调用的工具�
 | **`read_file`** | 按路径读取本对话的附件（图片、视频、音频、文件）加入上下文；不支持直接看图的模型由辅助模型代看。 | 全平台 (Win/Linux) |
 | **`send_image`** | 发送附件或工具生成的图片。 | 全平台 (Win/Linux) |
 | **`add_sticker`** / **`list_stickers`** | 检索表情包与新增表情包。 | 全平台 (Win/Linux) |
-| **`recall`** | 主动检索旧聊天档案与每日概要。 | 全平台 (Win/Linux) |
+| **`recall`** | 主动检索旧聊天档案与每日概要，并可按结果 id 分页读取摘要背后的聊天原文。 | 全平台 (Win/Linux) |
 | **`memory`** | 记录、修改关于群友和本群的长期记忆。 | 全平台 (Win/Linux) |
 | **`search_bot_commands`** / **`run_bot_command`** | 搜索并以提问者身份执行其他插件的指令。 | 全平台 (Win/Linux) |
 | **`schedule`** | 定时任务：稍后或按周期（每天 / 工作日 / 每周 / 按间隔）回到当前对话执行任务并回复，例如提醒、定时查询。 | 全平台 (Win/Linux) |

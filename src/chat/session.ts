@@ -349,15 +349,41 @@ export function setDayDigest(key: string, day: string, text: string, sources: st
   store.save()
 }
 
+/** The chat an archive entry was made from: kept beside its summary, or the entry itself while still raw. */
+const originalOf = (entry: ArchiveEntry) => entry.sourceText?.trim() || (entry.raw ? entry.text : undefined)
+
 /** Everything searchable in a session: detailed archive entries plus daily digests. */
-function searchable(key: string): { id?: string; at: number; day: string; text: string; kind: 'episode' | 'day'; raw?: boolean }[] {
+function searchable(key: string): { id?: string; at: number; day: string; text: string; kind: 'episode' | 'day'; raw?: boolean; original: boolean }[] {
   const s = store.data[key]
   if (!s) return []
+  const archive = (s.archive ?? []).filter(entry => Date.now() - entry.at < PRUNE_AFTER)
+  const withOriginal = new Set(archive.filter(originalOf).map(entry => entry.id))
   return [
-    ...(s.archive ?? []).filter(entry => Date.now() - entry.at < PRUNE_AFTER).map(entry => ({ id: entry.id, at: entry.at, day: dayOf(entry), text: entry.text, kind: 'episode' as const, raw: entry.raw })),
+    ...archive.map(entry => ({ id: entry.id, at: entry.at, day: dayOf(entry), text: entry.text, kind: 'episode' as const, raw: entry.raw, original: Boolean(entry.id && withOriginal.has(entry.id)) })),
     // a digest sorts as the end of its day (23:59:59 UTC+8)
-    ...keepDays(s.days).map(d => ({ id: d.id, at: Date.parse(`${d.day}T15:59:59Z`), day: d.day, text: d.text, kind: 'day' as const })),
+    ...keepDays(s.days).map(d => ({ id: d.id, at: Date.parse(`${d.day}T15:59:59Z`), day: d.day, text: d.text, kind: 'day' as const, original: d.sources.some(id => withOriginal.has(id)) })),
   ]
+}
+
+/**
+ * The original chat behind a recall result, looked up only in the given sessions: an episode's retained messages, or
+ * for a daily digest those of every episode it was written from that is still kept. Undefined when there is none.
+ */
+export function archiveOriginal(keys: string[], id: string): { day: string; text: string } | undefined {
+  for (const key of keys) {
+    const s = store.data[key]
+    if (!s) continue
+    const archive = (s.archive ?? []).filter(entry => Date.now() - entry.at < PRUNE_AFTER)
+    const entry = archive.find(a => a.id === id)
+    if (entry) {
+      const text = originalOf(entry)
+      return text ? { day: dayOf(entry), text } : undefined
+    }
+    const digest = keepDays(s.days).find(d => d.id === id)
+    if (!digest) continue
+    const parts = archive.filter(a => a.id && digest.sources.includes(a.id) && originalOf(a)).sort((a, b) => a.at - b.at)
+    return parts.length ? { day: digest.day, text: parts.map(a => `—— ${hhmm(a.at)} ——\n${originalOf(a)}`).join('\n\n') } : undefined
+  }
 }
 
 /**
@@ -460,9 +486,10 @@ export async function recallSession(key: string, query: string, count = 3, opts:
     .slice(0, Math.min(config.get().memory.recallLimit, Math.max(1, count)))
     .map(({ entry }) => {
       const where = entry.label ? `·${entry.label}` : ''
+      const source = entry.original && entry.id ? `（原文 id=${entry.id}）` : ''
       return entry.kind === 'day'
-        ? `【${entry.day} 当日概要${where}】${truncate(entry.text, 600)}`
-        : `${entry.day} ${hhmm(entry.at)}${entry.label ? ` [${entry.label}]` : ''} ${truncate(entry.text, 600)}`
+        ? `【${entry.day} 当日概要${where}】${truncate(entry.text, 600)}${source}`
+        : `${entry.day} ${hhmm(entry.at)}${entry.label ? ` [${entry.label}]` : ''} ${truncate(entry.text, 600)}${source}`
     })
 }
 

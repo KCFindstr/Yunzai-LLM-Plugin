@@ -3939,11 +3939,30 @@ function setDayDigest(key, day, text2, sources) {
 function searchable(key) {
   const s = store3.data[key];
   if (!s) return [];
+  const archive = (s.archive ?? []).filter((entry) => Date.now() - entry.at < PRUNE_AFTER);
+  const withOriginal = new Set(archive.filter(originalOf).map((entry) => entry.id));
   return [
-    ...(s.archive ?? []).filter((entry) => Date.now() - entry.at < PRUNE_AFTER).map((entry) => ({ id: entry.id, at: entry.at, day: dayOf(entry), text: entry.text, kind: "episode", raw: entry.raw })),
+    ...archive.map((entry) => ({ id: entry.id, at: entry.at, day: dayOf(entry), text: entry.text, kind: "episode", raw: entry.raw, original: Boolean(entry.id && withOriginal.has(entry.id)) })),
     // a digest sorts as the end of its day (23:59:59 UTC+8)
-    ...keepDays(s.days).map((d) => ({ id: d.id, at: Date.parse(`${d.day}T15:59:59Z`), day: d.day, text: d.text, kind: "day" }))
+    ...keepDays(s.days).map((d) => ({ id: d.id, at: Date.parse(`${d.day}T15:59:59Z`), day: d.day, text: d.text, kind: "day", original: d.sources.some((id) => withOriginal.has(id)) }))
   ];
+}
+function archiveOriginal(keys, id) {
+  for (const key of keys) {
+    const s = store3.data[key];
+    if (!s) continue;
+    const archive = (s.archive ?? []).filter((entry2) => Date.now() - entry2.at < PRUNE_AFTER);
+    const entry = archive.find((a) => a.id === id);
+    if (entry) {
+      const text2 = originalOf(entry);
+      return text2 ? { day: dayOf(entry), text: text2 } : void 0;
+    }
+    const digest = keepDays(s.days).find((d) => d.id === id);
+    if (!digest) continue;
+    const parts = archive.filter((a) => a.id && digest.sources.includes(a.id) && originalOf(a)).sort((a, b) => a.at - b.at);
+    return parts.length ? { day: digest.day, text: parts.map((a) => `\u2014\u2014 ${hhmm(a.at)} \u2014\u2014
+${originalOf(a)}`).join("\n\n") } : void 0;
+  }
 }
 async function indexArchive(key, signal) {
   const s = store3.data[key];
@@ -4017,7 +4036,8 @@ async function recallSession(key, query, count = 3, opts = {}) {
     return { entry, lexical, cos: cosine.get(entry), score: (semantic ? cosine.get(entry) ?? -1 : lexical) + (range && entry.kind === "day" ? 1 : 0) };
   }).filter((hit) => range || !query.trim() || (semantic ? (hit.cos ?? -1) >= minScore : hit.lexical >= 0.06)).sort((a, b) => b.score - a.score || b.entry.at - a.entry.at).slice(0, Math.min(config.get().memory.recallLimit, Math.max(1, count))).map(({ entry }) => {
     const where = entry.label ? `\xB7${entry.label}` : "";
-    return entry.kind === "day" ? `\u3010${entry.day} \u5F53\u65E5\u6982\u8981${where}\u3011${truncate(entry.text, 600)}` : `${entry.day} ${hhmm(entry.at)}${entry.label ? ` [${entry.label}]` : ""} ${truncate(entry.text, 600)}`;
+    const source = entry.original && entry.id ? `\uFF08\u539F\u6587 id=${entry.id}\uFF09` : "";
+    return entry.kind === "day" ? `\u3010${entry.day} \u5F53\u65E5\u6982\u8981${where}\u3011${truncate(entry.text, 600)}${source}` : `${entry.day} ${hhmm(entry.at)}${entry.label ? ` [${entry.label}]` : ""} ${truncate(entry.text, 600)}${source}`;
   });
 }
 function groupSessionsFor(selfId, userId, groups2) {
@@ -4084,7 +4104,7 @@ function sessionsMissingVectors() {
     return [...s.archive ?? [], ...s.days ?? []].some((entry) => !entry.id || !v[entry.id]);
   }).map(([key]) => key);
 }
-var store3, vectors, newId, dayOf, keepDays, PRUNE_AFTER, lastPrune2, pendingArchive, pendingChatter, hhmm;
+var store3, vectors, newId, dayOf, keepDays, PRUNE_AFTER, lastPrune2, pendingArchive, pendingChatter, originalOf, hhmm;
 var init_session = __esm({
   "src/chat/session.ts"() {
     "use strict";
@@ -4109,6 +4129,7 @@ var init_session = __esm({
     lastPrune2 = 0;
     pendingArchive = (key) => pendingOf(key, false);
     pendingChatter = (key) => pendingOf(key, true);
+    originalOf = (entry) => entry.sourceText?.trim() || (entry.raw ? entry.text : void 0);
     hhmm = (ts) => new Date(ts + 8 * 36e5).toISOString().slice(11, 16);
   }
 });
@@ -8024,7 +8045,7 @@ function registerMemoryTool() {
     source: "builtin",
     // a getter: the registry reads it every turn, so it follows memory.recallLimit
     get description() {
-      return `\u68C0\u7D22\u5F53\u524D\u4F1A\u8BDD\u66F4\u65E9\u7684\u5386\u53F2\u804A\u5929\u8BB0\u5F55\uFF08\u5305\u542B\u5404\u9636\u6BB5\u6458\u8981\u4E0E\u6BCF\u65E5\u6982\u8981\uFF0C\u8BED\u4E49\u4E0E\u5173\u952E\u8BCD\u7EFC\u5408\u5339\u914D\uFF0C\u53EF\u6309\u65E5\u671F\u7B5B\u9009\uFF09\u3002\u4EC5\u5F53\u524D\u4F1A\u8BDD\uFF0C\u6700\u591A\u8FD4\u56DE${config.get().memory.recallLimit}\u6761\u3002`;
+      return `\u68C0\u7D22\u5F53\u524D\u4F1A\u8BDD\u66F4\u65E9\u7684\u5386\u53F2\u804A\u5929\u8BB0\u5F55\uFF08\u5305\u542B\u5404\u9636\u6BB5\u6458\u8981\u4E0E\u6BCF\u65E5\u6982\u8981\uFF0C\u8BED\u4E49\u4E0E\u5173\u952E\u8BCD\u7EFC\u5408\u5339\u914D\uFF0C\u53EF\u6309\u65E5\u671F\u7B5B\u9009\uFF09\u3002\u4EC5\u5F53\u524D\u4F1A\u8BDD\uFF0C\u6700\u591A\u8FD4\u56DE${config.get().memory.recallLimit}\u6761\u3002\u6458\u8981\u4F1A\u7701\u7565\u7EC6\u8282\uFF1B\u7ED3\u679C\u5E26\u300C\u539F\u6587 id=\u2026\u300D\u65F6\uFF0C\u53EF\u7528 id \u8BFB\u53D6\u5F53\u65F6\u7684\u804A\u5929\u539F\u6587\uFF08\u542B\u539F\u8BDD\u548C\u56FE\u7247\u8DEF\u5F84\uFF09\uFF0C\u9700\u8981\u786E\u5207\u8BF4\u6CD5\u3001\u7EC6\u8282\u6216\u65E7\u56FE\u7247\u65F6\u4F7F\u7528\uFF0C\u8F83\u957F\u65F6\u7528 offset \u7EED\u8BFB\u3002`;
     },
     parameters: {
       type: "object",
@@ -8033,10 +8054,24 @@ function registerMemoryTool() {
         date: { type: "string", description: "\u53EA\u770B\u67D0\u4E00\u5929\uFF1AYYYY-MM-DD\uFF0C\u6216\u300C\u6628\u5929\u300D\u300C\u4E0A\u5468\u516D\u300D\u300C10\u670820\u65E5\u300D\u8FD9\u7C7B\u8BF4\u6CD5" },
         from: { type: "string", description: "\u65E5\u671F\u8303\u56F4\u8D77\u70B9 YYYY-MM-DD\uFF08\u542B\uFF09" },
         to: { type: "string", description: "\u65E5\u671F\u8303\u56F4\u7EC8\u70B9 YYYY-MM-DD\uFF08\u542B\uFF09" },
-        count: { type: "integer", description: "\u8FD4\u56DE\u6761\u6570\uFF0C\u9ED8\u8BA43\uFF08\u4E0D\u8D85\u8FC7\u4E0A\u9762\u8BF4\u7684\u4E0A\u9650\uFF09" }
+        count: { type: "integer", description: "\u8FD4\u56DE\u6761\u6570\uFF0C\u9ED8\u8BA43\uFF08\u4E0D\u8D85\u8FC7\u4E0A\u9762\u8BF4\u7684\u4E0A\u9650\uFF09" },
+        id: { type: "string", description: "\u8BFB\u53D6\u67D0\u6761\u7ED3\u679C\u7684\u804A\u5929\u539F\u6587\uFF1A\u586B\u7ED3\u679C\u91CC\u300C\u539F\u6587 id=\u300D\u540E\u7684\u503C\uFF1B\u586B\u5199\u65F6\u5FFD\u7565\u5176\u4ED6\u68C0\u7D22\u53C2\u6570" },
+        offset: { type: "integer", description: "\u8BFB\u53D6\u539F\u6587\u65F6\u4ECE\u7B2C\u51E0\u4E2A\u5B57\u5F00\u59CB\uFF0C\u9ED8\u8BA40" }
       }
     },
     async run(args, ctx) {
+      if (typeof args.id === "string" && args.id.trim()) {
+        const keys = [sessionKey(ctx.e, ctx.eff.chat.sessionScope), ...recallSources(ctx.e, ctx.eff.chat.sessionScope).map((s) => s.key)];
+        const original = archiveOriginal(keys, args.id.trim());
+        if (!original) return { content: `\u6CA1\u6709 id \u4E3A\u300C${args.id}\u300D\u7684\u804A\u5929\u539F\u6587\uFF08\u53EF\u80FD\u5DF2\u8FC7\u671F\uFF0C\u6216\u8BE5\u6761\u53EA\u6709\u6458\u8981\uFF09\uFF0C\u8BF7\u5148\u68C0\u7D22\u518D\u7528\u7ED3\u679C\u91CC\u7684 id`, isError: true };
+        const offset = Math.max(0, Math.floor(Number(args.offset) || 0));
+        const page = original.text.slice(offset, offset + ORIGINAL_PAGE);
+        const end = offset + page.length;
+        const more = end < original.text.length ? `
+\u2026\u2026\uFF08\u5171 ${original.text.length} \u5B57\uFF0C\u5DF2\u8BFB\u5230\u7B2C ${end} \u5B57\uFF0C\u7EE7\u7EED\u8BFB\u7528 offset=${end}\uFF09` : "";
+        return `\u3010${original.day} \u804A\u5929\u539F\u6587${offset ? `\uFF0C\u4ECE\u7B2C ${offset} \u5B57\u8D77` : ""}\u3011
+${page || "\uFF08\u5DF2\u8BFB\u5B8C\uFF09"}${more}`;
+      }
       const range = rangeOf(args);
       const hits = await recallSession(sessionKey(ctx.e, ctx.eff.chat.sessionScope), String(args.query ?? ""), Number(args.count) || 3, { range, extra: recallSources(ctx.e, ctx.eff.chat.sessionScope) });
       return hits.join("\n\n") || (range ? `${range.from === range.to ? range.from : `${range.from} \u81F3 ${range.to}`} \u6CA1\u6709\u627E\u5230\u65E7\u804A\u5929\u8BB0\u5F55` : "\u6CA1\u6709\u5339\u914D\u7684\u65E7\u804A\u5929\u7247\u6BB5");
@@ -8097,6 +8132,7 @@ ${renderMemory(scope, key).join("\n")}` : "";
     }
   });
 }
+var ORIGINAL_PAGE;
 var init_tool = __esm({
   "src/memory/tool.ts"() {
     "use strict";
@@ -8106,6 +8142,7 @@ var init_tool = __esm({
     init_session();
     init_dates();
     init_roster();
+    ORIGINAL_PAGE = 3e3;
   }
 });
 
