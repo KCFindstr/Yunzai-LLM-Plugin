@@ -52,7 +52,7 @@ export interface Rollout {
   createdAt: number
   updatedAt: number
   status: 'queued' | 'running' | 'completed' | 'failed' | 'blocked' | 'interrupted' | 'waiting_callback'
-  source: 'chat' | 'agy' | 'computer' | 'proactive'
+  source: 'chat' | 'agy' | 'computer' | 'proactive' | 'schedule'
   jobId?: string
   input: string
   reply?: string

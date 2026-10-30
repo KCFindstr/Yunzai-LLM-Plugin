@@ -10,7 +10,7 @@ const EVENT = {
   thinking: ['思考强度', 'models'],
   tool: ['工具调用', 'tools'], reply: ['最终回复', 'check'], error: ['执行错误', 'alert'],
 }
-const SOURCE = { chat: '聊天', proactive: '主动发言', agy: 'AGY 结果回复', computer: '电脑任务结果回复' }
+const SOURCE = { chat: '聊天', proactive: '主动发言', schedule: '定时任务', agy: 'AGY 结果回复', computer: '电脑任务结果回复' }
 const THINKING_SOURCE = { fixed: '固定配置', uniform: '各类消息使用相同强度', unsupported: '接口不支持思考强度设置', fallback: '判断失败，使用第一个类别', model: '模型判断', systemone: 'System One', obvious: '快速判断（旧版）', heuristic: '关键词规则（旧版）' }
 
 function thinkingDetails(r, opened) {

@@ -13,6 +13,7 @@ const PAGES = [
   ['models', '模型', 'models', () => import('./pages/models.js'), '模型与资源'],
   ['stickers', '表情包', 'sticker', () => import('./pages/stickers.js'), '模型与资源'],
   ['tools', '工具与技能', 'tools', () => import('./pages/tools.js'), '模型与资源'],
+  ['schedules', '定时任务', 'clock', () => import('./pages/schedules.js'), '系统管理'],
   ['computer', '电脑任务', 'computer', () => import('./pages/computer.js'), '系统管理'],
   ['agy', '异步代理', 'models', () => import('./pages/agy.js'), '系统管理'],
   ['config', '配置', 'settings', () => import('./pages/config.js'), '系统管理'],

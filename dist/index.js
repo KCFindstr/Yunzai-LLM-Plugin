@@ -87,8 +87,8 @@ function migrateLayout(pluginRoot, loc2 = locations(pluginRoot)) {
       state = { ...state, ...JSON.parse(fs.readFileSync(pending, "utf8")) };
     } catch {
     }
-    const save2 = () => fs.writeFileSync(pending, JSON.stringify(state));
-    save2();
+    const save3 = () => fs.writeFileSync(pending, JSON.stringify(state));
+    save3();
     const failed = [], moved = [];
     for (const name of fs.readdirSync(oldData)) {
       if (state.copied.includes(name)) continue;
@@ -98,7 +98,7 @@ function migrateLayout(pluginRoot, loc2 = locations(pluginRoot)) {
       try {
         if (move(from, agy2 ? path.join(loc2.resources, "agy-setup") : path.join(loc2.data, name)) === "copied") {
           state.copied.push(name);
-          save2();
+          save3();
         }
         moved.push(name);
       } catch (err) {
@@ -1062,7 +1062,7 @@ var init_schema = __esm({
     judgeIds = (c) => [...new Set([...(c.systemoneModels ?? []).map((m) => m.id), ...modelIds(c)].filter(Boolean))];
     presetNames = (c) => Object.keys(c.persona?.presets ?? {});
     toolNames = (c) => [
-      .../* @__PURE__ */ new Set(["web_search", "web_fetch", "run_bot_command", "search_bot_commands", "list_bot_commands", "load_skill", "memory", "add_sticker", "list_stickers", "render_html", "run_code", "computer_task", "agy", "google_lens", ...(c.tools?.http ?? []).map((h) => h.name).filter(Boolean), ...c.tools?.disabled ?? []])
+      .../* @__PURE__ */ new Set(["web_search", "web_fetch", "run_bot_command", "search_bot_commands", "list_bot_commands", "load_skill", "memory", "add_sticker", "list_stickers", "render_html", "run_code", "computer_task", "agy", "google_lens", "schedule", ...(c.tools?.http ?? []).map((h) => h.name).filter(Boolean), ...c.tools?.disabled ?? []])
     ];
     limits = (label) => obj({ window5h: num("5\u5C0F\u65F6\u989D\u5EA6\uFF08\u7F8E\u5143\uFF09", { min: 0, nullable: true }), weekly: num("\u6BCF\u5468\u989D\u5EA6\uFF08\u7F8E\u5143\uFF09", { min: 0, nullable: true }) }, label);
     provider = obj(
@@ -1333,6 +1333,13 @@ var init_schema = __esm({
           maxQueue: int("\u6392\u961F\u4E0A\u9650", { min: 1, max: 50 }),
           maxChainDepth: int("\u540E\u53F0\u7ED3\u679C\u56DE\u590D\u4E2D\u53EF\u8FDE\u7EED\u65B0\u5EFA\u4EFB\u52A1\u7684\u6B21\u6570\uFF080 \u4E3A\u7981\u6B62\uFF09", { min: 0, max: 10 })
         }, "\u5F02\u6B65\u4EE3\u7406"),
+        schedule: obj({
+          enable: bool("\u5B9A\u65F6\u4EFB\u52A1\uFF1A\u8BA9\u673A\u5668\u4EBA\u7A0D\u540E\u6216\u6309\u5468\u671F\u56DE\u5230\u5BF9\u8BDD\uFF08\u63D0\u9192\u3001\u5B9A\u65F6\u67E5\u8BE2\uFF09"),
+          access: oneOf(["admin", "all"], "\u8C01\u53EF\u4EE5\u8BA9\u673A\u5668\u4EBA\u8BBE\u7F6E\u5B9A\u65F6\u4EFB\u52A1"),
+          maxPerUser: int("\u6BCF\u4EBA\u540C\u65F6\u8FDB\u884C\u4E2D\u7684\u4EFB\u52A1\u4E0A\u9650\uFF08\u7BA1\u7406\u5458\u4E0D\u9650\uFF09", { min: 1, max: 100 }),
+          minInterval: int("\u6309\u95F4\u9694\u91CD\u590D\u7684\u6700\u77ED\u95F4\u9694\uFF08\u5206\u949F\uFF09", { min: 1, max: 1440 }),
+          maxChain: int("\u5230\u70B9\u6267\u884C\u65F6\u53EF\u8FDE\u7EED\u518D\u8BBE\u7F6E\u4EFB\u52A1\u7684\u6B21\u6570\uFF080 \u4E3A\u7981\u6B62\uFF09", { min: 0, max: 20 })
+        }, "\u5B9A\u65F6\u4EFB\u52A1"),
         disabled: multi(toolNames, "\u7981\u7528\u7684\u5DE5\u5177")
       },
       "\u5DE5\u5177"
@@ -1642,6 +1649,14 @@ function normalize(raw) {
     maxMinutes: bounded(agy.maxMinutes, 10, 1, 1440),
     maxQueue: bounded(agy.maxQueue, 8, 1, 50),
     maxChainDepth: bounded(agy.maxChainDepth, 1, 0, 10)
+  };
+  const sc = isPlainObject(c.tools.schedule) ? c.tools.schedule : {};
+  c.tools.schedule = {
+    enable: sc.enable !== false,
+    access: sc.access === "admin" ? "admin" : "all",
+    maxPerUser: bounded(sc.maxPerUser, 5, 1, 100),
+    minInterval: bounded(sc.minInterval, 30, 1, 1440),
+    maxChain: bounded(sc.maxChain, 3, 0, 20)
   };
   c.skills = isPlainObject(c.skills) ? c.skills : { enable: true };
   const m = isPlainObject(c.memory) ? c.memory : {};
@@ -2033,9 +2048,9 @@ var init_common = __esm({
 // src/core/store.ts
 import fs5 from "node:fs";
 import path5 from "node:path";
-function registerFlushable(store11) {
-  stores.add(store11);
-  return () => stores.delete(store11);
+function registerFlushable(store12) {
+  stores.add(store12);
+  return () => stores.delete(store12);
 }
 function flushAllStores() {
   for (const s of stores) s.flush();
@@ -2094,11 +2109,11 @@ var init_store = __esm({
 });
 
 // src/llm/state.ts
-function usesServerState(provider2, model2, store11) {
+function usesServerState(provider2, model2, store12) {
   if (provider2.type === "gemini")
-    return (model2?.serverState ?? provider2.serverState ?? true) && (store11 ?? model2?.extraBody?.store ?? provider2.store ?? true);
+    return (model2?.serverState ?? provider2.serverState ?? true) && (store12 ?? model2?.extraBody?.store ?? provider2.store ?? true);
   if (provider2.type === "openai-responses")
-    return (provider2.serverState ?? false) && (store11 ?? provider2.store ?? provider2.serverState ?? false);
+    return (provider2.serverState ?? false) && (store12 ?? provider2.store ?? provider2.serverState ?? false);
   return false;
 }
 var init_state = __esm({
@@ -2897,8 +2912,8 @@ var init_gemini = __esm({
       async chat(p) {
         const base = p.provider.baseUrl || "https://generativelanguage.googleapis.com";
         const url = /\/v1beta\/?$/.test(base) ? joinUrl(base, "interactions") : joinUrl(base, "v1beta/interactions");
-        const store11 = usesServerState(p.provider, p.model, p.store);
-        const state = store11 ? p.state : void 0;
+        const store12 = usesServerState(p.provider, p.model, p.store);
+        const state = store12 ? p.state : void 0;
         const vision = p.model.vision !== false;
         const msgs = state ? p.messages.slice(state.skip) : p.messages;
         const input = [];
@@ -2936,14 +2951,14 @@ var init_gemini = __esm({
         if (thinkingLevel) generation_config.thinking_level = thinkingLevel;
         if (p.temperature != null) generation_config.temperature = p.temperature;
         if (p.model.topP != null) generation_config.top_p = p.model.topP;
-        let body = { model: p.model.model, input, system_instruction: p.system, store: store11, generation_config };
+        let body = { model: p.model.model, input, system_instruction: p.system, store: store12, generation_config };
         if (state) body.previous_interaction_id = state.previousId;
         const tools2 = p.tools.map((t) => ({ type: "function", name: t.name, description: t.description, parameters: t.parameters }));
         if (p.nativeSearch) tools2.push({ type: "google_search" }, { type: "url_context" });
         if (tools2.length) body.tools = tools2;
         if (p.model.extraBody) body = deepMerge(body, p.model.extraBody);
-        body.store = store11;
-        if (!store11) delete body.previous_interaction_id;
+        body.store = store12;
+        if (!store12) delete body.previous_interaction_id;
         const res = await requestJson(p.provider, (key) => ({ url, headers: { "x-goog-api-key": key }, body }), p.signal);
         if (res?.status === "failed") {
           const e = res?.errors?.[0];
@@ -2982,7 +2997,7 @@ var init_gemini = __esm({
           },
           native: { provider: "gemini", model: p.model.model, data: steps },
           stopReason: res?.status ?? "unknown",
-          responseId: store11 ? res?.id : void 0
+          responseId: store12 ? res?.id : void 0
         };
       }
     };
@@ -3124,7 +3139,7 @@ var init_openaiResponses = __esm({
         const official = /api\.openai\.com/i.test(base);
         const deepseek = /deepseek\.com/i.test(base);
         const vision = p.model.vision !== false;
-        const store11 = p.provider.store ?? p.provider.serverState ?? false;
+        const store12 = p.provider.store ?? p.provider.serverState ?? false;
         const msgs = p.state ? p.messages.slice(p.state.skip) : p.messages;
         const input = [];
         const userInput = (content) => ({
@@ -3150,7 +3165,7 @@ var init_openaiResponses = __esm({
             if (images.length) input.push(userInput(images));
           }
         }
-        let body = { model: p.model.model, input, instructions: p.system, max_output_tokens: p.maxTokens, store: store11 };
+        let body = { model: p.model.model, input, instructions: p.system, max_output_tokens: p.maxTokens, store: store12 };
         if (p.state) body.previous_response_id = p.state.previousId;
         const tools2 = p.tools.map((t) => ({ type: "function", name: t.name, description: t.description, parameters: t.parameters }));
         if (p.nativeSearch) tools2.push({ type: "web_search" });
@@ -3158,7 +3173,7 @@ var init_openaiResponses = __esm({
         const effort = openaiEffort(p.thinking);
         if (effort) {
           body.reasoning = { effort, summary: "auto" };
-          if (!store11) body.include = ["reasoning.encrypted_content"];
+          if (!store12) body.include = ["reasoning.encrypted_content"];
         } else if (deepseek) body.reasoning = { effort: "none" };
         if (p.temperature != null) body.temperature = p.temperature;
         if (p.model.topP != null) body.top_p = p.model.topP;
@@ -3203,7 +3218,7 @@ var init_openaiResponses = __esm({
           },
           native: { provider: "openai-responses", model: p.model.model, data: output },
           stopReason: res?.status === "incomplete" ? `incomplete:${res?.incomplete_details?.reason ?? ""}` : res?.status ?? "unknown",
-          responseId: store11 ? res?.id : void 0
+          responseId: store12 ? res?.id : void 0
         };
       }
     };
@@ -4451,13 +4466,13 @@ async function callRunner(cfg, req, hardTimeoutSec, signal) {
       const err = [];
       child2.stdout.on("data", (d) => out.push(d));
       child2.stderr.on("data", (d) => err.push(d));
-      const timer3 = setTimeout(() => child2.kill(), hardTimeoutSec * 1e3);
+      const timer4 = setTimeout(() => child2.kill(), hardTimeoutSec * 1e3);
       child2.on("error", (e) => {
-        clearTimeout(timer3);
+        clearTimeout(timer4);
         reject(e);
       });
       child2.on("close", (status) => {
-        clearTimeout(timer3);
+        clearTimeout(timer4);
         const text2 = Buffer.concat(out).toString("utf8").trim();
         try {
           const res = JSON.parse(text2);
@@ -6349,6 +6364,156 @@ var init_format = __esm({
   }
 });
 
+// src/chat/mentions.ts
+function validMentionId(id, selfId) {
+  return id !== "all" && id !== "you" && id !== String(selfId) && /^[\w:\uF03A-]+$/.test(id);
+}
+function replyMentions(text2, e, budget = { remaining: 5 }) {
+  if (!e?.group_id) return text2;
+  const parts = [];
+  const append = (value) => {
+    if (!value) return;
+    if (parts.at(-1)?.type === "text") parts.at(-1).text += value;
+    else parts.push({ type: "text", text: value });
+  };
+  const pattern = /```[^\n]*\n?[\s\S]*?(?:```|$)|~~~[^\n]*\n?[\s\S]*?(?:~~~|$)|(?<!`)(`+)(?!`)[^\n]*?\1(?!`)|\[at:([^\]\s]+)\]/g;
+  let offset = 0;
+  let converted = false;
+  for (const match of text2.matchAll(pattern)) {
+    append(text2.slice(offset, match.index));
+    const id = match[2];
+    if (id && validMentionId(id, e.self_id) && budget.remaining > 0) {
+      parts.push(seg().at(id));
+      budget.remaining--;
+      converted = true;
+    } else append(match[0]);
+    offset = match.index + match[0].length;
+  }
+  append(text2.slice(offset));
+  return converted ? parts : text2;
+}
+var init_mentions = __esm({
+  "src/chat/mentions.ts"() {
+    "use strict";
+    init_yunzai();
+  }
+});
+
+// src/chat/reply.ts
+var reply_exports = {};
+__export(reply_exports, {
+  deliver: () => deliver,
+  prepareReply: () => prepareReply,
+  stripMarkdown: () => stripMarkdown
+});
+function stripMarkdown(text2) {
+  return text2.replace(/```[\w-]*\n?([\s\S]*?)```/g, (block, code) => code.includes("[at:") ? block : code.trimEnd()).replace(/^[ \t]{0,3}#{1,6}[ \t]+/gm, "").replace(/\*\*([^*\n]+)\*\*/g, "$1").replace(/__([^_\n]+)__/g, "$1").replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, "$1$2").replace(/`([^`\n]+)`/g, (inline, code) => code.includes("[at:") ? inline : code).replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, "$2").replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, (_, t, u) => t === u ? u : `${t} ${u}`).replace(/^[ \t]*[-*+][ \t]+/gm, "\xB7 ").replace(/^[ \t]*>[ \t]?/gm, "").replace(/^[ \t]*([-*_][ \t]*){3,}$/gm, "");
+}
+function prepareReply(raw, cfg, markdown = false) {
+  const { text: noMarkers, names: names2 } = extractStickerMarkers(raw);
+  let text2 = cfg.stripMarkdown && !markdown ? stripMarkdown(noMarkers) : noMarkers;
+  text2 = text2.replace(/\n{3,}/g, "\n\n").trim();
+  if (!text2) return { bubbles: [], stickerNames: names2 };
+  if (markdown) return { bubbles: [text2], stickerNames: names2 };
+  if (text2.length > cfg.maxChars) {
+    if (cfg.longText === "forward") return { bubbles: [], forward: text2, stickerNames: names2 };
+    text2 = truncate(text2, cfg.maxChars);
+  }
+  const paras = text2.split(/\n\s*\n/).map((s) => s.trim()).filter(Boolean);
+  if (cfg.maxBubbles > 1 && paras.length > 1 && paras.length <= cfg.maxBubbles && paras.every((p) => p.length <= 120))
+    return { bubbles: paras, stickerNames: names2 };
+  if (cfg.maxBubbles > 1 && paras.length > cfg.maxBubbles && text2.length <= 240) {
+    const head = paras.slice(0, cfg.maxBubbles - 1);
+    const tail = paras.slice(cfg.maxBubbles - 1).join("\n");
+    return { bubbles: [...head, tail], stickerNames: names2 };
+  }
+  return { bubbles: [text2], stickerNames: names2 };
+}
+function typingDelay(len, cfg) {
+  const t = cfg.typing;
+  const ms = len / Math.max(1, t.charsPerSecond) * 1e3 * randFloat(0.8, 1.25);
+  return Math.min(t.maxDelay, Math.max(t.minDelay, ms));
+}
+function groupKey(e) {
+  return e.group_id ? `g:${e.self_id}:${e.group_id}` : `p:${e.self_id}:${e.user_id}`;
+}
+async function takeSlot(e, cfg, waitMs) {
+  if (!await limiter.take(groupKey(e), cfg.groupRate, waitMs)) return false;
+  return limiter.take("global", cfg.globalRate, waitMs);
+}
+async function showTyping(e, cfg) {
+  if (e.group_id || !cfg.privateTyping) return;
+  try {
+    await sendApi(e, "set_input_status", { user_id: String(e.user_id), event_type: 1 });
+  } catch {
+  }
+}
+async function deliver(e, raw, eff, opts) {
+  const cfg = eff.reply;
+  const mentionBudget = { remaining: 5 };
+  const prep = prepareReply(raw, cfg, markdownEnabled(e, cfg));
+  const sticker2 = chooseSticker(opts.convKey, prep.stickerNames, eff.sticker);
+  const elapsed = Date.now() - opts.startedAt;
+  if (!opts.suppressText && (prep.bubbles.length || prep.forward)) {
+    await showTyping(e, cfg);
+    if (!await takeSlot(e, cfg, 15e3)) {
+      log.warn("\u8FBE\u5230\u53D1\u9001\u9891\u7387\u4E0A\u9650\uFF0C\u653E\u5F03\u672C\u6B21\u56DE\u590D");
+      return;
+    }
+    const first2 = prep.forward ? 30 : prep.bubbles[0].length;
+    await sleep(typingDelay(first2, cfg) - elapsed);
+    const quote = Boolean(e.message_id) && (cfg.quote === "always" || cfg.quote === "auto" && Boolean(e.group_id) && (messagesSince(e) >= 2 || Date.now() - opts.startedAt > 25e3));
+    const at = cfg.atUser && Boolean(e.group_id) && !quote;
+    if (prep.forward) {
+      if (quote || at) await e.reply("\u5185\u5BB9\u6709\u70B9\u957F\uFF0C\u6211\u6574\u7406\u5728\u4E0B\u9762\u5566", quote, { at });
+      await sendForward(e, [replyMentions(prep.forward, e, mentionBudget)], botNickname(e));
+      recordBotMessage(e, truncate(prep.forward, 100), opts.convKey);
+    } else {
+      for (let i = 0; i < prep.bubbles.length; i++) {
+        const b = prep.bubbles[i];
+        if (i > 0) {
+          if (!await takeSlot(e, cfg, 8e3)) {
+            const rest = prep.bubbles.slice(i).join("\n");
+            await e.reply(replyMentions(rest, e, mentionBudget));
+            recordBotMessage(e, rest, opts.convKey);
+            break;
+          }
+          await showTyping(e, cfg);
+          await sleep(typingDelay(b.length, cfg));
+        }
+        await e.reply(replyMentions(b, e, mentionBudget), i === 0 && quote, i === 0 && at ? { at: true } : {});
+        recordBotMessage(e, b, opts.convKey);
+      }
+    }
+  }
+  for (const img of opts.images ?? []) {
+    if (!await takeSlot(e, cfg, 2e4)) {
+      log.warn("\u8FBE\u5230\u53D1\u9001\u9891\u7387\u4E0A\u9650\uFF0C\u6E32\u67D3\u56FE\u7247\u672A\u53D1\u9001");
+      break;
+    }
+    await e.reply(seg().image(img));
+    opts.onImageSent?.(img);
+    recordBotMessage(e, "[\u56FE\u7247]", opts.convKey);
+  }
+  if (sticker2 && await takeSlot(e, cfg, 3e3)) {
+    await sleep(randFloat(600, 1800));
+    if (await sendSticker(e, sticker2, eff.sticker)) recordBotMessage(e, `[\u8868\u60C5:${sticker2.name}]`, opts.convKey);
+  }
+}
+var init_reply = __esm({
+  "src/chat/reply.ts"() {
+    "use strict";
+    init_log();
+    init_util();
+    init_yunzai();
+    init_format();
+    init_picker();
+    init_groupLog();
+    init_ratelimit();
+    init_mentions();
+  }
+});
+
 // src/chat/rolloutStore.ts
 import fs19 from "node:fs";
 import path18 from "node:path";
@@ -6541,12 +6706,12 @@ function directory3(id) {
 }
 function storeFor2(id) {
   const dir = directory3(id);
-  let store11 = stores3.get(id);
-  if (!store11) {
-    store11 = new JsonStore(path19.join(dir, "history.json"), { seq: 0, dropped: 0, events: [] });
-    stores3.set(id, store11);
+  let store12 = stores3.get(id);
+  if (!store12) {
+    store12 = new JsonStore(path19.join(dir, "history.json"), { seq: 0, dropped: 0, events: [] });
+    stores3.set(id, store12);
   }
-  return store11;
+  return store12;
 }
 function agyHistoryText(value, secrets = privateValues(config.get()), max = 12e3) {
   const hidden = /password|secret|token|cookie|authorization|api.?key|^data$|^native$|reasoning|thinking|signature/i;
@@ -6577,9 +6742,9 @@ function cleanEvent(event) {
 }
 function recordAgyEvent(id, event) {
   try {
-    const store11 = storeFor2(id);
-    const safe = cleanEvent({ ...event, seq: ++store11.data.seq, at: Date.now() });
-    store11.data.events.push(safe);
+    const store12 = storeFor2(id);
+    const safe = cleanEvent({ ...event, seq: ++store12.data.seq, at: Date.now() });
+    store12.data.events.push(safe);
     log.debug(`[AGY ${id}] ${safe.kind} ${[
       safe.model ? `model=${safe.model}` : "",
       safe.step != null ? `step=${safe.step}` : "",
@@ -6588,26 +6753,26 @@ function recordAgyEvent(id, event) {
       safe.inputTokens != null ? `in=${safe.inputTokens} out=${safe.outputTokens ?? 0}` : "",
       safe.delivery ? `delivery=${safe.delivery}` : ""
     ].filter(Boolean).join(" ")} text=${safe.text.slice(0, 4e3)}${safe.args ? ` args=${safe.args.slice(0, 4e3)}` : ""}`);
-    while (store11.data.events.length > 500 || Buffer.byteLength(JSON.stringify(store11.data)) > 2 * 1024 * 1024) {
-      store11.data.events.shift();
-      store11.data.dropped++;
+    while (store12.data.events.length > 500 || Buffer.byteLength(JSON.stringify(store12.data)) > 2 * 1024 * 1024) {
+      store12.data.events.shift();
+      store12.data.dropped++;
     }
-    store11.save();
+    store12.save();
   } catch {
     log.warn("AGY \u6267\u884C\u8BB0\u5F55\u4FDD\u5B58\u5931\u8D25");
   }
 }
 function patchAgyEvents(id, patch) {
   try {
-    const store11 = storeFor2(id);
+    const store12 = storeFor2(id);
     let dirty = false;
-    store11.data.events = store11.data.events.map((event) => {
+    store12.data.events = store12.data.events.map((event) => {
       const update = patch(event);
       if (!update) return event;
       dirty = true;
       return cleanEvent({ ...event, ...update });
     });
-    if (dirty) store11.save();
+    if (dirty) store12.save();
   } catch {
     log.warn("AGY \u6267\u884C\u8BB0\u5F55\u4FDD\u5B58\u5931\u8D25");
   }
@@ -6706,9 +6871,9 @@ function agySubagentHistory(id, conversationId, brain = agyHostPaths()[1]) {
 function noteConversation(id, conversationId) {
   if (!CONVERSATION.test(conversationId)) return;
   try {
-    const store11 = storeFor2(id);
-    store11.data.conversations = [...store11.data.conversations ?? [], conversationId.toLowerCase()];
-    store11.save();
+    const store12 = storeFor2(id);
+    store12.data.conversations = [...store12.data.conversations ?? [], conversationId.toLowerCase()];
+    store12.save();
   } catch {
     log.warn("AGY \u6267\u884C\u8BB0\u5F55\u4FDD\u5B58\u5931\u8D25");
   }
@@ -6728,16 +6893,16 @@ function findConversations(job, brain) {
 }
 function resolveAgyHistory(job, brain = agyHostPaths()[1]) {
   if (["queued", "running", "waiting"].includes(job.status)) return;
-  const store11 = storeFor2(job.id);
-  if (store11.data.resolved) return;
+  const store12 = storeFor2(job.id);
+  if (store12.data.resolved) return;
   try {
-    const conversations = store11.data.conversations?.length ? store11.data.conversations : findConversations(job, brain);
+    const conversations = store12.data.conversations?.length ? store12.data.conversations : findConversations(job, brain);
     const runs = [];
-    for (const event of store11.data.events) {
+    for (const event of store12.data.events) {
       if (event.kind === "context") runs.push([]);
       else runs.at(-1)?.push(event);
     }
-    if (!runs.length) runs.push(store11.data.events);
+    if (!runs.length) runs.push(store12.data.events);
     if (conversations.length !== runs.length) return;
     const updates = /* @__PURE__ */ new Map();
     runs.forEach((run, i) => {
@@ -6749,7 +6914,7 @@ function resolveAgyHistory(job, brain = agyHostPaths()[1]) {
         return !(at < from || at > to);
       });
       const pair = (events, ordered, update) => {
-        const legacy = i === 0 && store11.data.dropped ? [] : events.filter((event) => event.index == null);
+        const legacy = i === 0 && store12.data.dropped ? [] : events.filter((event) => event.index == null);
         events.forEach((event) => {
           const entry = event.index != null ? byIndex.get(event.index) : legacy.length === ordered.length && legacy.includes(event) ? ordered[legacy.indexOf(event)] : void 0;
           const change = entry && update(entry, event);
@@ -6757,7 +6922,7 @@ function resolveAgyHistory(job, brain = agyHostPaths()[1]) {
         });
       };
       const aligned = /* @__PURE__ */ new Map();
-      if (!(i === 0 && store11.data.dropped)) {
+      if (!(i === 0 && store12.data.dropped)) {
         const responses = own.filter((entry) => entry.type === "PLANNER_RESPONSE");
         const issued = (from2) => {
           const names2 = [], open = [];
@@ -6802,8 +6967,8 @@ function resolveAgyHistory(job, brain = agyHostPaths()[1]) {
     });
     if (updates.size) patchAgyEvents(job.id, (event) => updates.get(event.seq));
   } finally {
-    store11.data.resolved = true;
-    store11.save();
+    store12.data.resolved = true;
+    store12.save();
   }
 }
 function agyHistory(id) {
@@ -8009,7 +8174,7 @@ async function runTurn(req) {
     conv: req.convKey,
     input: req.input.text || (req.input.images.length ? "\uFF08\u53D1\u4E86\u56FE\u7247\uFF09" : "\uFF08\u53EA@\u4E86\u4F60\uFF0C\u6CA1\u8BF4\u8BDD\uFF09"),
     inputImageCount: req.input.images.length,
-    source: req.asyncResult?.kind ?? (req.computerResult ? "computer" : req.proactive ? "proactive" : "chat"),
+    source: req.asyncResult?.kind ?? (req.computerResult ? "computer" : req.proactive ? "proactive" : req.scheduled ? "schedule" : "chat"),
     jobId: req.asyncResult?.id ?? req.computerResult?.id
   });
   const ref = { rolloutId, continued };
@@ -8019,14 +8184,14 @@ async function runTurn(req) {
       return runTurnInner(req, ref);
     });
     if (result.kind === "reply") {
-      const text2 = result.skipped ? "\uFF08\u4E3B\u52A8\u53D1\u8A00\uFF1A\u6A21\u578B\u9009\u62E9\u4E0D\u63A5\u8BDD\uFF09" : result.text || (result.dispatched ? `\uFF08\u6267\u884C\u6307\u4EE4 ${result.dispatched}\uFF09` : "\uFF08\u65E0\u6587\u5B57\u56DE\u590D\uFF09");
+      const text2 = result.skipped ? req.scheduled ? "\uFF08\u5B9A\u65F6\u4EFB\u52A1\uFF1A\u6A21\u578B\u5224\u65AD\u65E0\u9700\u53D1\u6D88\u606F\uFF09" : "\uFF08\u4E3B\u52A8\u53D1\u8A00\uFF1A\u6A21\u578B\u9009\u62E9\u4E0D\u63A5\u8BDD\uFF09" : result.text || (result.dispatched ? `\uFF08\u6267\u884C\u6307\u4EE4 ${result.dispatched}\uFF09` : "\uFF08\u65E0\u6587\u5B57\u56DE\u590D\uFF09");
       recordRolloutEvent(rolloutId, { kind: "reply", text: text2 });
       updateRollout(rolloutId, { status: hasPendingJobs(rolloutId) ? "waiting_callback" : "completed", reply: text2 });
     } else {
       recordRolloutEvent(rolloutId, { kind: "error", text: result.kind === "quota" ? "\u989D\u5EA6\u5DF2\u7528\u5B8C\uFF0C\u672A\u8C03\u7528\u6A21\u578B" : result.message, isError: true });
       updateRollout(rolloutId, { status: result.kind === "quota" ? "blocked" : "failed", ...result.kind === "quota" ? { model: result.modelId } : {} });
     }
-    return { ...result, afterReply: ref.turn?.afterReply };
+    return { ...result, afterReply: ref.turn?.afterReply, rolloutId };
   } catch (error) {
     recordRolloutEvent(rolloutId, { kind: "error", text: error?.message ?? String(error), isError: true });
     updateRollout(rolloutId, { status: "failed" });
@@ -8062,7 +8227,7 @@ async function runTurnInner(req, ref) {
     });
   const temperature = saved ? saved.temperature : model2.temperature ?? eff.chat.temperature;
   const maxTokens = saved?.maxTokens ?? model2.maxTokens ?? eff.chat.maxOutputTokens;
-  const turn = { commands: 0, searches: 0, fetches: 0, images: [], rolloutId: ref.rolloutId, chainDepth: req.chainDepth ?? 0 };
+  const turn = { commands: 0, searches: 0, fetches: 0, images: [], rolloutId: ref.rolloutId, chainDepth: req.chainDepth ?? 0, scheduleChain: req.scheduled?.chain ?? 0 };
   if (!req.computerResult && !req.asyncResult) turn.inputImages = input.images;
   turn.asyncResult = req.asyncResult;
   turn.computerResult = req.computerResult;
@@ -8296,8 +8461,8 @@ ${session.summary}` }] });
     `[${model2.id}] ${Date.now() - started}ms think=${thinking} in=${usage2.input} cache=${usage2.cacheRead}/${usage2.cacheWrite + usage2.cacheWrite1h} out=${usage2.output}${usage2.reasoning ? `(\u601D\u8003${usage2.reasoning})` : ""}${usage2.webSearches ? ` \u81EA\u5E26\u641C\u7D22${usage2.webSearches}\u6B21` : ""} $${cost.toFixed(5)}${usage2.inputIncomplete ? " (\u4E0A\u6E38\u5386\u53F2\u7528\u91CF\u53EF\u80FD\u7F3A\u5931)" : ""}${turn.dispatched ? ` cmd=${turn.dispatched}` : ""}`
   );
   if (finalText) log.debug(`[${model2.id}] \u56DE\u590D\uFF1A${brief(finalText, 500)}`);
-  if (req.proactive && !turn.dispatched && !turn.images.length && (!finalText.trim() || SKIP_REPLY.test(finalText))) {
-    recordTurn({ ...turnInfo(), reply: "\uFF08\u4E3B\u52A8\u53D1\u8A00\uFF1A\u4E0D\u63A5\u8BDD\uFF09" });
+  if ((req.proactive || req.scheduled) && !turn.dispatched && !turn.images.length && (!finalText.trim() || SKIP_REPLY.test(finalText))) {
+    recordTurn({ ...turnInfo(), reply: req.scheduled ? "\uFF08\u5B9A\u65F6\u4EFB\u52A1\uFF1A\u65E0\u9700\u53D1\u6D88\u606F\uFF09" : "\uFF08\u4E3B\u52A8\u53D1\u8A00\uFF1A\u4E0D\u63A5\u8BDD\uFF09" });
     return { kind: "reply", text: "", modelId: model2.id, cost, images: [], thinking, skipped: true };
   }
   recordTurn({ ...turnInfo(), reply: finalText || (turn.dispatched ? `\uFF08\u6267\u884C\u6307\u4EE4 ${turn.dispatched}\uFF09` : "") });
@@ -9229,143 +9394,7 @@ function commandEvent(e, reply2, batch = false) {
 // src/tools/computer.ts
 init_store();
 init_log();
-
-// src/chat/reply.ts
-init_log();
-init_util();
-init_yunzai();
-init_format();
-init_picker();
-init_groupLog();
-init_ratelimit();
-
-// src/chat/mentions.ts
-init_yunzai();
-function validMentionId(id, selfId) {
-  return id !== "all" && id !== "you" && id !== String(selfId) && /^[\w:\uF03A-]+$/.test(id);
-}
-function replyMentions(text2, e, budget = { remaining: 5 }) {
-  if (!e?.group_id) return text2;
-  const parts = [];
-  const append = (value) => {
-    if (!value) return;
-    if (parts.at(-1)?.type === "text") parts.at(-1).text += value;
-    else parts.push({ type: "text", text: value });
-  };
-  const pattern = /```[^\n]*\n?[\s\S]*?(?:```|$)|~~~[^\n]*\n?[\s\S]*?(?:~~~|$)|(?<!`)(`+)(?!`)[^\n]*?\1(?!`)|\[at:([^\]\s]+)\]/g;
-  let offset = 0;
-  let converted = false;
-  for (const match of text2.matchAll(pattern)) {
-    append(text2.slice(offset, match.index));
-    const id = match[2];
-    if (id && validMentionId(id, e.self_id) && budget.remaining > 0) {
-      parts.push(seg().at(id));
-      budget.remaining--;
-      converted = true;
-    } else append(match[0]);
-    offset = match.index + match[0].length;
-  }
-  append(text2.slice(offset));
-  return converted ? parts : text2;
-}
-
-// src/chat/reply.ts
-function stripMarkdown(text2) {
-  return text2.replace(/```[\w-]*\n?([\s\S]*?)```/g, (block, code) => code.includes("[at:") ? block : code.trimEnd()).replace(/^[ \t]{0,3}#{1,6}[ \t]+/gm, "").replace(/\*\*([^*\n]+)\*\*/g, "$1").replace(/__([^_\n]+)__/g, "$1").replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, "$1$2").replace(/`([^`\n]+)`/g, (inline, code) => code.includes("[at:") ? inline : code).replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, "$2").replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, (_, t, u) => t === u ? u : `${t} ${u}`).replace(/^[ \t]*[-*+][ \t]+/gm, "\xB7 ").replace(/^[ \t]*>[ \t]?/gm, "").replace(/^[ \t]*([-*_][ \t]*){3,}$/gm, "");
-}
-function prepareReply(raw, cfg, markdown = false) {
-  const { text: noMarkers, names: names2 } = extractStickerMarkers(raw);
-  let text2 = cfg.stripMarkdown && !markdown ? stripMarkdown(noMarkers) : noMarkers;
-  text2 = text2.replace(/\n{3,}/g, "\n\n").trim();
-  if (!text2) return { bubbles: [], stickerNames: names2 };
-  if (markdown) return { bubbles: [text2], stickerNames: names2 };
-  if (text2.length > cfg.maxChars) {
-    if (cfg.longText === "forward") return { bubbles: [], forward: text2, stickerNames: names2 };
-    text2 = truncate(text2, cfg.maxChars);
-  }
-  const paras = text2.split(/\n\s*\n/).map((s) => s.trim()).filter(Boolean);
-  if (cfg.maxBubbles > 1 && paras.length > 1 && paras.length <= cfg.maxBubbles && paras.every((p) => p.length <= 120))
-    return { bubbles: paras, stickerNames: names2 };
-  if (cfg.maxBubbles > 1 && paras.length > cfg.maxBubbles && text2.length <= 240) {
-    const head = paras.slice(0, cfg.maxBubbles - 1);
-    const tail = paras.slice(cfg.maxBubbles - 1).join("\n");
-    return { bubbles: [...head, tail], stickerNames: names2 };
-  }
-  return { bubbles: [text2], stickerNames: names2 };
-}
-function typingDelay(len, cfg) {
-  const t = cfg.typing;
-  const ms = len / Math.max(1, t.charsPerSecond) * 1e3 * randFloat(0.8, 1.25);
-  return Math.min(t.maxDelay, Math.max(t.minDelay, ms));
-}
-function groupKey(e) {
-  return e.group_id ? `g:${e.self_id}:${e.group_id}` : `p:${e.self_id}:${e.user_id}`;
-}
-async function takeSlot(e, cfg, waitMs) {
-  if (!await limiter.take(groupKey(e), cfg.groupRate, waitMs)) return false;
-  return limiter.take("global", cfg.globalRate, waitMs);
-}
-async function showTyping(e, cfg) {
-  if (e.group_id || !cfg.privateTyping) return;
-  try {
-    await sendApi(e, "set_input_status", { user_id: String(e.user_id), event_type: 1 });
-  } catch {
-  }
-}
-async function deliver(e, raw, eff, opts) {
-  const cfg = eff.reply;
-  const mentionBudget = { remaining: 5 };
-  const prep = prepareReply(raw, cfg, markdownEnabled(e, cfg));
-  const sticker2 = chooseSticker(opts.convKey, prep.stickerNames, eff.sticker);
-  const elapsed = Date.now() - opts.startedAt;
-  if (!opts.suppressText && (prep.bubbles.length || prep.forward)) {
-    await showTyping(e, cfg);
-    if (!await takeSlot(e, cfg, 15e3)) {
-      log.warn("\u8FBE\u5230\u53D1\u9001\u9891\u7387\u4E0A\u9650\uFF0C\u653E\u5F03\u672C\u6B21\u56DE\u590D");
-      return;
-    }
-    const first2 = prep.forward ? 30 : prep.bubbles[0].length;
-    await sleep(typingDelay(first2, cfg) - elapsed);
-    const quote = Boolean(e.message_id) && (cfg.quote === "always" || cfg.quote === "auto" && Boolean(e.group_id) && (messagesSince(e) >= 2 || Date.now() - opts.startedAt > 25e3));
-    const at = cfg.atUser && Boolean(e.group_id) && !quote;
-    if (prep.forward) {
-      if (quote || at) await e.reply("\u5185\u5BB9\u6709\u70B9\u957F\uFF0C\u6211\u6574\u7406\u5728\u4E0B\u9762\u5566", quote, { at });
-      await sendForward(e, [replyMentions(prep.forward, e, mentionBudget)], botNickname(e));
-      recordBotMessage(e, truncate(prep.forward, 100), opts.convKey);
-    } else {
-      for (let i = 0; i < prep.bubbles.length; i++) {
-        const b = prep.bubbles[i];
-        if (i > 0) {
-          if (!await takeSlot(e, cfg, 8e3)) {
-            const rest = prep.bubbles.slice(i).join("\n");
-            await e.reply(replyMentions(rest, e, mentionBudget));
-            recordBotMessage(e, rest, opts.convKey);
-            break;
-          }
-          await showTyping(e, cfg);
-          await sleep(typingDelay(b.length, cfg));
-        }
-        await e.reply(replyMentions(b, e, mentionBudget), i === 0 && quote, i === 0 && at ? { at: true } : {});
-        recordBotMessage(e, b, opts.convKey);
-      }
-    }
-  }
-  for (const img of opts.images ?? []) {
-    if (!await takeSlot(e, cfg, 2e4)) {
-      log.warn("\u8FBE\u5230\u53D1\u9001\u9891\u7387\u4E0A\u9650\uFF0C\u6E32\u67D3\u56FE\u7247\u672A\u53D1\u9001");
-      break;
-    }
-    await e.reply(seg().image(img));
-    opts.onImageSent?.(img);
-    recordBotMessage(e, "[\u56FE\u7247]", opts.convKey);
-  }
-  if (sticker2 && await takeSlot(e, cfg, 3e3)) {
-    await sleep(randFloat(600, 1800));
-    if (await sendSticker(e, sticker2, eff.sticker)) recordBotMessage(e, `[\u8868\u60C5:${sticker2.name}]`, opts.convKey);
-  }
-}
-
-// src/tools/computer.ts
+init_reply();
 init_session();
 init_utility();
 init_format();
@@ -9388,7 +9417,7 @@ async function desktopRequest(cfg, request2, signal) {
     const child2 = spawn2("wsl.exe", ["-d", cfg.distro, "-u", "root", "-e", "python3", "/opt/llm-desktop/client.py"], { windowsHide: true, signal });
     const chunks = [];
     let bytes = 0;
-    const timer3 = setTimeout(() => child2.kill(), 5e4);
+    const timer4 = setTimeout(() => child2.kill(), 5e4);
     child2.stdout.on("data", (chunk) => {
       bytes += chunk.length;
       if (bytes > 12e6) child2.kill();
@@ -9396,13 +9425,13 @@ async function desktopRequest(cfg, request2, signal) {
     });
     child2.stderr.resume();
     child2.on("error", (error) => {
-      clearTimeout(timer3);
+      clearTimeout(timer4);
       reject(error);
     });
     child2.stdin.on("error", () => {
     });
     child2.on("close", () => {
-      clearTimeout(timer3);
+      clearTimeout(timer4);
       try {
         const result = JSON.parse(Buffer.concat(chunks).toString("utf8"));
         if (result.error) throw new Error(result.error);
@@ -9442,12 +9471,12 @@ function directory2(id) {
 }
 function storeFor(id) {
   directory2(id);
-  let store11 = stores2.get(id);
-  if (!store11) {
-    store11 = new JsonStore(path16.join(directory2(id), "history.json"), { seq: 0, dropped: 0, events: [], images: [] });
-    stores2.set(id, store11);
+  let store12 = stores2.get(id);
+  if (!store12) {
+    store12 = new JsonStore(path16.join(directory2(id), "history.json"), { seq: 0, dropped: 0, events: [], images: [] });
+    stores2.set(id, store12);
   }
-  return store11;
+  return store12;
 }
 function historyText(value, max = 8e3) {
   const text2 = typeof value === "string" ? value : JSON.stringify(value, (key, entry) => /password|secret|token|cookie|authorization|api.?key|^data$|^native$|reasoning|signature/i.test(key) ? "[redacted]" : entry) ?? "";
@@ -9455,13 +9484,13 @@ function historyText(value, max = 8e3) {
 }
 function recordComputerEvent(id, event) {
   try {
-    const store11 = storeFor(id);
-    store11.data.events.push({ ...event, text: historyText(event.text), seq: ++store11.data.seq, at: Date.now() });
-    while (store11.data.events.length > 1e3 || Buffer.byteLength(JSON.stringify(store11.data)) > MAX_HISTORY_BYTES) {
-      store11.data.events.shift();
-      store11.data.dropped++;
+    const store12 = storeFor(id);
+    store12.data.events.push({ ...event, text: historyText(event.text), seq: ++store12.data.seq, at: Date.now() });
+    while (store12.data.events.length > 1e3 || Buffer.byteLength(JSON.stringify(store12.data)) > MAX_HISTORY_BYTES) {
+      store12.data.events.shift();
+      store12.data.dropped++;
     }
-    store11.save();
+    store12.save();
   } catch (error) {
     log.warn(`\u7535\u8111\u4EFB\u52A1\u8BB0\u5F55\u4FDD\u5B58\u5931\u8D25\uFF1A${error?.message}`);
   }
@@ -9470,16 +9499,16 @@ function saveComputerScreenshot(id, buffer) {
   try {
     const mime = detectImageMime(buffer);
     if (!mime || buffer.length > MAX_IMAGE_BYTES3) return;
-    const store11 = storeFor(id);
+    const store12 = storeFor(id);
     const hash = sha1(buffer);
-    const existing = store11.data.images.find((image2) => image2.id === hash);
+    const existing = store12.data.images.find((image2) => image2.id === hash);
     if (existing) return existing;
-    if (store11.data.images.length >= 64 || store11.data.images.reduce((total, image2) => total + image2.bytes, 0) + buffer.length > MAX_IMAGES_BYTES) return;
+    if (store12.data.images.length >= 64 || store12.data.images.reduce((total, image2) => total + image2.bytes, 0) + buffer.length > MAX_IMAGES_BYTES) return;
     fs17.mkdirSync(directory2(id), { recursive: true });
     fs17.writeFileSync(path16.join(directory2(id), `${hash}.image`), buffer);
     const image = { id: hash, mime, bytes: buffer.length };
-    store11.data.images.push(image);
-    store11.save();
+    store12.data.images.push(image);
+    store12.save();
     return image;
   } catch (error) {
     log.warn(`\u7535\u8111\u4EFB\u52A1\u622A\u56FE\u4FDD\u5B58\u5931\u8D25\uFF1A${error?.message}`);
@@ -9556,7 +9585,7 @@ async function runComputer(job, opts) {
   const abort = () => controller.abort(signal.reason);
   signal.addEventListener("abort", abort, { once: true });
   if (signal.aborted) abort();
-  const timer3 = setTimeout(() => controller.abort(new Error("\u7535\u8111\u4EFB\u52A1\u8FBE\u5230\u65F6\u95F4\u4E0A\u9650")), cfg.maxMinutes * 6e4);
+  const timer4 = setTimeout(() => controller.abort(new Error("\u7535\u8111\u4EFB\u52A1\u8FBE\u5230\u65F6\u95F4\u4E0A\u9650")), cfg.maxMinutes * 6e4);
   const workerSignal = controller.signal;
   const skill = fs18.readFileSync(path17.join(PLUGIN_DIR, "desktop", "SKILL.md"), "utf8").replace(/^---[\s\S]*?---\s*/, "");
   const attachments = job.inputImages?.map((image) => `${computerImagePath(job.id, image)} (${image.mime}, ${image.bytes} bytes)`).join("\n");
@@ -9688,7 +9717,7 @@ ${skill}`;
     throw error;
   } finally {
     log.info(`[\u7535\u8111 ${job.id}] model=${model2.id} ${Date.now() - startedAt2}ms steps=${job.steps ?? 0} input=${input} output=${output} cacheRead=${cacheRead} cacheWrite=${cacheWrite} cost=$${cost.toFixed(6)} jobCost=$${(job.costUsd ?? previous.cost).toFixed(6)} pricing=${price?.source ?? "unknown"} aborted=${workerSignal.aborted}`);
-    clearTimeout(timer3);
+    clearTimeout(timer4);
     signal.removeEventListener("abort", abort);
   }
 }
@@ -11077,6 +11106,7 @@ init_agent();
 init_groupLog();
 init_message();
 init_ratelimit();
+init_reply();
 init_session();
 init_utility();
 init_roster();
@@ -12022,11 +12052,11 @@ var BROKEN_IMAGE = "data:image/svg+xml;base64," + Buffer.from(
 async function inlineLocalImages(html, ctx) {
   const cache4 = /* @__PURE__ */ new Map();
   const broken = [];
-  const local = (value) => !/^(?:https?:|data:|#|\/\/)/i.test(value);
+  const local2 = (value) => !/^(?:https?:|data:|#|\/\/)/i.test(value);
   const resource = /(?:\b(?:src|poster|background)\s*=\s*(?:(["'])(.*?)\1|([^\s>]+))|url\(\s*(?:(["'])(.*?)\4|([^\s)]+))\s*\))/gi;
   for (const match of html.matchAll(resource)) {
     const file = match[2] ?? match[3] ?? match[5] ?? match[6];
-    if (!file || !local(file) || cache4.has(file)) continue;
+    if (!file || !local2(file) || cache4.has(file)) continue;
     try {
       const { part } = await readLocalImage(file, ctx);
       cache4.set(file, "data:" + part.mime + ";base64," + part.data);
@@ -12111,7 +12141,7 @@ function lensBridge(distro2, request2, signal) {
     const finish = (error, result) => {
       if (settled) return;
       settled = true;
-      clearTimeout(timer3);
+      clearTimeout(timer4);
       signal.removeEventListener("abort", abort);
       if (error) {
         child2.kill();
@@ -12119,7 +12149,7 @@ function lensBridge(distro2, request2, signal) {
       } else resolve(result);
     };
     const abort = () => finish(Error("Google Lens \u64CD\u4F5C\u5DF2\u53D6\u6D88\u6216\u8D85\u65F6\uFF0C\u8BF7\u68C0\u67E5\u865A\u62DF\u673A\u6D4F\u89C8\u5668\u540E\u91CD\u8BD5"));
-    const timer3 = setTimeout(abort, 54e3);
+    const timer4 = setTimeout(abort, 54e3);
     signal.addEventListener("abort", abort, { once: true });
     child2.stdout.on("data", (chunk) => {
       output += chunk;
@@ -12364,7 +12394,7 @@ User clarification: ${redact(job.response, secrets)}` : ""}`;
     let lastResponse = "", cliError = "", stderrTail = "";
     const responseText = /* @__PURE__ */ new Map();
     const abort = () => killTree(child2.pid);
-    const timer3 = setTimeout(() => {
+    const timer4 = setTimeout(() => {
       timedOut = true;
       abort();
     }, cfg.maxMinutes * 6e4 + 1e4);
@@ -12422,7 +12452,7 @@ User clarification: ${redact(job.response, secrets)}` : ""}`;
       observe?.({ event: "diagnostic", text: redact(chunk, secrets).slice(0, 2e3) });
     });
     const cleanup = () => {
-      clearTimeout(timer3);
+      clearTimeout(timer4);
       signal.removeEventListener("abort", abort);
     };
     child2.on("error", () => {
@@ -12462,6 +12492,7 @@ init_privacy();
 init_history2();
 init_registry();
 init_session();
+init_reply();
 var store10 = new JsonStore("agy-jobs.json", []);
 var retainedJobs2;
 var agyQueue = new ComputerQueue(store10.data, () => {
@@ -12615,6 +12646,373 @@ function registerAgyTool() {
         (ctx.turn.afterReply ??= []).push(() => activate2(job, ctx));
       } else if (args.action !== "status") return { content: `\u672A\u77E5\u64CD\u4F5C\u300C${args.action}\u300D\uFF08\u652F\u6301\uFF1Astart, status, cancel, respond\uFF09`, isError: true };
       return JSON.stringify({ id: job.id, status: job.status, report: redact(job.report ?? "", secrets), deliveryError: job.deliveryError });
+    }
+  });
+}
+
+// src/tools/schedule.ts
+init_util();
+init_yunzai();
+
+// src/chat/schedule.ts
+init_config();
+init_log();
+init_store();
+init_util();
+init_yunzai();
+init_session();
+var REPEATS = ["none", "daily", "weekdays", "weekly", "interval"];
+var TZ_OFFSET2 = 8 * 36e5;
+var MINUTE = 6e4;
+var DAY2 = 864e5;
+var ONE_OFF_GRACE = DAY2;
+var REPEAT_GRACE = 30 * MINUTE;
+var KEEP_FINISHED = 30 * DAY2;
+var MAX_STORED = 1e3;
+var MAX_TASK_CHARS2 = 500;
+var MAX_HORIZON = 366 * DAY2;
+var TICK_MS2 = 15e3;
+var store11 = new JsonStore("schedules.json", []);
+if (!Array.isArray(store11.data)) store11.data = [];
+var running3 = /* @__PURE__ */ new Set();
+var listTasks = () => store11.data;
+var getTask = (id) => store11.data.find((t) => t.id === id);
+var isRunning = (id) => running3.has(id);
+function save2() {
+  const cutoff = Date.now() - KEEP_FINISHED;
+  const keep = store11.data.filter((t) => t.status === "active" || t.updatedAt > cutoff);
+  if (keep.length > MAX_STORED) keep.splice(0, keep.length - MAX_STORED);
+  store11.data = keep;
+  store11.save();
+}
+var local = (ts) => {
+  const d = new Date(ts + TZ_OFFSET2);
+  return { weekday: d.getUTCDay(), midnight: ts - (ts + TZ_OFFSET2) % DAY2 };
+};
+function parseTime(text2, now = Date.now()) {
+  const m = String(text2 ?? "").trim().match(/^(?:(?:(\d{4})[-/.])?(\d{1,2})[-/.](\d{1,2})[ T]+)?(\d{1,2})[:：](\d{2})(?::\d{2})?$/);
+  if (!m) return void 0;
+  const [, y, mo, d, hh, mm] = m;
+  if (Number(hh) > 23 || Number(mm) > 59) return void 0;
+  if (!mo) {
+    const today = local(now).midnight + (Number(hh) * 60 + Number(mm)) * MINUTE;
+    return today > now ? today : today + DAY2;
+  }
+  const at = (year2) => {
+    const ts2 = Date.UTC(year2, Number(mo) - 1, Number(d), Number(hh), Number(mm)) - TZ_OFFSET2;
+    return new Date(ts2 + TZ_OFFSET2).getUTCDate() === Number(d) ? ts2 : void 0;
+  };
+  const year = new Date(now + TZ_OFFSET2).getUTCFullYear();
+  if (y) return at(Number(y));
+  const ts = at(year);
+  return ts != null && ts <= now ? at(year + 1) : ts;
+}
+function nextOccurrence(from, repeat, everyMinutes, now = Date.now()) {
+  if (repeat === "none") return void 0;
+  if (repeat === "interval") {
+    const step2 = Math.max(1, everyMinutes ?? 0) * MINUTE;
+    return from + Math.max(1, Math.ceil((now - from + 1) / step2)) * step2;
+  }
+  const step = repeat === "weekly" ? 7 * DAY2 : DAY2;
+  let t = from + step;
+  if (t <= now) t += Math.ceil((now - t + 1) / step) * step;
+  if (repeat === "weekdays") while ([0, 6].includes(local(t).weekday)) t += DAY2;
+  return t;
+}
+function describeRepeat(t) {
+  if (t.repeat === "daily") return "\u6BCF\u5929";
+  if (t.repeat === "weekdays") return "\u6BCF\u4E2A\u5DE5\u4F5C\u65E5";
+  if (t.repeat === "weekly") return "\u6BCF\u5468";
+  if (t.repeat === "interval") {
+    const m = t.everyMinutes ?? 0;
+    return m % 1440 === 0 ? `\u6BCF ${m / 1440} \u5929` : m % 60 === 0 ? `\u6BCF ${m / 60} \u5C0F\u65F6` : `\u6BCF ${m} \u5206\u949F`;
+  }
+  return "\u4E00\u6B21\u6027";
+}
+function validateTask(t, limits2, now = Date.now()) {
+  if (!t.task.trim()) return "\u7F3A\u5C11\u4EFB\u52A1\u5185\u5BB9";
+  if (t.task.length > MAX_TASK_CHARS2) return `\u4EFB\u52A1\u5185\u5BB9\u8FC7\u957F\uFF08${t.task.length} \u5B57\uFF09\uFF0C\u8BF7\u7F29\u51CF\u81F3 ${MAX_TASK_CHARS2} \u5B57\u4EE5\u5185`;
+  if (!REPEATS.includes(t.repeat)) return `\u4E0D\u652F\u6301\u7684\u91CD\u590D\u65B9\u5F0F\u300C${t.repeat}\u300D`;
+  if (!Number.isFinite(t.nextAt)) return "\u65F6\u95F4\u65E0\u6548";
+  if (t.nextAt < now + 3e4) return "\u65F6\u95F4\u5FC5\u987B\u5728\u81F3\u5C11 1 \u5206\u949F\u4E4B\u540E";
+  if (t.nextAt > now + MAX_HORIZON) return "\u53EA\u80FD\u5B89\u6392\u4E00\u5E74\u4EE5\u5185\u7684\u4EFB\u52A1";
+  if (t.repeat === "interval") {
+    if (!Number.isFinite(t.everyMinutes) || t.everyMinutes < limits2.minInterval) return `\u91CD\u590D\u95F4\u9694\u81F3\u5C11 ${limits2.minInterval} \u5206\u949F`;
+    if (t.everyMinutes > 30 * 1440) return "\u91CD\u590D\u95F4\u9694\u6700\u591A 30 \u5929";
+  }
+}
+function activeCounts(userId) {
+  const active2 = store11.data.filter((t) => t.status === "active");
+  return { user: active2.filter((t) => t.userId === userId).length, total: active2.length };
+}
+var MAX_ACTIVE_TOTAL = 200;
+function addTask(owner2, t) {
+  const now = Date.now();
+  let id;
+  do
+    id = `s${now.toString(36).slice(-5)}${Math.random().toString(36).slice(2, 6)}`;
+  while (getTask(id));
+  const task = {
+    ...owner2,
+    id,
+    task: t.task.trim(),
+    nextAt: t.nextAt,
+    repeat: t.repeat,
+    ...t.repeat === "interval" ? { everyMinutes: t.everyMinutes } : {},
+    createdAt: now,
+    updatedAt: now,
+    status: "active",
+    runs: 0
+  };
+  store11.data.push(task);
+  save2();
+  return task;
+}
+function updateTask(task, t) {
+  Object.assign(task, { task: t.task.trim(), nextAt: t.nextAt, repeat: t.repeat, updatedAt: Date.now() });
+  if (t.repeat === "interval") task.everyMinutes = t.everyMinutes;
+  else delete task.everyMinutes;
+  save2();
+}
+function cancelTask(task) {
+  if (task.status !== "active") return false;
+  task.status = "cancelled";
+  task.updatedAt = Date.now();
+  save2();
+  return true;
+}
+function removeTask(task) {
+  store11.data = store11.data.filter((t) => t !== task);
+  save2();
+}
+function taskLine(t) {
+  const when = t.status === "active" ? `\u4E0B\u6B21 ${formatNow(new Date(t.nextAt))}` : { done: "\u5DF2\u5B8C\u6210", cancelled: "\u5DF2\u53D6\u6D88", failed: "\u5931\u8D25", missed: "\u5DF2\u9519\u8FC7" }[t.status];
+  return `${t.id}\uFF5C${when}\uFF08${describeRepeat(t)}\uFF09\uFF5C${t.userName}\uFF1A${truncate(t.task, 80)}`;
+}
+function wakeEvent(t) {
+  const bot = globalThis.Bot?.[t.selfId];
+  const target2 = t.groupId ? bot?.pickGroup?.(isNaN(Number(t.groupId)) ? t.groupId : Number(t.groupId)) : bot?.pickFriend?.(isNaN(Number(t.userId)) ? t.userId : Number(t.userId));
+  if (typeof target2?.sendMsg !== "function") return void 0;
+  const sender = { user_id: t.userId, nickname: t.userName, card: t.userName };
+  const e = {
+    post_type: "message",
+    message_type: t.groupId ? "group" : "private",
+    sub_type: "normal",
+    self_id: t.selfId,
+    user_id: t.userId,
+    group_id: t.groupId,
+    group_name: t.groupName,
+    sender,
+    message: [],
+    msg: "",
+    raw_message: "",
+    time: Math.floor(Date.now() / 1e3),
+    isGroup: Boolean(t.groupId),
+    isPrivate: !t.groupId,
+    isMaster: t.admin,
+    bot,
+    adapter_id: bot?.adapter?.id,
+    adapter_name: bot?.adapter?.name,
+    scheduledTask: t.id,
+    // the Yunzai reply signature: (message, quote, { at })
+    reply: (msg, _quote, data) => target2.sendMsg(data?.at && t.groupId ? [seg().at(t.userId), " ", ...Array.isArray(msg) ? msg : [msg]] : msg)
+  };
+  if (t.groupId) e.group = target2;
+  else e.friend = target2;
+  return e;
+}
+function wakePrompt(t, now = Date.now()) {
+  const late = now - t.nextAt;
+  const who = `${t.userName}(\u5E73\u53F0ID ${t.userId})`;
+  return [
+    "\u3010\u5B9A\u65F6\u4EFB\u52A1\xB7\u5230\u70B9\u63D0\u9192\uFF0C\u4E0D\u662F\u65B0\u7684\u7528\u6237\u6D88\u606F\u3011",
+    `\u8FD9\u662F\u4F60\u5728 ${formatNow(new Date(t.createdAt))} ${t.createdBy === "web" ? `\u7531\u7BA1\u7406\u5458\u5728\u7F51\u9875\u9762\u677F\u4E3A ${who} \u8BBE\u7F6E` : `\u5E94 ${who} \u7684\u8BF7\u6C42\u8BBE\u7F6E`}\u7684\u5B9A\u65F6\u4EFB\u52A1\uFF08${describeRepeat(t)}${t.repeat !== "none" ? `\uFF0C\u7B2C ${t.runs + 1} \u6B21` : ""}\uFF0CID ${t.id}\uFF09\u3002`,
+    t.request ? `\u5F53\u65F6\u7684\u539F\u8BDD\uFF1A${truncate(t.request, 300)}` : "",
+    `\u4EFB\u52A1\uFF1A${t.task}`,
+    late > 2 * MINUTE ? `\u539F\u5B9A ${formatNow(new Date(t.nextAt))}\uFF0C\u56E0\u673A\u5668\u4EBA\u79BB\u7EBF\u665A\u4E86\u7EA6 ${Math.round(late / MINUTE)} \u5206\u949F\uFF1B\u5DF2\u7ECF\u6CA1\u6709\u610F\u4E49\u65F6\u53EA\u56DE\u590D [skip]\u3002` : "",
+    `\u73B0\u5728\u7167\u4EFB\u52A1\u53BB\u505A\uFF1A\u63D0\u9192\u5C31\u76F4\u63A5\u8BF4\u51FA\u63D0\u9192\u7684\u5185\u5BB9${t.groupId ? `\uFF0C\u5E76\u7528 [at:${t.userId}] \u63D0\u9192\u5BF9\u65B9` : ""}\uFF1B\u9700\u8981\u67E5\u8BE2\u6216\u6267\u884C\u7684\u5148\u7528\u5DE5\u5177\u505A\u5B8C\u518D\u56DE\u590D\u3002\u7528\u4F60\u5E73\u5E38\u7684\u8BED\u6C14\uFF0C\u50CF\u81EA\u5DF1\u8BB0\u7740\u8FD9\u4EF6\u4E8B\uFF0C\u4E0D\u63D0\u5B9A\u65F6\u4EFB\u52A1\u3001ID \u6216\u5185\u90E8\u673A\u5236\u3002\u786E\u5B9E\u4E0D\u9700\u8981\u53D1\u6D88\u606F\u65F6\u53EA\u56DE\u590D [skip]\u3002`
+  ].filter(Boolean).join("\n");
+}
+async function fireTask(t, e, deps) {
+  const eff = config.effective(t.groupId);
+  const convKey = sessionKey(e, eff.chat.sessionScope);
+  const agent = deps ?? { ...await Promise.resolve().then(() => (init_agent(), agent_exports)), deliver: (await Promise.resolve().then(() => (init_reply(), reply_exports))).deliver };
+  await conversationLocks.run(convKey, async () => {
+    const startedAt2 = Date.now();
+    let afterReply;
+    try {
+      const out = await agent.runTurn({
+        e,
+        eff,
+        isAdmin: t.admin,
+        convKey,
+        scheduled: { id: t.id, chain: t.chain + 1 },
+        input: { text: wakePrompt(t, startedAt2), images: [], imageSegments: [] }
+      });
+      afterReply = out.afterReply;
+      if (out.kind === "quota") throw Error("\u989D\u5EA6\u5DF2\u7528\u5B8C\uFF0C\u672A\u6267\u884C");
+      if (out.kind === "error") throw Error(out.message);
+      t.lastRolloutId = out.rolloutId;
+      if (out.skipped) {
+        t.lastResult = "\uFF08\u5224\u65AD\u65E0\u9700\u53D1\u6D88\u606F\uFF09";
+        return;
+      }
+      let sent = 0;
+      const event = Object.create(e);
+      event.reply = async (...args) => {
+        const response = await e.reply(...args);
+        const failed = response === false || (Array.isArray(response?.error) ? response.error.length > 0 : Boolean(response?.error)) || response?.status === "failed" || response?.retcode != null && response.retcode !== 0;
+        if (!response?.message_id && failed) throw Error("\u6D88\u606F\u53D1\u9001\u5931\u8D25");
+        sent++;
+        return response;
+      };
+      const suppressText = Boolean(out.dispatched) && !eff.tools.botCommand.ack;
+      await agent.deliver(event, out.text, { ...eff, reply: { ...eff.reply, quote: "never", atUser: false } }, { startedAt: startedAt2, convKey, suppressText, images: out.images });
+      if (out.text.trim() && !suppressText && !sent) throw Error("\u6D88\u606F\u672A\u80FD\u53D1\u9001");
+      t.lastResult = truncate(out.text || (out.dispatched ? `\uFF08\u6267\u884C\u6307\u4EE4 ${out.dispatched}\uFF09` : "\uFF08\u65E0\u6587\u5B57\u56DE\u590D\uFF09"), 300);
+      await agent.compactSession?.(convKey, eff, { userId: t.userId, groupId: t.groupId, isAdmin: t.admin });
+    } finally {
+      for (const start of afterReply ?? []) start();
+    }
+  });
+}
+async function tick(now = Date.now(), deps) {
+  const due = store11.data.filter((t) => t.status === "active" && t.nextAt <= now && !running3.has(t.id));
+  for (const t of due) {
+    const late = now - t.nextAt;
+    if (late > (t.repeat === "none" ? ONE_OFF_GRACE : REPEAT_GRACE)) {
+      log.warn(`\u5B9A\u65F6\u4EFB\u52A1 ${t.id} \u5DF2\u9519\u8FC7\uFF08\u665A\u4E86 ${Math.round(late / MINUTE)} \u5206\u949F\uFF09`);
+      t.lastError = `${formatNow(new Date(t.nextAt))} \u673A\u5668\u4EBA\u4E0D\u5728\u7EBF\uFF0C\u5DF2\u9519\u8FC7`;
+      t.updatedAt = now;
+      if (t.repeat === "none") t.status = "missed";
+      else t.nextAt = nextOccurrence(t.nextAt, t.repeat, t.everyMinutes, now);
+      save2();
+      continue;
+    }
+    if (!config.get().enable) continue;
+    const e = wakeEvent(t);
+    if (!e) continue;
+    running3.add(t.id);
+    const scheduledAt = t.nextAt;
+    void (async () => {
+      try {
+        await fireTask(t, e, deps);
+        t.lastError = void 0;
+        log.info(`\u5B9A\u65F6\u4EFB\u52A1 ${t.id} \u5DF2\u6267\u884C`);
+      } catch (err) {
+        t.lastError = truncate(err?.message ?? String(err), 300);
+        log.warn(`\u5B9A\u65F6\u4EFB\u52A1 ${t.id} \u6267\u884C\u5931\u8D25: ${t.lastError}`);
+      } finally {
+        running3.delete(t.id);
+        t.runs++;
+        t.lastRunAt = Date.now();
+        t.updatedAt = t.lastRunAt;
+        if (t.status === "active" && t.nextAt === scheduledAt) {
+          const next = nextOccurrence(scheduledAt, t.repeat, t.everyMinutes, Math.max(Date.now(), scheduledAt));
+          if (next == null) t.status = t.lastError ? "failed" : "done";
+          else t.nextAt = next;
+        }
+        save2();
+      }
+    })();
+  }
+}
+var timer3;
+function startScheduler() {
+  if (timer3) return;
+  timer3 = setInterval(() => {
+    tick().catch((err) => log.warn("\u5B9A\u65F6\u4EFB\u52A1\u68C0\u67E5\u5931\u8D25", err));
+  }, TICK_MS2);
+  timer3.unref?.();
+}
+function stopScheduler() {
+  if (timer3) clearInterval(timer3);
+  timer3 = void 0;
+}
+
+// src/tools/schedule.ts
+init_registry();
+var MAX_PER_TURN = 3;
+function visible(ctx) {
+  const e = ctx.e;
+  return listTasks().filter((t) => t.status === "active" && t.selfId === String(e.self_id) && (t.groupId ?? "") === String(e.group_id ?? "") && (ctx.isAdmin || t.userId === String(e.user_id)));
+}
+function firstWeekday(ts) {
+  while ([0, 6].includes(new Date(ts + 8 * 36e5).getUTCDay())) ts += 864e5;
+  return ts;
+}
+function registerScheduleTool() {
+  registry.register({
+    name: "schedule",
+    source: "builtin",
+    description: `\u5B9A\u65F6\u4EFB\u52A1\uFF1A\u8BA9\u4F60\u5728\u7A0D\u540E\u6216\u6309\u5468\u671F\u56DE\u5230\u5F53\u524D\u5BF9\u8BDD\u505A\u4E00\u4EF6\u4E8B\uFF0C\u4F8B\u5982\u300C10\u5206\u949F\u540E\u63D0\u9192\u6211\u5173\u706B\u300D\u300C\u660E\u65E98\u70B9\u53EB\u6211\u8D77\u5E8A\u300D\u300C\u6BCF\u4E2A\u5DE5\u4F5C\u65E59\u70B9\u63D0\u9192\u6253\u5361\u300D\u300C\u6BCF\u5929\u65E9\u4E0A\u64AD\u62A5\u5929\u6C14\u300D\u300C\u534A\u5C0F\u65F6\u540E\u518D\u770B\u770B\u90A3\u4E2A\u7F51\u9875\u66F4\u65B0\u6CA1\u6709\u300D\u3002create \u7528 at\uFF08\u5317\u4EAC\u65F6\u95F4 "YYYY-MM-DD HH:mm"\uFF0C\u53EF\u7701\u7565\u65E5\u671F\u8868\u793A\u4E0B\u4E00\u6B21\u5230\u8FD9\u4E2A\u65F6\u523B\uFF09\u6216 delayMinutes \u6307\u5B9A\u9996\u6B21\u65F6\u95F4\uFF1Brepeat \u4E3A none/daily/weekdays/weekly/interval\uFF08interval \u9700 everyMinutes\uFF09\u3002task \u5199\u7ED9\u5230\u70B9\u65F6\u7684\u4F60\u81EA\u5DF1\uFF1A\u8981\u505A\u4EC0\u4E48\u3001\u63D0\u9192\u8C01\u3001\u63D0\u9192\u4EC0\u4E48\uFF0C\u5199\u6E05\u695A\u5177\u4F53\u5185\u5BB9\uFF0C\u4E0D\u8981\u53EA\u5199"\u63D0\u9192\u4ED6"\u3002\u5230\u70B9\u65F6\u4F60\u4F1A\u5728\u672C\u5BF9\u8BDD\u6536\u5230\u8FD9\u6761\u4EFB\u52A1\u5E76\u7167\u505A\u540E\u56DE\u590D\uFF0C\u53EF\u4EE5\u4F7F\u7528\u5DE5\u5177\u3002list \u67E5\u770B\u672C\u5BF9\u8BDD\u4E2D\u8FDB\u884C\u4E2D\u7684\u4EFB\u52A1\uFF0Ccancel \u6309 id \u53D6\u6D88\u3002\u8BBE\u7F6E\u540E\u7528\u4E00\u53E5\u8BDD\u544A\u8BC9\u5BF9\u65B9\u65F6\u95F4\u5373\u53EF\uFF0C\u4E0D\u63D0 ID \u6216\u5185\u90E8\u673A\u5236\uFF1B\u5BF9\u65B9\u8BF4"\u53D6\u6D88\u63D0\u9192"\u65F6\u5148 list \u518D cancel\u3002`,
+    parameters: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["create", "list", "cancel"] },
+        task: { type: "string", description: `\u5230\u70B9\u65F6\u8981\u505A\u7684\u4E8B\uFF08${MAX_TASK_CHARS2} \u5B57\u4EE5\u5185\uFF09` },
+        at: { type: "string", description: '\u5317\u4EAC\u65F6\u95F4\uFF0C"2026-10-29 08:00" \u6216 "08:00"' },
+        delayMinutes: { type: "number", description: "\u591A\u5C11\u5206\u949F\u540E\uFF08\u4E0E at \u4E8C\u9009\u4E00\uFF09" },
+        repeat: { type: "string", enum: REPEATS },
+        everyMinutes: { type: "number", description: "repeat=interval \u65F6\u7684\u95F4\u9694\u5206\u949F\u6570" },
+        id: { type: "string", description: "cancel \u7684\u4EFB\u52A1 ID" }
+      },
+      required: ["action"]
+    },
+    available: (ctx) => ctx.eff.tools.schedule.enable && (ctx.eff.tools.schedule.access === "all" || ctx.isAdmin),
+    limit: () => `\u6700\u591A\u65B0\u5EFA ${MAX_PER_TURN} \u4E2A`,
+    remaining: (ctx) => `\u5269\u4F59\u65B0\u5EFA ${Math.max(0, MAX_PER_TURN - (ctx.turn.scheduled ?? 0))} \u4E2A`,
+    async run(args, ctx) {
+      const denied = toolAccessError("schedule", ctx);
+      if (denied) return denied;
+      const cfg = ctx.eff.tools.schedule, e = ctx.e;
+      if (args.action === "list") {
+        const tasks = visible(ctx);
+        return tasks.length ? `\u73B0\u5728 ${formatNow()}
+${tasks.map(taskLine).join("\n")}` : "\u672C\u5BF9\u8BDD\u6CA1\u6709\u8FDB\u884C\u4E2D\u7684\u5B9A\u65F6\u4EFB\u52A1";
+      }
+      if (args.action === "cancel") {
+        const task2 = visible(ctx).find((t) => t.id === String(args.id ?? "").trim());
+        if (!task2) return { content: `\u672C\u5BF9\u8BDD\u4E2D\u6CA1\u6709 ID \u4E3A\u300C${args.id ?? ""}\u300D\u7684\u8FDB\u884C\u4E2D\u4EFB\u52A1\uFF0C\u8BF7\u5148 list \u67E5\u770B`, isError: true };
+        cancelTask(task2);
+        return `\u5DF2\u53D6\u6D88\uFF1A${taskLine(task2)}`;
+      }
+      if (args.action !== "create") return { content: `\u672A\u77E5\u64CD\u4F5C\u300C${args.action}\u300D\uFF08\u652F\u6301\uFF1Acreate, list, cancel\uFF09`, isError: true };
+      if ((ctx.turn.scheduled ?? 0) >= MAX_PER_TURN) return { content: `\u672C\u6B21\u56DE\u590D\u6700\u591A\u65B0\u5EFA ${MAX_PER_TURN} \u4E2A\u5B9A\u65F6\u4EFB\u52A1`, isError: true };
+      const chain = ctx.turn.scheduleChain ?? 0;
+      if (chain > cfg.maxChain)
+        return { content: `\u6D41\u7A0B\u9650\u5236\uFF1A\u8FD9\u662F\u8FDE\u7EED\u7B2C ${chain} \u6B21\u7531\u5B9A\u65F6\u4EFB\u52A1\u89E6\u53D1\uFF0C\u5DF2\u8FBE\u4E0A\u9650\uFF08${cfg.maxChain} \u6B21\uFF09\uFF0C\u4E0D\u80FD\u518D\u8BBE\u7F6E\u65B0\u7684\u5B9A\u65F6\u4EFB\u52A1\uFF1B\u8BF7\u76F4\u63A5\u56DE\u590D\uFF0C\u9700\u8981\u7EE7\u7EED\u65F6\u7B49\u5BF9\u65B9\u518D\u6765\u627E\u4F60\u3002`, isError: true };
+      const userId = String(e.user_id);
+      const counts = activeCounts(userId);
+      if (!ctx.isAdmin && counts.user >= cfg.maxPerUser)
+        return { content: `\u5BF9\u65B9\u5DF2\u6709 ${counts.user} \u4E2A\u8FDB\u884C\u4E2D\u7684\u5B9A\u65F6\u4EFB\u52A1\uFF08\u4E0A\u9650 ${cfg.maxPerUser}\uFF09\uFF0C\u8BF7\u5148\u53D6\u6D88\u4E0D\u9700\u8981\u7684\u518D\u8BBE\u7F6E`, isError: true };
+      if (counts.total >= MAX_ACTIVE_TOTAL) return { content: "\u5B9A\u65F6\u4EFB\u52A1\u603B\u6570\u5DF2\u8FBE\u4E0A\u9650\uFF0C\u6682\u65F6\u4E0D\u80FD\u518D\u8BBE\u7F6E", isError: true };
+      const now = Date.now();
+      const repeat = args.repeat || "none";
+      let nextAt;
+      if (args.at != null && String(args.at).trim()) {
+        nextAt = parseTime(String(args.at), now);
+        if (nextAt == null) return { content: `\u65E0\u6CD5\u8BC6\u522B\u65F6\u95F4\u300C${args.at}\u300D\uFF0C\u8BF7\u7528\u5317\u4EAC\u65F6\u95F4 "YYYY-MM-DD HH:mm" \u6216 "HH:mm"`, isError: true };
+      } else if (Number.isFinite(Number(args.delayMinutes)) && Number(args.delayMinutes) > 0) nextAt = now + Number(args.delayMinutes) * 6e4;
+      else if (repeat === "interval" && Number(args.everyMinutes) > 0) nextAt = now + Number(args.everyMinutes) * 6e4;
+      else return { content: "\u7F3A\u5C11\u65F6\u95F4\uFF1A\u8BF7\u63D0\u4F9B at \u6216 delayMinutes", isError: true };
+      if (repeat === "weekdays") nextAt = firstWeekday(nextAt);
+      const draft = { task: String(args.task ?? ""), nextAt, repeat, everyMinutes: repeat === "interval" ? Number(args.everyMinutes) : void 0 };
+      const invalid = validateTask(draft, cfg, now);
+      if (invalid) return { content: invalid, isError: true };
+      const task = addTask({
+        createdBy: "chat",
+        request: truncate(String(e.msg ?? ""), 300) || void 0,
+        selfId: String(e.self_id),
+        userId,
+        userName: senderName(e),
+        groupId: e.group_id != null ? String(e.group_id) : void 0,
+        groupName: e.group_name ? String(e.group_name) : void 0,
+        admin: ctx.isAdmin,
+        chain
+      }, draft);
+      ctx.turn.scheduled = (ctx.turn.scheduled ?? 0) + 1;
+      return `\u5DF2\u8BBE\u7F6E\uFF1A${formatNow(new Date(task.nextAt))}\uFF08${describeRepeat(task)}\uFF09\u3002\u73B0\u5728 ${formatNow()}\u3002\u8BF7\u7528\u4E00\u53E5\u8BDD\u544A\u8BC9\u5BF9\u65B9\uFF0C\u4E0D\u63D0 ID\u3002`;
     }
   });
 }
@@ -13758,6 +14156,42 @@ ${md}
     if (!job) throw fail("\u6CA1\u6709\u8FD9\u4E2A\u4EFB\u52A1", 404);
     cancelAgyJob(job);
   }),
+  R("GET", "/api/schedules", () => ({
+    now: Date.now(),
+    limits: config.get().tools.schedule,
+    tasks: listTasks().map((t) => ({
+      ...t,
+      repeatText: describeRepeat(t),
+      running: isRunning(t.id),
+      groupName: t.groupId ? nameOf("group", t.groupId) ?? t.groupName : void 0
+    }))
+  })),
+  R("PUT", "/api/schedules/:id", ({ params, body }) => {
+    const task = getTask(params[0]);
+    if (!task) throw fail("\u6CA1\u6709\u8FD9\u4E2A\u5B9A\u65F6\u4EFB\u52A1", 404);
+    if (task.status !== "active") throw fail("\u53EA\u80FD\u7F16\u8F91\u8FDB\u884C\u4E2D\u7684\u4EFB\u52A1");
+    if (isRunning(task.id)) throw fail("\u4EFB\u52A1\u6B63\u5728\u6267\u884C\uFF0C\u8BF7\u7A0D\u540E\u518D\u6539");
+    const draft = {
+      task: String(body.task ?? task.task),
+      nextAt: Number(body.nextAt ?? task.nextAt),
+      repeat: String(body.repeat ?? task.repeat),
+      everyMinutes: body.everyMinutes != null && body.everyMinutes !== "" ? Number(body.everyMinutes) : task.everyMinutes
+    };
+    const invalid = validateTask(draft, { minInterval: 1 });
+    if (invalid) throw fail(invalid);
+    updateTask(task, draft);
+  }),
+  R("POST", "/api/schedules/:id/cancel", ({ params }) => {
+    const task = getTask(params[0]);
+    if (!task) throw fail("\u6CA1\u6709\u8FD9\u4E2A\u5B9A\u65F6\u4EFB\u52A1", 404);
+    if (!cancelTask(task)) throw fail("\u4EFB\u52A1\u5DF2\u7ED3\u675F");
+  }),
+  R("DELETE", "/api/schedules/:id", ({ params }) => {
+    const task = getTask(params[0]);
+    if (!task) throw fail("\u6CA1\u6709\u8FD9\u4E2A\u5B9A\u65F6\u4EFB\u52A1", 404);
+    if (task.status === "active") throw fail("\u8BF7\u5148\u53D6\u6D88\u4EFB\u52A1");
+    removeTask(task);
+  }),
   R("POST", "/api/actions/:name", async ({ params }) => {
     switch (params[0]) {
       case "reload":
@@ -13970,12 +14404,14 @@ function startup() {
   registerComputerTool();
   registerAgyTool();
   registerGoogleLensTool();
+  registerScheduleTool();
   refreshComputerKeepalive();
   config.onChange(refreshComputerKeepalive);
   loadSkills();
   loadCustomTools().catch((err) => log.warn("\u52A0\u8F7D\u81EA\u5B9A\u4E49\u5DE5\u5177\u5931\u8D25", err));
   startPriceRefresh();
   startArchiveJobs();
+  startScheduler();
   try {
     startWeb();
   } catch (err) {
@@ -13990,6 +14426,7 @@ function startup() {
     computerQueue.stop();
     agyQueue.stop();
     stopArchiveJobs();
+    stopScheduler();
     stopWeb();
     stopComputerKeepalive();
     flushAllStores();
@@ -14000,6 +14437,7 @@ function startup() {
     computerQueue.stop();
     agyQueue.stop();
     stopArchiveJobs();
+    stopScheduler();
     stopComputerKeepalive();
     flushAllStores();
     stopKeepalive();

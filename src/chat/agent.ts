@@ -79,6 +79,8 @@ export interface TurnRequest {
   chainDepth?: number
   /** The bot chose to speak up (proactive reply): nobody addressed it, and it may answer [skip] to stay quiet. */
   proactive?: boolean
+  /** A scheduled task came due (chain: wake-ups that led here); like a proactive turn it may answer [skip]. */
+  scheduled?: { id: string; chain: number }
 }
 
 /** A proactive reply's way of saying it has nothing to add. */
@@ -103,7 +105,7 @@ export type TurnOutcome = (
   | { kind: 'reply'; text: string; modelId: string; cost: number; dispatched?: string; images: Buffer[]; thinking: ThinkingLevel; skipped?: boolean }
   | { kind: 'quota'; block: QuotaBlock; modelId: string }
   | { kind: 'error'; message: string; unconfigured?: boolean }
-) & { afterReply?: (() => void)[] }
+) & { afterReply?: (() => void)[]; rolloutId?: string }
 
 function selectModel(eff: EffectiveConfig, ctx: QuotaCtx, exact?: string): { picked?: Picked; block?: { block: QuotaBlock; modelId: string } } {
   const ids = exact ? [exact] : [...new Set([eff.model, ...config.get().fallbackModels].filter(Boolean))]
@@ -139,7 +141,7 @@ export async function runTurn(req: TurnRequest): Promise<TurnOutcome> {
     recordRolloutEvent(req.rolloutId!, { kind: 'callback', text: req.input.text, job: { kind: req.asyncResult ? 'agy' : 'computer', id: callbackJob! } })
   }
   const rolloutId = continued ? req.rolloutId! : startRollout({ conv: req.convKey, input: req.input.text || (req.input.images.length ? '（发了图片）' : '（只@了你，没说话）'),
-    inputImageCount: req.input.images.length, source: req.asyncResult?.kind ?? (req.computerResult ? 'computer' : req.proactive ? 'proactive' : 'chat'),
+    inputImageCount: req.input.images.length, source: req.asyncResult?.kind ?? (req.computerResult ? 'computer' : req.proactive ? 'proactive' : req.scheduled ? 'schedule' : 'chat'),
     jobId: req.asyncResult?.id ?? req.computerResult?.id })
   const ref: { turn?: TurnState; rolloutId: string; continued: boolean } = { rolloutId, continued }
   try {
@@ -148,14 +150,14 @@ export async function runTurn(req: TurnRequest): Promise<TurnOutcome> {
       return runTurnInner(req, ref)
     })
     if (result.kind === 'reply') {
-      const text = result.skipped ? '（主动发言：模型选择不接话）' : result.text || (result.dispatched ? `（执行指令 ${result.dispatched}）` : '（无文字回复）')
+      const text = result.skipped ? (req.scheduled ? '（定时任务：模型判断无需发消息）' : '（主动发言：模型选择不接话）') : result.text || (result.dispatched ? `（执行指令 ${result.dispatched}）` : '（无文字回复）')
       recordRolloutEvent(rolloutId, { kind: 'reply', text })
       updateRollout(rolloutId, { status: hasPendingJobs(rolloutId) ? 'waiting_callback' : 'completed', reply: text })
     } else {
       recordRolloutEvent(rolloutId, { kind: 'error', text: result.kind === 'quota' ? '额度已用完，未调用模型' : result.message, isError: true })
       updateRollout(rolloutId, { status: result.kind === 'quota' ? 'blocked' : 'failed', ...(result.kind === 'quota' ? { model: result.modelId } : {}) })
     }
-    return { ...result, afterReply: ref.turn?.afterReply }
+    return { ...result, afterReply: ref.turn?.afterReply, rolloutId }
   } catch (error: any) {
     recordRolloutEvent(rolloutId, { kind: 'error', text: error?.message ?? String(error), isError: true })
     updateRollout(rolloutId, { status: 'failed' })
@@ -197,7 +199,7 @@ async function runTurnInner(req: TurnRequest, ref: { turn?: TurnState; rolloutId
   const temperature = saved ? saved.temperature : model.temperature ?? eff.chat.temperature
   const maxTokens = saved?.maxTokens ?? model.maxTokens ?? eff.chat.maxOutputTokens
 
-  const turn: TurnState = { commands: 0, searches: 0, fetches: 0, images: [], rolloutId: ref.rolloutId, chainDepth: req.chainDepth ?? 0 }
+  const turn: TurnState = { commands: 0, searches: 0, fetches: 0, images: [], rolloutId: ref.rolloutId, chainDepth: req.chainDepth ?? 0, scheduleChain: req.scheduled?.chain ?? 0 }
   if (!req.computerResult && !req.asyncResult) turn.inputImages = input.images
   turn.asyncResult = req.asyncResult
   turn.computerResult = req.computerResult
@@ -409,9 +411,9 @@ async function runTurnInner(req: TurnRequest, ref: { turn?: TurnState; rolloutId
     `[${model.id}] ${Date.now() - started}ms think=${thinking} in=${usage.input} cache=${usage.cacheRead}/${usage.cacheWrite + usage.cacheWrite1h} out=${usage.output}${usage.reasoning ? `(思考${usage.reasoning})` : ''}${usage.webSearches ? ` 自带搜索${usage.webSearches}次` : ''} $${cost.toFixed(5)}${usage.inputIncomplete ? ' (上游历史用量可能缺失)' : ''}${turn.dispatched ? ` cmd=${turn.dispatched}` : ''}`,
   )
   if (finalText) log.debug(`[${model.id}] 回复：${brief(finalText, 500)}`)
-  // a proactive turn that decided to stay quiet leaves no trace in the conversation
-  if (req.proactive && !turn.dispatched && !turn.images.length && (!finalText.trim() || SKIP_REPLY.test(finalText))) {
-    recordTurn({ ...turnInfo(), reply: '（主动发言：不接话）' })
+  // a proactive or scheduled turn that decided to stay quiet leaves no trace in the conversation
+  if ((req.proactive || req.scheduled) && !turn.dispatched && !turn.images.length && (!finalText.trim() || SKIP_REPLY.test(finalText))) {
+    recordTurn({ ...turnInfo(), reply: req.scheduled ? '（定时任务：无需发消息）' : '（主动发言：不接话）' })
     return { kind: 'reply', text: '', modelId: model.id, cost, images: [], thinking, skipped: true }
   }
   recordTurn({ ...turnInfo(), reply: finalText || (turn.dispatched ? `（执行指令 ${turn.dispatched}）` : '') })

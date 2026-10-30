@@ -35,6 +35,7 @@ import { agyQueue, cancelAgyJob } from '../tools/agy.ts'
 import { agyHistory, agyJobView, agySubagentHistory, resolveAgyHistory } from '../agy/history.ts'
 import { computerHistory, readComputerScreenshot } from '../computer/history.ts'
 import { helperToolLimit, registry } from '../tools/registry.ts'
+import { cancelTask, describeRepeat, getTask, isRunning, listTasks, removeTask, updateTask, validateTask, type Repeat } from '../chat/schedule.ts'
 import { deleteSkill, listSkills, parseSkillMarkdown, saveSkill, skillsForTools } from '../tools/skills.ts'
 import { prepareRuntimeTools, runtimeToolReady, setupStatus } from '../core/setup.ts'
 
@@ -789,6 +790,35 @@ export const routes: Route[] = [
     const job = agyQueue.jobs.find(entry => entry.id === params[0])
     if (!job) throw fail('没有这个任务', 404)
     cancelAgyJob(job)
+  }),
+
+  R('GET', '/api/schedules', () => ({
+    now: Date.now(),
+    limits: config.get().tools.schedule,
+    tasks: listTasks().map(t => ({ ...t, repeatText: describeRepeat(t), running: isRunning(t.id),
+      groupName: t.groupId ? nameOf('group', t.groupId) ?? t.groupName : undefined })),
+  })),
+  R('PUT', '/api/schedules/:id', ({ params, body }) => {
+    const task = getTask(params[0])
+    if (!task) throw fail('没有这个定时任务', 404)
+    if (task.status !== 'active') throw fail('只能编辑进行中的任务')
+    if (isRunning(task.id)) throw fail('任务正在执行，请稍后再改')
+    const draft = { task: String(body.task ?? task.task), nextAt: Number(body.nextAt ?? task.nextAt), repeat: String(body.repeat ?? task.repeat) as Repeat,
+      everyMinutes: body.everyMinutes != null && body.everyMinutes !== '' ? Number(body.everyMinutes) : task.everyMinutes }
+    const invalid = validateTask(draft, { minInterval: 1 })
+    if (invalid) throw fail(invalid)
+    updateTask(task, draft)
+  }),
+  R('POST', '/api/schedules/:id/cancel', ({ params }) => {
+    const task = getTask(params[0])
+    if (!task) throw fail('没有这个定时任务', 404)
+    if (!cancelTask(task)) throw fail('任务已结束')
+  }),
+  R('DELETE', '/api/schedules/:id', ({ params }) => {
+    const task = getTask(params[0])
+    if (!task) throw fail('没有这个定时任务', 404)
+    if (task.status === 'active') throw fail('请先取消任务')
+    removeTask(task)
   }),
 
   R('POST', '/api/actions/:name', async ({ params }) => {

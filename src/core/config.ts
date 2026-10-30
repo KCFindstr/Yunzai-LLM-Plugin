@@ -481,6 +481,14 @@ export function normalize(raw: any): PluginConfig {
     maxQueue: bounded(agy.maxQueue, 8, 1, 50),
     maxChainDepth: bounded(agy.maxChainDepth, 1, 0, 10),
   }
+  const sc = isPlainObject(c.tools.schedule) ? c.tools.schedule : {}
+  c.tools.schedule = {
+    enable: sc.enable !== false,
+    access: sc.access === 'admin' ? 'admin' : 'all',
+    maxPerUser: bounded(sc.maxPerUser, 5, 1, 100),
+    minInterval: bounded(sc.minInterval, 30, 1, 1440),
+    maxChain: bounded(sc.maxChain, 3, 0, 20),
+  }
   c.skills = isPlainObject(c.skills) ? c.skills : { enable: true }
   const m = isPlainObject(c.memory) ? c.memory : {}
   const n = (v: any, d: number) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : d)

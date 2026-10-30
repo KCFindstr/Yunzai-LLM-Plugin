@@ -239,7 +239,19 @@ export interface ToolsSection {
   computer: ComputerConfig
   googleLens: { enable: boolean; access: 'admin' | 'all'; distro: string }
   agy: AgyConfig
+  schedule: ScheduleConfig
   disabled: string[]
+}
+
+export interface ScheduleConfig {
+  enable: boolean
+  access: 'admin' | 'all'
+  /** Active tasks per person (admins are not limited). */
+  maxPerUser: number
+  /** Shortest repeat interval, minutes. */
+  minInterval: number
+  /** How many times in a row a wake-up may schedule the next one (0 = never). */
+  maxChain: number
 }
 
 export interface AgyConfig {

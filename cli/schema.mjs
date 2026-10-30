@@ -191,7 +191,7 @@ const embeddingIds = c => (c.embeddingModels ?? []).map(m => m.id).filter(Boolea
 const judgeIds = c => [...new Set([...(c.systemoneModels ?? []).map(m => m.id), ...modelIds(c)].filter(Boolean))]
 const presetNames = c => Object.keys(c.persona?.presets ?? {})
 const toolNames = c => [
-  ...new Set(['web_search', 'web_fetch', 'run_bot_command', 'search_bot_commands', 'list_bot_commands', 'load_skill', 'memory', 'add_sticker', 'list_stickers', 'render_html', 'run_code', 'computer_task', 'agy', 'google_lens', ...(c.tools?.http ?? []).map(h => h.name).filter(Boolean), ...(c.tools?.disabled ?? [])]),
+  ...new Set(['web_search', 'web_fetch', 'run_bot_command', 'search_bot_commands', 'list_bot_commands', 'load_skill', 'memory', 'add_sticker', 'list_stickers', 'render_html', 'run_code', 'computer_task', 'agy', 'google_lens', 'schedule', ...(c.tools?.http ?? []).map(h => h.name).filter(Boolean), ...(c.tools?.disabled ?? [])]),
 ]
 
 const limits = label => obj({ window5h: num('5小时额度（美元）', { min: 0, nullable: true }), weekly: num('每周额度（美元）', { min: 0, nullable: true }) }, label)
@@ -476,6 +476,13 @@ const tools = obj(
       maxQueue: int('排队上限', { min: 1, max: 50 }),
       maxChainDepth: int('后台结果回复中可连续新建任务的次数（0 为禁止）', { min: 0, max: 10 }),
     }, '异步代理'),
+    schedule: obj({
+      enable: bool('定时任务：让机器人稍后或按周期回到对话（提醒、定时查询）'),
+      access: oneOf(['admin', 'all'], '谁可以让机器人设置定时任务'),
+      maxPerUser: int('每人同时进行中的任务上限（管理员不限）', { min: 1, max: 100 }),
+      minInterval: int('按间隔重复的最短间隔（分钟）', { min: 1, max: 1440 }),
+      maxChain: int('到点执行时可连续再设置任务的次数（0 为禁止）', { min: 0, max: 20 }),
+    }, '定时任务'),
     disabled: multi(toolNames, '禁用的工具'),
   },
   '工具',

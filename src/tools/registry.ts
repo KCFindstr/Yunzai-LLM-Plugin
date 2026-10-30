@@ -38,6 +38,10 @@ export interface TurnState {
   rolloutId?: string
   /** Background results that led to this turn; jobs started now are one level deeper. */
   chainDepth?: number
+  /** Scheduled wake-ups that led to this turn (0 for a user message); tasks scheduled now are one deeper. */
+  scheduleChain?: number
+  /** Tasks the schedule tool created this turn. */
+  scheduled?: number
 }
 
 export interface ToolCtx {

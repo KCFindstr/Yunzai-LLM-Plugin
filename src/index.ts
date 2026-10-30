@@ -21,6 +21,8 @@ import { closeOwnBrowser } from './render/browser.ts'
 import { registerComputerTool, computerQueue } from './tools/computer.ts'
 import { registerGoogleLensTool } from './tools/googleLens.ts'
 import { registerAgyTool, agyQueue } from './tools/agy.ts'
+import { registerScheduleTool } from './tools/schedule.ts'
+import { startScheduler, stopScheduler } from './chat/schedule.ts'
 import { refreshComputerKeepalive, stopComputerKeepalive } from './computer/keepalive.ts'
 import { startWeb, stopWeb } from './web/server.ts'
 import { startArchiveJobs, stopArchiveJobs } from './chat/archiveJobs.ts'
@@ -48,6 +50,7 @@ function startup() {
   registerComputerTool()
   registerAgyTool()
   registerGoogleLensTool()
+  registerScheduleTool()
   refreshComputerKeepalive()
   config.onChange(refreshComputerKeepalive)
   loadSkills()
@@ -55,6 +58,7 @@ function startup() {
   startPriceRefresh()
   // group chatter summaries and daily digests, independent of anyone talking to the bot
   startArchiveJobs()
+  startScheduler()
   try {
     startWeb()
   } catch (err: any) {
@@ -71,6 +75,7 @@ function startup() {
     computerQueue.stop()
     agyQueue.stop()
     stopArchiveJobs()
+    stopScheduler()
     stopWeb()
     stopComputerKeepalive()
     flushAllStores()
@@ -81,6 +86,7 @@ function startup() {
     computerQueue.stop()
     agyQueue.stop()
     stopArchiveJobs()
+    stopScheduler()
     stopComputerKeepalive()
     flushAllStores()
     stopKeepalive()
