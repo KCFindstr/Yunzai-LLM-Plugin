@@ -143,37 +143,64 @@ const STOPWORDS = new Set((
   '的 了 和 与 及 或 是 在 有 也 都 就 还 而 但 并 被 把 让 给 对 向 从 到 为 以 于 之 其 这 那 这个 那个 这些 那些 一个 一些 ' +
   '我 你 他 她 它 我们 你们 他们 她们 自己 对方 大家 什么 怎么 为什么 如何 哪 哪里 没有 不是 就是 还是 可以 需要 已经 因为 所以 ' +
   '如果 然后 之后 之前 随后 后来 先 再 又 再次 首次 继续 表示 称 说 问 回答 回应 询问 提到 谈及 要求 告诉 认为 觉得 希望 ' +
-  '今天 昨天 明天 上午 下午 晚上 凌晨 中午 当日 概要 事实 结论 约定 暂无 私聊 群聊 用户 成员 消息 内容 时候 一下 一起 ' +
-  'the a an and or of to in on for with is are was were be been it this that at by from as but not you we they he she i'
+  '今天 昨天 明天 上午 下午 晚上 凌晨 中午 当日 次日 概要 纪要 事实 结论 约定 暂无 私聊 群聊 用户 成员 群友 消息 内容 时候 一下 一起 ' +
+  '平台 图片 发图 配图 路径 讨论 聊天 调侃 吐槽 分享 发送 提议 解答 纠正 确认 成功 失败 可能 居然 多次 两次 最终 称呼 新梗 ' +
+  'the a an and or of to in on for with is are was were be been it this that at by from as but not you we they he she i ' +
+  'image jpg png gif webp work attachments'
 ).split(/\s+/))
 
 const LONG_STOPWORDS = [...STOPWORDS].filter(w => w.length >= 2 && /^\p{Script=Han}+$/u.test(w))
 // a gram starting or ending on one of these is a fragment of a phrase, not a name or topic
-const EDGE_CHARS = new Set('的了着过和与及或是在有也都就还而但并被把让给对向从到为以于之其这那我你他她它们么吗呢吧啊呀哦嘛又再很说问称')
+const EDGE_CHARS = new Set('的了着过和与及或是在有也都就还而但并被把让给对向从到为以于之其这那我你他她它们么吗呢吧啊呀哦嘛又再很说问称个')
+// …and a gram ending on one of these is cut before its word ends (碰最后一, 是不)
+const END_CHARS = new Set('不一没')
 const segmenter = new Intl.Segmenter('en', { granularity: 'word' })
+const MAX_GRAM = 5
 
 /**
- * Terms of a text, dictionary-free: every 2-4 character gram of each Han run (the word segmenter has no idea about
- * names and slang like 哈基米), plus Latin words and adjacent word pairs. clusterKeywords then lets a longer gram
- * absorb the shorter ones it contains.
+ * What a summary says, without the bookkeeping around it: raw message headers like
+ * 【2026-10-22 周四 15:30｜群「1」｜发言人 4(平台ID 4)】, [at:…] and [图片1:/work/…] markers, stored paths and hashes,
+ * platform IDs and times.
+ */
+function clean(text: string) {
+  return text.toLowerCase()
+    .replace(/【[^】]*[｜|][^】]*】|［[^］]*］/g, ' ')
+    // a marker becomes its (stopword) kind, so 岛风风发[图片1:…] still reads 发图 and doesn't end the run at 发
+    .replace(/\[(图片|视频|音频|文件)\d*[:：][^\]]*\]/g, '$1')
+    .replace(/\[[^\]:：]*[:：][^\]]*\]/g, ' ')
+    .replace(/\[?(?:\/work)?\/(?:attachments|agy|tmp|out)\/[^\s\]]*\]?/g, '图片')
+    .replace(/\b[0-9a-f]{6,}\b|[0-9a-f]{8,}/g, ' ')
+    .replace(/(?:平台)?id\s*\d+|[(（]\s*\d+\s*[)）]|\d+([:：.\-/]\d+)*/g, ' ')
+}
+
+/** The Han runs of a cleaned text, each split where a multi-character stopword sits. */
+function hanRuns(text: string): string[] {
+  return text.match(/\p{Script=Han}+/gu) ?? []
+}
+
+function hanGrams(run: string, emit: (gram: string, at: number) => void) {
+  // stopEnd[i]: end of the earliest stopword starting at i, so a gram covering it can be skipped
+  const stopEnd = new Array<number>(run.length).fill(Infinity)
+  for (const w of LONG_STOPWORDS) for (let p = run.indexOf(w); p >= 0; p = run.indexOf(w, p + 1)) stopEnd[p] = Math.min(stopEnd[p], p + w.length)
+  for (let n = 2; n <= MAX_GRAM; n++)
+    for (let i = 0; i + n <= run.length; i++) {
+      if (EDGE_CHARS.has(run[i]) || EDGE_CHARS.has(run[i + n - 1]) || END_CHARS.has(run[i + n - 1])) continue
+      let stop = false
+      for (let p = i; p < i + n - 1 && !stop; p++) stop = stopEnd[p] <= i + n
+      if (!stop) emit(run.slice(i, i + n), i)
+    }
+}
+
+/**
+ * Terms of a text, dictionary-free: every 2-5 character gram of each Han run (word segmenters split names and slang
+ * like 哈基米 or 大肥鱼), plus Latin words and adjacent word pairs. clusterKeywords then drops the grams that are only
+ * pieces of a longer word.
  */
 export function terms(text: string): Set<string> {
-  // raw archived messages carry headers like 【2026-10-22 周四 15:30｜群「1」｜发言人 4(平台ID 4)】 and [at:you] markers
-  const clean = text.toLowerCase().replace(/【[^】]*[｜|][^】]*】/g, ' ').replace(/\[[a-z_]+:[^\]]*\]/gi, ' ')
+  const c = clean(text)
   const out = new Set<string>()
-  for (const run of clean.match(/\p{Script=Han}+/gu) ?? []) {
-    // stopEnd[i]: end of the earliest stopword starting at i, so a gram covering it can be skipped
-    const stopEnd = new Array<number>(run.length).fill(Infinity)
-    for (const w of LONG_STOPWORDS) for (let p = run.indexOf(w); p >= 0; p = run.indexOf(w, p + 1)) stopEnd[p] = Math.min(stopEnd[p], p + w.length)
-    for (let n = 2; n <= 4; n++)
-      for (let i = 0; i + n <= run.length; i++) {
-        if (EDGE_CHARS.has(run[i]) || EDGE_CHARS.has(run[i + n - 1])) continue
-        let stop = false
-        for (let p = i; p < i + n - 1 && !stop; p++) stop = stopEnd[p] <= i + n
-        if (!stop) out.add(run.slice(i, i + n))
-      }
-  }
-  const words = [...segmenter.segment(clean.replace(/\p{Script=Han}+/gu, ' | '))]
+  for (const run of hanRuns(c)) hanGrams(run, g => out.add(g))
+  const words = [...segmenter.segment(c.replace(/\p{Script=Han}+/gu, ' | '))]
     .filter(s => s.isWordLike && /^[a-z][a-z0-9_'-]*$/.test(s.segment))
     .map(s => s.segment)
   words.forEach((w, i) => {
@@ -184,22 +211,77 @@ export function terms(text: string): Set<string> {
   return out
 }
 
+// a gram whose neighbour on one side is the same character this often is a piece of a longer word (员岛风风 of
+// 管理员岛风风, 爱突击检 of 突击检查); function characters don't count, 让哈基米 / 和哈基米 leave 哈基米 free
+const BOUND = 0.75
+
+/**
+ * Grams that are fragments across the whole archive: seen at least twice, nearly always next to the same
+ * (non-function) character on the left or on the right. A run edge counts as a different neighbour every time.
+ */
+export function fragments(texts: string[], candidates: Set<string>): Set<string> {
+  const sides = new Map<string, { n: number; left: Map<string, number>; right: Map<string, number> }>()
+  for (const t of texts)
+    for (const run of hanRuns(clean(t)))
+      hanGrams(run, (g, i) => {
+        if (!candidates.has(g)) return
+        let s = sides.get(g)
+        if (!s) sides.set(g, (s = { n: 0, left: new Map(), right: new Map() }))
+        s.n++
+        const l = run[i - 1], r = run[i + g.length]
+        if (l && !EDGE_CHARS.has(l)) s.left.set(l, (s.left.get(l) ?? 0) + 1)
+        if (r && !EDGE_CHARS.has(r)) s.right.set(r, (s.right.get(r) ?? 0) + 1)
+      })
+  const out = new Set<string>()
+  const top = (m: Map<string, number>) => Math.max(0, ...m.values())
+  for (const [g, s] of sides) if (s.n >= 2 && Math.max(top(s.left), top(s.right)) >= BOUND * s.n) out.add(g)
+  return out
+}
+
+/**
+ * Names of people, read off the archive itself: summaries tag them as 岛风风(平台ID 1) / 妹弓(ID3) / 会长(2). Every
+ * 2-5 character tail of the Han text before such a tag counts, so 管理员岛风风 yields 岛风风 and its pieces too.
+ */
+export function names(texts: string[]): Set<string> {
+  const out = new Set<string>()
+  for (const t of texts)
+    for (const m of t.matchAll(/(\p{Script=Han}+)\s*[(（]\s*(?:平台)?\s*(?:id)?\s*\d+\s*[)）]/giu)) {
+      const run = m[1]
+      for (let n = 2; n <= Math.min(MAX_GRAM, run.length); n++) out.add(run.slice(-n))
+    }
+  return out
+}
+
+// a label lists at most this many people: they show up in every kind of conversation, so they say little of its topic
+const MAX_NAMES = 1
+
+/** 岛风风发 / 让会长: a name with a character or two of the sentence around it attached. */
+function nameAndWord(t: string, people: Set<string>) {
+  if (people.has(t) || t.includes(' ')) return false
+  for (let cut = 1; cut <= 2 && t.length - cut >= 2; cut++)
+    if (people.has(t.slice(0, -cut)) || people.has(t.slice(cut))) return true
+  return false
+}
+
 /**
  * c-TF-IDF over documents: a term scores by the share of the cluster's documents containing it, weighted by how rare
  * it is across all documents. `skip` marks near-duplicate documents (a day digest restating its only episode), which
  * would otherwise make every phrase of theirs look common. Terms seen in a single document are skipped for clusters
- * of 3+; a term found mostly
- * inside a longer one (哈基 inside 哈基米) gives way to it, and a term overlapping an already chosen one is dropped.
+ * of 3+; fragments of longer words are dropped, a label names at most one person, a term found mostly inside a longer one within the cluster gives way to
+ * it, and a term overlapping an already chosen one is dropped.
  */
 export function clusterKeywords(texts: string[], assign: number[], k: number, top = 5, skip = new Set<number>()): string[][] {
   const docTerms = texts.map((t, i) => (skip.has(i) ? new Set<string>() : terms(t)))
   const df = new Map<string, number>()
   for (const ts of docTerms) for (const t of ts) df.set(t, (df.get(t) ?? 0) + 1)
   const n = texts.length
+  const repeated = new Set([...df].filter(([t, c]) => c >= 2 && !t.includes(' ')).map(([t]) => t))
+  const pieces = fragments(texts.filter((_, i) => !skip.has(i)), repeated)
+  const people = names(texts)
   return Array.from({ length: k }, (_, c) => {
     const members = docTerms.filter((_, i) => assign[i] === c && !skip.has(i))
     const counts = new Map<string, number>()
-    for (const ts of members) for (const t of ts) counts.set(t, (counts.get(t) ?? 0) + 1)
+    for (const ts of members) for (const t of ts) if (!pieces.has(t)) counts.set(t, (counts.get(t) ?? 0) + 1)
     const minCount = members.length >= 3 ? 2 : 1
     // the longest containing gram of each term, by count: a term whose count it nearly matches is just its fragment
     const absorbed = new Set<string>()
@@ -212,9 +294,12 @@ export function clusterKeywords(texts: string[], assign: number[], k: number, to
       .map(([t, cnt]) => [t, (cnt / members.length) * Math.log(1 + n / df.get(t)!)] as const)
       .sort((a, b) => b[1] - a[1] || b[0].length - a[0].length)
     const picked: string[] = []
+    let named = 0
     for (const [t] of ranked) {
       if (picked.length >= top) break
       if (picked.some(p => p.includes(t) || t.includes(p) || overlaps(p, t))) continue
+      if (nameAndWord(t, people)) continue
+      if (people.has(t) && named++ >= MAX_NAMES) continue
       picked.push(t)
     }
     return picked

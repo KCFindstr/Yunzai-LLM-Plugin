@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { clusterKeywords, clusterVectors, maxK, terms } from '../src/memory/cluster.ts'
+import { clusterKeywords, clusterVectors, fragments, maxK, names, terms } from '../src/memory/cluster.ts'
 
 /** Unit vectors around `centers` (one-hot in 32 dims), `per` each; loose enough that members are not near-duplicates. */
 function blobs(centers: number[][], per: number) {
@@ -56,6 +56,30 @@ describe('clusters', () => {
     assert.ok(!t.has('我们') && !t.has('今天') && !t.has('发言人') && !t.has('平台'))
     assert.ok([...t].some(x => x.includes('抽卡') || x.includes('讨论')))
     assert.deepEqual(clusterKeywords(['a b'], [0], 1), [[]])
+  })
+
+  it('ignores stored paths, hashes and platform IDs', () => {
+    const t = terms('岛风风(平台ID 1)发图[图片1:/work/attachments/b25df60adb/image-1bf1fb3b1d05.jpg]，又发了 /work/attachments/aa644bb650/x.png 让大家认图')
+    for (const junk of ['attachments', 'work', 'image', 'b25df60adb', 'jpg']) assert.ok(![...t].some(x => x.includes(junk)), junk)
+    assert.ok(t.has('认图'))
+  })
+
+  it('drops pieces of longer words and names attached to a verb', () => {
+    const texts = ['管理员岛风风突击检查', '管理员岛风风又来突击检查', '让管理员岛风风突击检查', '岛风风(平台ID 1)发视频', '岛风风(平台ID 1)发房间链接']
+    const pieces = fragments(texts, new Set(['员岛风风', '突击检', '突击检查', '岛风风']))
+    assert.ok(pieces.has('员岛风风') && pieces.has('突击检'))
+    assert.ok(!pieces.has('突击检查') && !pieces.has('岛风风'))
+    assert.ok(names(texts).has('岛风风'))
+    const [labels] = clusterKeywords(texts, [0, 0, 0, 0, 0], 1)
+    assert.ok(labels.includes('突击检查'), String(labels))
+    assert.ok(!labels.some(l => ['突击检', '员岛风风', '岛风风发'].includes(l)), String(labels))
+  })
+
+  it('names at most one person in a label', () => {
+    const texts = ['会长和妹弓聊火锅', '会长和妹弓吃火锅', '会长、妹弓排队火锅', '会长(平台ID 2)与妹弓(平台ID 3)']
+    const [labels] = clusterKeywords(texts, [0, 0, 0, 0], 1)
+    assert.ok(labels.includes('火锅'), String(labels))
+    assert.equal(labels.filter(l => ['会长', '妹弓'].includes(l)).length, 1, String(labels))
   })
 
   it('caps k by the point count', () => {
