@@ -31,6 +31,16 @@ Yunzai-LLM-Plugin 按实际用量计算模型花费，并按人、群和全局�
 
 ---
 
+在 Web 面板 **「用量与额度」** 可以按时间和模型查看花费与 token：
+
+<div className="screenshot-card">
+  <img src="/img/webui-usage.png" alt="用量与额度（演示数据）" />
+</div>
+
+（截图使用演示数据。）
+
+---
+
 ## 价格表与动态同步
 
 - **自动抓取价格**：插件每 24 小时（`pricing.refreshHours`）从 **LiteLLM / OpenRouter 价格表** 拉取每百万 Token 价格，自动计算每次对话的实际美元花费。

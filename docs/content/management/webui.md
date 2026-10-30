@@ -35,13 +35,21 @@ Yunzai-LLM-Plugin 自带 Web 管理面板，不用手写 YAML 或记指令，在
 ### 2. 可视化配置中心 (`#/config`)
 - **表单与 YAML 双模式**：
   - **表单模式**：分为「设置向导、基础、提供商、模型、人设、分群设置、群友称呼、触发方式、对话与上下文、自动思考强度、主动发言、额度、回复与风控、表情包、工具、长期记忆、技能、价格表、网页管理」，选项提供类型约束、范围检查与中文说明；相关提示直接显示在对应设置旁。
-  - **config.yaml 模式**：内置代码编辑器直接修改原始 YAML，保存时经过严格 Schema 校验，防止因手滑导致机器人崩溃。
-- **即时热重载**：保存修改后即刻生效，无需重启 Yunzai 机器人。
+  - **config.yaml 模式**：内置代码编辑器直接修改原始 YAML，保存前按 Schema 校验，格式错误的内容不会写入。
+- **热重载**：保存后立即生效，无需重启 Yunzai 机器人。
+
+<div className="screenshot-card">
+  <img src="/img/webui-setup.png" alt="设置向导（演示数据）" />
+</div>
 
 ### 3. 用量与多维额度统计 (`#/usage`)
 - **时间与范围筛选**：支持按今日、最近 7 天、14 天、30 天、本月或自定义时间段筛选 Token 消耗与美元支出。
 - **模型消耗细分**：分模型展示未缓存输入、输出与缓存的 token 与费用。
 - **额度使用进度条**：展示各模型 5 小时与 7 天额度的使用情况，以及本周花费最多的用户。
+
+<div className="screenshot-card">
+  <img src="/img/webui-usage.png" alt="用量与额度（演示数据）" />
+</div>
 
 ### 4. 3D 向量空间与记忆聚类 (`#/vectors`)
 - **3D PCA 投影降维视图**：将聊天历史片段的 Embedding 向量投射至可三维旋转、缩放的交互空间中。
@@ -62,6 +70,12 @@ Yunzai-LLM-Plugin 自带 Web 管理面板，不用手写 YAML 或记指令，在
 - **工具与技能目录 (`#/tools`)**：查看已注册的工具与技能。
 - **定时任务 (`#/schedules`)**：分页查看进行中与已结束的定时任务，可编辑时间、重复方式和任务内容，或取消任务。
 - **电脑任务 / 异步代理 (`#/computer`、`#/agy`)**：查看后台任务的状态与结果。
+- **执行记录 (`#/rollouts`)**：逐轮查看大模型调用时的思考过程、工具参数输入与工具返回结果时间线。
+- **实时日志 (`#/logs`)**：每 2 秒更新机器人后台日志，支持日志级别筛选与内容搜索。
+
+<div className="screenshot-card">
+  <img src="/img/webui-stickers.png" alt="表情包管理" />
+</div>
 
 <div className="screenshot-card">
   <img src="/img/webui-schedules.png" alt="定时任务列表（演示数据）" />
@@ -71,9 +85,11 @@ Yunzai-LLM-Plugin 自带 Web 管理面板，不用手写 YAML 或记指令，在
   <img src="/img/webui-computer-detail.png" alt="电脑任务详情（演示数据）" />
 </div>
 
-以上截图均使用演示数据。
-- **执行记录 (`#/rollouts`)**：逐轮查看大模型调用时的思考过程、工具参数输入与工具返回结果时间线。
-- **实时日志 (`#/logs`)**：每 2 秒更新机器人后台日志，支持日志级别筛选与内容搜索。
+<div className="screenshot-card">
+  <img src="/img/webui-rollout.png" alt="执行记录（演示数据）" />
+</div>
+
+除表情包外，本页截图均使用演示数据。
 
 ---
 

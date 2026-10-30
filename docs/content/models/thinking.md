@@ -55,3 +55,7 @@ Yunzai-LLM-Plugin 提供 **`thinking: auto` 自动分级**：复杂问题照常�
 阈值曲线 `threshold(t) = end + (start - end) × 0.5^(t / halfLife)`，其中 `t` 是**距机器人自己上次在本群回复的秒数**（与群里其他人发言无关）：机器人刚说过话时阈值高，越久没说话越容易接话。
 
 主动回复不计入发言人的个人额度（群 / 全局额度照常），模型认为没必要接话时也可以不发。Web 面板 **「配置 → 主动发言」** 中可以查看阈值曲线、最近的判断记录，并试运行判断模型。
+
+<div className="screenshot-card">
+  <img src="/img/webui-threshold-curve.png" alt="回复阈值曲线" />
+</div>
