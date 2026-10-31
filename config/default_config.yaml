@@ -49,7 +49,7 @@ providers:
     baseUrl: https://generativelanguage.googleapis.com
     # 服务密钥；支持列表和 env:变量名
     apiKey: ''
-    # 使用服务端会话状态(previous_interaction_id)，减少重复上传历史
+    # 仅在同一次执行内使用服务端状态(previous_interaction_id)续接工具轮次；新执行发送完整上下文
     serverState: true
   # DeepSeek 提供商配置
   deepseek:

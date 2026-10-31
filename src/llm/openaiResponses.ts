@@ -1,6 +1,7 @@
 import { deepMerge } from '../core/util.ts'
 import { acceptsFile, dataUrl, filePlaceholder, genCallId, openaiEffort, parseArgs, toolImages } from './common.ts'
 import { joinUrl, requestJson } from './http.ts'
+import { usesServerState } from './state.ts'
 import type { Adapter, ChatParams, ChatResult, Part, ToolCall } from './types.ts'
 import { inlineThinking, joinThinking, stripThink } from './types.ts'
 
@@ -12,8 +13,9 @@ export const openaiResponses: Adapter = {
     // DeepSeek's Responses endpoint thinks by default; only effort "none" turns it off (checked 2026-10)
     const deepseek = /deepseek\.com/i.test(base)
     const vision = p.model.vision !== false
-    const store = p.provider.store ?? p.provider.serverState ?? false
-    const msgs = p.state ? p.messages.slice(p.state.skip) : p.messages
+    const store = p.store ?? p.provider.store ?? p.provider.serverState ?? false
+    const state = usesServerState(p.provider, p.model, store) ? p.state : undefined
+    const msgs = state ? p.messages.slice(state.skip) : p.messages
     const input: any[] = []
 
     const userInput = (content: Part[]) => ({
@@ -50,7 +52,7 @@ export const openaiResponses: Adapter = {
     }
 
     let body: any = { model: p.model.model, input, instructions: p.system, max_output_tokens: p.maxTokens, store }
-    if (p.state) body.previous_response_id = p.state.previousId
+    if (state) body.previous_response_id = state.previousId
     const tools: any[] = p.tools.map(t => ({ type: 'function', name: t.name, description: t.description, parameters: t.parameters }))
     if (p.nativeSearch) tools.push({ type: 'web_search' })
     if (tools.length) body.tools = tools
@@ -63,6 +65,9 @@ export const openaiResponses: Adapter = {
     if (p.model.topP != null) body.top_p = p.model.topP
     if ((p.provider.promptCacheKey ?? official) && p.cacheKey) body.prompt_cache_key = p.cacheKey
     if (p.model.extraBody) body = deepMerge(body, p.model.extraBody)
+    body.store = store
+    if (state) body.previous_response_id = state.previousId
+    else delete body.previous_response_id
 
     const res = await requestJson(
       p.provider,

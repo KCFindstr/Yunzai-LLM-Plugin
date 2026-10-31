@@ -285,7 +285,9 @@ async function runTurnInner(req: TurnRequest, ref: { turn?: TurnState; rolloutId
   const stateKey = `${model.provider}:${provider.type}:${provider.baseUrl ?? ''}:${model.model}:${memoryHash(statePrefix)}`
   const serverState = usesServerState(provider, model)
   let state: ServerState | undefined
-  if (serverState && session.state?.key === stateKey && session.state.len === session.messages.length)
+  // Every new rollout sends its assembled context in full. Only an async result
+  // belonging to this same rollout may resume its earlier provider conversation.
+  if (ref.continued && serverState && session.state?.rolloutId === ref.rolloutId && session.state.key === stateKey && session.state.len === session.messages.length)
     state = { previousId: session.state.previousId, skip: prefix.length + session.messages.length }
   const cacheKey = `yzllm-${sha1(`${system}|${convKey}`).slice(0, 16)}`
 
@@ -438,7 +440,7 @@ async function runTurnInner(req: TurnRequest, ref: { turn?: TurnState; rolloutId
   setServerState(
     convKey,
     serverState && cleanEnd && lastResponseId && after === session && after.contextRevision === contextRevision
-      ? { key: stateKey, previousId: lastResponseId, len: after.messages.length } : undefined,
+      ? { key: stateKey, previousId: lastResponseId, len: after.messages.length, rolloutId: ref.rolloutId } : undefined,
   )
   return { kind: 'reply', text: finalText, modelId: model.id, cost, dispatched: turn.dispatched, images: turn.images, thinking }
 }

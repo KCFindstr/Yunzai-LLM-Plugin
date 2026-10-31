@@ -24,7 +24,7 @@ export interface ProviderConfig {
   authStyle?: 'x-api-key' | 'bearer'
   /** anthropic: prompt cache TTL. */
   cacheTtl?: '5m' | '1h'
-  /** gemini (default true) / openai-responses (default false): reuse server-side conversation state. */
+  /** gemini (default true) / openai-responses (default false): reuse server state only within a rollout. */
   serverState?: boolean
   /** gemini/openai-responses: store=false disables server state. */
   store?: boolean

@@ -72,7 +72,9 @@ export const gemini: Adapter = {
     if (p.model.extraBody) body = deepMerge(body, p.model.extraBody)
     // A one-shot store=false or disabled chain must also override extraBody storage settings.
     body.store = store
-    if (!store) delete body.previous_interaction_id
+    // extraBody must not inject a conversation from outside the current rollout.
+    if (state) body.previous_interaction_id = state.previousId
+    else delete body.previous_interaction_id
 
     const res = await requestJson(p.provider, key => ({ url, headers: { 'x-goog-api-key': key }, body }), p.signal)
 

@@ -219,6 +219,9 @@ Usage normalized to `{input (uncached), cacheRead, cacheWrite, cacheWrite1h, out
 
 Server state: `ChatParams.state = {previousId, skip}` means `messages[0..skip)` already live server-side.
 Used by `gemini` (default on) and `openai-responses` (opt-in `serverState: true`).
+Every new rollout starts without a previous provider ID and sends its assembled context in full.
+State can be reused only by tool steps or a callback belonging to the same rollout; persisted legacy IDs
+without a matching rollout ID are ignored. Explicit local history, summaries and memory remain available.
 
 ## 5. Status
 

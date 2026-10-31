@@ -40,7 +40,7 @@ for (const protocol of ['openai', 'openai-responses'] as const) it(`reuses the i
     config.set('providers.mock.apiKey', 'changed-key')
     registry.register({ ...registry.get('cache_capture')!, description: 'Changed after the initiating request' })
     let delivered = false
-    await completeAgyJob({ id: 'aabbccddee', owner: '', task: 'original request', status: 'completed', createdAt: 0, updatedAt: 0 },
+    await completeAgyJob({ id: 'aabbccddee', rolloutId: first.rolloutId, owner: '', task: 'original request', status: 'completed', createdAt: 0, updatedAt: 0 },
       { report: '分析复杂任务完成。'.repeat(20) + '\n/work/agy/aabbccddee/out/result.png' }, captured!, {
         runTurn: request => { assert.equal(request.eff, eff); assert.equal(request.sessionConfig, captured!.turn.sessionConfig); return runTurn(request) },
         deliver: async (_event, text, _eff, opts) => { delivered = true; assert.equal(text, 'Here is the result'); assert.deepEqual(opts.images, [image]) },
@@ -60,7 +60,7 @@ for (const protocol of ['openai', 'openai-responses'] as const) it(`reuses the i
       assert.equal(completion.instructions, original.instructions)
       assert.deepEqual(completion.reasoning, original.reasoning)
       assert.equal(completion.max_output_tokens, original.max_output_tokens)
-      assert.equal(completion.previous_response_id, 'response-2')
+      assert.equal(completion.previous_response_id, 'response-2', 'a callback in the original rollout may continue its chain')
       assert.equal(completion.input.length, 1)
     } else {
       assert.deepEqual(completion.messages[0], original.messages[0])

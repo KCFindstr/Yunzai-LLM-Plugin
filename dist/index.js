@@ -1077,7 +1077,7 @@ var init_schema = __esm({
         promptCacheKey: bool("\u53D1\u9001 prompt_cache_key", { when: (p) => p.type === "openai" || p.type === "openai-responses" }),
         authStyle: oneOf(["x-api-key", "bearer"], "\u9274\u6743\u65B9\u5F0F", { when: (p) => p.type === "anthropic" }),
         cacheTtl: oneOf(["5m", "1h"], "\u63D0\u793A\u7F13\u5B58\u65F6\u957F", { when: (p) => p.type === "anthropic" }),
-        serverState: bool("\u670D\u52A1\u7AEF\u4F1A\u8BDD\u72B6\u6001", { when: (p) => p.type === "gemini" || p.type === "openai-responses" }),
+        serverState: bool("\u6267\u884C\u5185\u670D\u52A1\u7AEF\u4F1A\u8BDD\u72B6\u6001", { when: (p) => p.type === "gemini" || p.type === "openai-responses" }),
         store: bool("\u670D\u52A1\u7AEF\u4FDD\u5B58\u5BF9\u8BDD", { when: (p) => p.type === "gemini" || p.type === "openai-responses" }),
         balance: oneOf(["none", "deepseek", "openrouter", "moonshot", "siliconflow"], "\u4F59\u989D\u67E5\u8BE2\u63A5\u53E3", { when: (p) => CHAT_PROVIDER_TYPES.includes(p.type) })
       },
@@ -1094,7 +1094,7 @@ var init_schema = __esm({
         vision: bool("\u652F\u6301\u56FE\u7247\u8F93\u5165"),
         toolUse: bool("\u652F\u6301\u5DE5\u5177\u8C03\u7528"),
         nativeSearch: bool("\u4F7F\u7528\u6A21\u578B\u81EA\u5E26\u641C\u7D22"),
-        serverState: bool("\u670D\u52A1\u7AEF\u4F1A\u8BDD\u72B6\u6001\uFF08\u8986\u76D6\u63D0\u4F9B\u5546\u8BBE\u7F6E\uFF0C\u4EC5 Gemini\uFF09"),
+        serverState: bool("\u6267\u884C\u5185\u670D\u52A1\u7AEF\u4F1A\u8BDD\u72B6\u6001\uFF08\u8986\u76D6\u63D0\u4F9B\u5546\u8BBE\u7F6E\uFF0C\u4EC5 Gemini\uFF09"),
         maxTokens: int("\u6700\u5927\u8F93\u51FA token", { min: 1 }),
         temperature: num("\u6E29\u5EA6", { min: 0, max: 2, nullable: true }),
         topP: num("top_p", { min: 0, max: 1, nullable: true }),
@@ -2963,7 +2963,8 @@ var init_gemini = __esm({
         if (tools2.length) body.tools = tools2;
         if (p.model.extraBody) body = deepMerge(body, p.model.extraBody);
         body.store = store12;
-        if (!store12) delete body.previous_interaction_id;
+        if (state) body.previous_interaction_id = state.previousId;
+        else delete body.previous_interaction_id;
         const res = await requestJson(p.provider, (key) => ({ url, headers: { "x-goog-api-key": key }, body }), p.signal);
         if (res?.status === "failed") {
           const e = res?.errors?.[0];
@@ -3137,6 +3138,7 @@ var init_openaiResponses = __esm({
     init_util();
     init_common();
     init_http();
+    init_state();
     init_types();
     openaiResponses = {
       async chat(p) {
@@ -3144,8 +3146,9 @@ var init_openaiResponses = __esm({
         const official = /api\.openai\.com/i.test(base);
         const deepseek = /deepseek\.com/i.test(base);
         const vision = p.model.vision !== false;
-        const store12 = p.provider.store ?? p.provider.serverState ?? false;
-        const msgs = p.state ? p.messages.slice(p.state.skip) : p.messages;
+        const store12 = p.store ?? p.provider.store ?? p.provider.serverState ?? false;
+        const state = usesServerState(p.provider, p.model, store12) ? p.state : void 0;
+        const msgs = state ? p.messages.slice(state.skip) : p.messages;
         const input = [];
         const userInput = (content) => ({
           role: "user",
@@ -3171,7 +3174,7 @@ var init_openaiResponses = __esm({
           }
         }
         let body = { model: p.model.model, input, instructions: p.system, max_output_tokens: p.maxTokens, store: store12 };
-        if (p.state) body.previous_response_id = p.state.previousId;
+        if (state) body.previous_response_id = state.previousId;
         const tools2 = p.tools.map((t) => ({ type: "function", name: t.name, description: t.description, parameters: t.parameters }));
         if (p.nativeSearch) tools2.push({ type: "web_search" });
         if (tools2.length) body.tools = tools2;
@@ -3184,6 +3187,9 @@ var init_openaiResponses = __esm({
         if (p.model.topP != null) body.top_p = p.model.topP;
         if ((p.provider.promptCacheKey ?? official) && p.cacheKey) body.prompt_cache_key = p.cacheKey;
         if (p.model.extraBody) body = deepMerge(body, p.model.extraBody);
+        body.store = store12;
+        if (state) body.previous_response_id = state.previousId;
+        else delete body.previous_response_id;
         const res = await requestJson(
           p.provider,
           (key) => ({ url: joinUrl(base, "responses"), headers: { authorization: `Bearer ${key}` }, body }),
@@ -8372,7 +8378,7 @@ ${session.summary}` }] });
   const stateKey = `${model2.provider}:${provider2.type}:${provider2.baseUrl ?? ""}:${model2.model}:${memoryHash(statePrefix)}`;
   const serverState = usesServerState(provider2, model2);
   let state;
-  if (serverState && session.state?.key === stateKey && session.state.len === session.messages.length)
+  if (ref.continued && serverState && session.state?.rolloutId === ref.rolloutId && session.state.key === stateKey && session.state.len === session.messages.length)
     state = { previousId: session.state.previousId, skip: prefix.length + session.messages.length };
   const cacheKey = `yzllm-${sha1(`${system}|${convKey}`).slice(0, 16)}`;
   let usage2 = emptyUsage();
@@ -8552,7 +8558,7 @@ ${session.summary}` }] });
   const after = peekSession(convKey);
   setServerState(
     convKey,
-    serverState && cleanEnd && lastResponseId && after === session && after.contextRevision === contextRevision ? { key: stateKey, previousId: lastResponseId, len: after.messages.length } : void 0
+    serverState && cleanEnd && lastResponseId && after === session && after.contextRevision === contextRevision ? { key: stateKey, previousId: lastResponseId, len: after.messages.length, rolloutId: ref.rolloutId } : void 0
   );
   return { kind: "reply", text: finalText, modelId: model2.id, cost, dispatched: turn.dispatched, images: turn.images, thinking };
 }

@@ -280,6 +280,25 @@ describe('openai responses', () => {
   })
 })
 
+for (const protocol of ['gemini', 'openai-responses'] as const) it(`${protocol} prevents extraBody from injecting a previous rollout or overriding disabled storage`, async () => {
+  const previous = protocol === 'gemini' ? 'previous_interaction_id' : 'previous_response_id'
+  const srv = await mockServer(() => [200, { id: 'next', status: 'completed', steps: [], output: [], usage: {} }])
+  after(srv.close)
+  const messages: Msg[] = [userMsg, { role: 'assistant', content: 'old' }, { role: 'user', content: [{ type: 'text', text: 'new' }] }]
+  const base = params({ type: protocol, baseUrl: srv.url, apiKey: 'test', serverState: true }, { extraBody: { store: true, [previous]: 'injected-id' } }, messages)
+  await chat(base)
+  assert.equal(srv.requests.at(-1)!.body[previous], undefined, 'fresh requests cannot inherit an injected ID')
+  assert.equal(srv.requests.at(-1)!.body.input.length, 3)
+  await chat({ ...base, state: { previousId: 'valid-current-rollout', skip: 2 } })
+  assert.equal(srv.requests.at(-1)!.body[previous], 'valid-current-rollout')
+  assert.equal(srv.requests.at(-1)!.body.input.length, 1)
+  const res = await chat({ ...base, store: false, state: { previousId: 'old', skip: 2 } })
+  assert.equal(srv.requests.at(-1)!.body.store, false)
+  assert.equal(srv.requests.at(-1)!.body[previous], undefined)
+  assert.equal(srv.requests.at(-1)!.body.input.length, 3)
+  assert.equal(res.responseId, undefined)
+})
+
 describe('gemini interactions', () => {
   it('uses the same model/provider/storage decision in the adapter and chat loop', async () => {
     const srv = await mockServer(() => [200, { id: 'next', status: 'completed', steps: [], usage: {} }])

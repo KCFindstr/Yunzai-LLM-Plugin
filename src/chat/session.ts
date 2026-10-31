@@ -42,8 +42,8 @@ export interface StoredSession {
   /** When each stored user/assistant pair happened, aligned with the end of `messages`. */
   turnTimes?: number[]
   updatedAt: number
-  /** Server-side chain (gemini/responses): valid while messages.length === len and the model key matches. */
-  state?: { key: string; previousId: string; len: number }
+  /** Only same-rollout callbacks may resume this chain; old entries without rolloutId are never reused. */
+  state?: { key: string; previousId: string; len: number; rolloutId?: string }
 }
 
 const store = new JsonStore<Record<string, StoredSession>>('sessions.json', {})
