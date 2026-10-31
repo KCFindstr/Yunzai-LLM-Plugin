@@ -7,6 +7,42 @@ import { appendTurn } from '../src/chat/session.ts'
 import { markHandled, recordBotMessage, recordGroupMessage } from '../src/chat/groupLog.ts'
 import { recentRollouts, rolloutHistory } from '../src/chat/rollouts.ts'
 
+it('includes messages from the last twelve hours in the prompt and excludes older messages', async t => {
+  const server = await mockServer(() => [200, { choices: [{ message: { content: '完成' }, finish_reason: 'stop' }], usage: { prompt_tokens: 100, completion_tokens: 10 } }])
+  writeUserConfig(`providers:\n  mock: { type: openai, baseUrl: '${server.url}', apiKey: test-key, maxRetries: 0 }\nmodels:\n  - { id: main, provider: mock, model: fake }\ndefaultModel: main\nfallbackModels: []\nchat: { thinking: off, summarize: false, groupContext: 16 }\nmemory: { enable: false }\ntools: { enable: false }\n`)
+  config.load()
+  const { e } = fakeEvent({ group_id: 77301, message_id: 'current' })
+  const now = Date.now()
+  let clock = now
+  t.mock.method(Date, 'now', () => clock)
+  for (const [age, text] of [[12 * 60 * 60_000 + 1, 'outside-window'], [12 * 60 * 60_000, 'twelve-hours-ago'], [60 * 60_000, 'one-hour-ago']] as const) {
+    clock = now - age
+    recordGroupMessage({ ...e, message_id: text, message: [{ type: 'text', text }] })
+  }
+  clock = now
+  recordGroupMessage(e)
+  try {
+    await runTurn({ e, eff: config.effective(), input: { text: '当前请求', images: [], imageSegments: [] }, isAdmin: true, convKey: 'twelve-hour-context' })
+    const current = server.requests[0].body.messages.at(-1).content
+    assert.match(current, /twelve-hours-ago/)
+    assert.match(current, /one-hour-ago/)
+    assert.doesNotMatch(current, /outside-window/)
+    const sessionTimeout = config.effective(e.group_id).chat.sessionTimeout
+    const { groupLines } = await import('../src/chat/judge.ts')
+    config.set('chat.groupContextMaxAgeMinutes', 30)
+    assert.deepEqual(groupLines(e, 16), [], 'judges respect the global age setting')
+    await runTurn({ e, eff: config.effective(e.group_id), input: { text: '当前请求', images: [], imageSegments: [] }, isAdmin: true, convKey: 'short-context' })
+    assert.doesNotMatch(server.requests.at(-1)!.body.messages.at(-1).content, /one-hour-ago|twelve-hours-ago/)
+    config.set('groups.77301.chat.groupContextMaxAgeMinutes', 120)
+    assert.match(groupLines(e, 16).join('\n'), /one-hour-ago/)
+    await runTurn({ e, eff: config.effective(e.group_id), input: { text: '当前请求', images: [], imageSegments: [] }, isAdmin: true, convKey: 'group-context-override' })
+    const overridden = server.requests.at(-1)!.body.messages.at(-1).content
+    assert.match(overridden, /one-hour-ago/)
+    assert.doesNotMatch(overridden, /twelve-hours-ago|outside-window/)
+    assert.equal(config.effective(e.group_id).chat.sessionTimeout, sessionTimeout)
+  } finally { await server.close() }
+})
+
 it('sends overlapping session exchanges in the chronological group window and snapshots the separate sources', async () => {
   const server = await mockServer(() => [200, { choices: [{ message: { content: '完成' }, finish_reason: 'stop' }], usage: { prompt_tokens: 100, completion_tokens: 10 } }])
   writeUserConfig(`providers:\n  mock: { type: openai, baseUrl: '${server.url}', apiKey: test-key, maxRetries: 0 }\nmodels:\n  - { id: main, provider: mock, model: fake }\ndefaultModel: main\nfallbackModels: []\nchat: { thinking: off, summarize: false, sessionScope: group, groupContext: 10 }\nmemory: { enable: false }\ntools: { enable: false }\n`)

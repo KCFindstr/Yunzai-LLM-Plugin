@@ -261,6 +261,8 @@ chat:
   summaryMaxTokens: 8192
   # 附带的最近群聊条数，0–100（帮助理解语境；不会写入长期记忆）
   groupContext: 16
+  # 最近群聊的时间范围（分钟），默认720分钟=12小时；与会话过期时间无关
+  groupContextMaxAgeMinutes: 720
   # 每条最近群聊最多附带多少字符
   groupContextMaxChars: 200
   # 单次回复最多调用几轮工具（每轮可并行多个调用；只调用辅助工具的轮次也计入；0 关闭全部工具）

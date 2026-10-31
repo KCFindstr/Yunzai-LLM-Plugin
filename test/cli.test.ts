@@ -81,6 +81,19 @@ describe('config CLI subcommands', () => {
     assert.match(run(['get', 'chat.groupContext']), /^100/)
   })
 
+  it('configures the recent group-message age globally and per group in minutes', () => {
+    writeUserConfig('')
+    assert.match(run(['get', 'chat.groupContextMaxAgeMinutes']), /^720/)
+    run(['set', 'chat.groupContextMaxAgeMinutes', '60'])
+    run(['set', 'groups.123456.chat.groupContextMaxAgeMinutes', '120'])
+    assert.equal(YAML.parse(userYaml()).chat.groupContextMaxAgeMinutes, 60)
+    assert.equal(YAML.parse(userYaml()).groups['123456'].chat.groupContextMaxAgeMinutes, 120)
+    assert.match(run(['get', 'chat.groupContextMaxAgeMinutes']), /^60/)
+    for (const invalid of ['0', '-1', '1.5']) assert.equal(runFail(['set', 'chat.groupContextMaxAgeMinutes', invalid]).code, 1)
+    run(['unset', 'chat.groupContextMaxAgeMinutes'])
+    assert.match(run(['get', 'chat.groupContextMaxAgeMinutes']), /^720/)
+  })
+
   it('list shows valid keys that are not set yet, filtered by provider type', () => {
     writeUserConfig('reply:\n  maxBubbles: 3\n')
     const p = run(['list', 'providers.anthropic'])

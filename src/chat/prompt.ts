@@ -91,7 +91,7 @@ export function buildHeader(e: any, eff: EffectiveConfig, input: ExtractedInput,
   if (e.group_id) {
     context.roster = rosterLines(e, eff.chat.rosterSize)
     if (context.roster.length) roster.push('【最近群友·仅身份参考】', ...context.roster)
-    context.recent = recentLines(e, eff.chat.groupContext, eff.chat.groupContextMaxChars, opts.conv)
+    context.recent = recentLines(e, eff.chat.groupContext, eff.chat.groupContextMaxChars, opts.conv, eff.chat.groupContextMaxAgeMinutes * 60_000)
     if (context.recent.length) recent.push('【最近群聊】', '以下按群内实际先后排列，可能与前面的对话历史重叠；重叠内容是同一次发言，并非再次发生。用此处判断群聊顺序，只回应末尾消息段中的当前请求。', ...context.recent)
   }
   const quote: string[] = []

@@ -2,7 +2,7 @@ import type { EffectiveConfig, ReplySection } from '../core/configTypes.ts'
 import { log } from '../core/log.ts'
 import { randFloat, sleep, truncate } from '../core/util.ts'
 import { botNickname, sendApi, sendForward, seg } from '../core/yunzai.ts'
-import { markdownEnabled } from './format.ts'
+import { markdownEnabled, SKIP_REPLY } from './format.ts'
 import { chooseSticker, extractStickerMarkers, sendSticker } from '../stickers/picker.ts'
 import { messagesSince, recordBotMessage } from './groupLog.ts'
 import { limiter } from './ratelimit.ts'
@@ -39,6 +39,7 @@ export interface Prepared {
  * into bubbles; Markdown mode (e.g. QQBot) keeps the text intact as one message.
  */
 export function prepareReply(raw: string, cfg: ReplySection, markdown = false): Prepared {
+  if (SKIP_REPLY.test(raw)) return { bubbles: [], stickerNames: [] }
   const { text: noMarkers, names } = extractStickerMarkers(raw)
   let text = cfg.stripMarkdown && !markdown ? stripMarkdown(noMarkers) : noMarkers
   text = text.replace(/\n{3,}/g, '\n\n').trim()

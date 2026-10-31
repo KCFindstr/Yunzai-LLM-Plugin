@@ -209,7 +209,7 @@ export function markHandled(e: any, conv: string) {
 }
 
 /** Keep overlapping exchanges: removing them loses how bot conversations interleave with group chatter. */
-export function recentLines(e: any, n: number, maxChars: number, conv?: string, withinMs = 30 * 60_000): string[] {
+export function recentLines(e: any, n: number, maxChars: number, conv?: string, withinMs = config.effective(e?.group_id).chat.groupContextMaxAgeMinutes * 60_000): string[] {
   n = Math.min(100, Math.max(0, Math.floor(n)))
   if (!e?.group_id || n <= 0) return []
   const list = logs.get(keyOf(e)) ?? []

@@ -164,6 +164,26 @@ async function renderDocument(html: string, opts: RenderOptions, paginate: boole
 /** Scale an image down so its longer side is at most `max` px (transparent PNG). */
 export async function downscaleImage(buf: Buffer, mime: string, max: number): Promise<Buffer> {
   const src = `data:${mime};base64,${buf.toString('base64')}`
-  const html = `<!doctype html><html><head><style>html,body{margin:0;padding:0;background:transparent}img{display:block;max-width:${max}px;max-height:${max}px}</style></head><body><img src="${src}"></body></html>`
-  return renderHtml(html, { width: max, maxHeight: max, scale: 1, transparent: true })
+  const browser = await getBrowser()
+  const page = await browser.newPage()
+  try {
+    // Export only the image pixels: document screenshots include viewport padding,
+    // and the general HTML renderer has minimum page dimensions.
+    const png = await page.evaluate(async (src: string, max: number) => {
+      const image = new Image()
+      image.src = src
+      await image.decode()
+      const ratio = Math.min(1, max / Math.max(image.naturalWidth, image.naturalHeight))
+      const canvas = document.createElement('canvas')
+      canvas.width = Math.max(1, Math.round(image.naturalWidth * ratio))
+      canvas.height = Math.max(1, Math.round(image.naturalHeight * ratio))
+      const context = canvas.getContext('2d')
+      if (!context) throw new Error('图片缩放失败：Canvas 不可用')
+      context.drawImage(image, 0, 0, canvas.width, canvas.height)
+      return canvas.toDataURL('image/png').split(',')[1]
+    }, src, max)
+    return Buffer.from(png, 'base64')
+  } finally {
+    await page.close().catch(() => {})
+  }
 }

@@ -66,7 +66,8 @@ export async function sendableImage(file: string, max: number): Promise<Buffer> 
     return buf
   }
   if (dim.type === 'gif' || Math.max(dim.width ?? 0, dim.height ?? 0) <= max) return buf
-  const cached = path.join(path.dirname(file), `${path.parse(file).name}.s${max}.png`)
+  // v2 excludes the transparent viewport area in older cached screenshots.
+  const cached = path.join(path.dirname(file), `${path.parse(file).name}.s${max}.v2.png`)
   if (fs.existsSync(cached)) return fs.readFileSync(cached)
   try {
     const out = await downscaleImage(buf, `image/${dim.type === 'jpg' ? 'jpeg' : dim.type}`, max)

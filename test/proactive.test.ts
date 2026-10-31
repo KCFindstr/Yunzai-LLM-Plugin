@@ -160,4 +160,25 @@ describe('proactive replies', () => {
     const stored = peekSession('proactive:spoke')!.messages[0]
     assert.match(JSON.stringify(stored), /你主动接话的群消息/)
   })
+
+  it('a standalone skip reply is silent for normal group and private turns too', async () => {
+    const { deliver, prepareReply } = await import('../src/chat/reply.ts')
+    for (const [index, marker] of ['[skip]', ' ［SKIP］ ', '【跳过】', '不回复'].entries()) {
+      reply = marker
+      const e = index % 2 ? fakeEvent({ message_type: 'private', group_id: undefined }).e : message('叫你哈基咪')
+      const eff = config.effective(e.group_id)
+      const convKey = `normal:skip:${index}`
+      const out = await runTurn({ e, eff, input: { text: '叫你哈基咪', images: [], imageSegments: [] }, isAdmin: false, convKey })
+      assert.equal(out.kind, 'reply')
+      if (out.kind !== 'reply') throw new Error('expected a reply outcome')
+      assert.equal(out.skipped, true)
+      assert.equal(out.text, '')
+      assert.equal(peekSession(convKey)?.messages.length ?? 0, 0)
+      for (const markdown of [false, true]) assert.deepEqual(prepareReply(marker, eff.reply, markdown), { bubbles: [], stickerNames: [] })
+      const sent: unknown[] = []
+      await deliver({ ...e, reply: async (value: unknown) => { sent.push(value) } }, marker, eff, { startedAt: Date.now(), convKey })
+      assert.deepEqual(sent, [])
+      assert.match(prepareReply('The marker [skip] means stay quiet.', eff.reply, true).bubbles[0], /\[skip\]/, 'mentions of the marker remain ordinary text')
+    }
+  })
 })

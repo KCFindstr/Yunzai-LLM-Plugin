@@ -254,6 +254,8 @@ class ConfigManager {
     const c = this.cfg
     const g = (groupId != null && c.groups[String(groupId)]) || {}
     const chat = deepMerge(c.chat, g.chat ?? {})
+    const contextAge = Number(chat.groupContextMaxAgeMinutes)
+    chat.groupContextMaxAgeMinutes = Number.isFinite(contextAge) ? Math.max(1, Math.floor(contextAge)) : c.chat.groupContextMaxAgeMinutes
     if (g.thinking) chat.thinking = g.thinking
     // group persona may be a preset name or a literal prompt
     const personaKey = g.persona ?? c.persona.active
@@ -372,6 +374,8 @@ export function normalize(raw: any): PluginConfig {
   const summaryBudget = Number(c.chat.summaryMaxTokens ?? 8192)
   c.chat.summaryMaxTokens = Number.isFinite(summaryBudget) ? Math.min(131072, Math.max(64, Math.floor(summaryBudget))) : 8192
   c.chat.groupContext = Math.min(100, Math.max(0, Math.floor(Number(c.chat.groupContext ?? 6) || 0)))
+  const contextAge = Number(c.chat.groupContextMaxAgeMinutes ?? 720)
+  c.chat.groupContextMaxAgeMinutes = Number.isFinite(contextAge) ? Math.max(1, Math.floor(contextAge)) : 720
   c.chat.maxToolCalls = Math.min(1000, Math.max(0, Math.floor(Number(c.chat.maxToolCalls ?? 20) || 0)))
   c.quota = isPlainObject(c.quota) ? c.quota : {}
   c.quota.defaultScope ??= 'user'

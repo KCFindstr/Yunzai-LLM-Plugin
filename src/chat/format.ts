@@ -1,5 +1,8 @@
 import type { ReplySection } from '../core/configTypes.ts'
 
+/** A standalone control reply that means the model has nothing to send. */
+export const SKIP_REPLY = /^\s*[\[［【]?\s*(skip|不回复|跳过)\s*[\]］】]?\s*$/i
+
 /** True when the event comes from the official QQ bot platform adapter (TRSS QQBot-Plugin). */
 export function isQQBotEvent(e: any): boolean {
   const name = String(e?.adapter_name ?? e?.bot?.adapter?.name ?? e?.bot?.version?.name ?? '')

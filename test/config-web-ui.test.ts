@@ -60,6 +60,26 @@ it('config page: unified models, provider groups, tool switches, levels, curve a
     }
     const text = () => page.$eval('main, #app', (el: Element) => el.textContent ?? '')
 
+    // Recent group-message age is editable through the shared config schema.
+    await open('chat', '.field input[type="number"]')
+    const ageValue = () => page.evaluate(() => {
+      const key = Array.from(document.querySelectorAll('.field .key')).find(el => el.textContent === 'chat.groupContextMaxAgeMinutes')!
+      return (key.closest('.field')!.querySelector('input') as HTMLInputElement).value
+    })
+    assert.equal(await ageValue(), '720')
+    await page.evaluate(() => {
+      const key = Array.from(document.querySelectorAll('.field .key')).find(el => el.textContent === 'chat.groupContextMaxAgeMinutes')!
+      const input = key.closest('.field')!.querySelector('input') as HTMLInputElement
+      input.value = '90'
+      input.dispatchEvent(new Event('change', { bubbles: true }))
+    })
+    for (let i = 0; i < 50 && config.get().chat.groupContextMaxAgeMinutes !== 90; i++) await new Promise(r => setTimeout(r, 100))
+    assert.equal(config.get().chat.groupContextMaxAgeMinutes, 90)
+    assert.match(fs.readFileSync(path.join(TMP, 'config', 'config.yaml'), 'utf8'), /groupContextMaxAgeMinutes: 90/)
+    await page.reload()
+    await page.waitForSelector('.field input[type="number"]')
+    assert.equal(await ageValue(), '90', 'saved value survives a UI reload')
+
     // 模型: three sections, a test button on each model, nav without the nested lists
     await open('models', 'details.group')
     const titles = await page.$$eval('.card h2', (els: Element[]) => els.map(el => el.textContent))

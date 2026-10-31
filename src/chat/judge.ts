@@ -72,7 +72,8 @@ export function messageHeading(e: any, isAdmin = false): string {
 
 /** Recent group lines before `e` (excluded), with the configured per-line budget. */
 export function groupLines(e: any, n: number, conv?: string): string[] {
-  return recentLines(e, n, config.effective(e?.group_id).chat.groupContextMaxChars, conv)
+  const chat = config.effective(e?.group_id).chat
+  return recentLines(e, n, chat.groupContextMaxChars, conv, chat.groupContextMaxAgeMinutes * 60_000)
 }
 
 export type JudgeTarget = { kind: 'systemone'; model: SystemOneModelConfig } | { kind: 'model'; candidates: string[] }

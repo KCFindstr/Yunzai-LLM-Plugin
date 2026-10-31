@@ -312,6 +312,7 @@ const chat = obj(
     summarize: bool('压缩旧对话为摘要'),
     summaryMaxTokens: int('摘要输出 token 上限（含思考；滚动摘要、群聊档案和每日概要）', { min: 64, max: 131072 }),
     groupContext: int('附带最近群聊条数', { min: 0, max: 100 }),
+    groupContextMaxAgeMinutes: int('最近群聊时间范围（分钟）', { min: 1 }),
     groupContextMaxChars: int('群聊每条最多字数', { min: 10 }),
     maxToolRounds: int('工具轮数上限（含只调用辅助工具的轮次；0关闭工具）', { min: 0, max: 100 }),
     maxToolCalls: int('普通工具合计次数上限（并行分别计数；不含发送/读取图片、加载技能、表情列表）', { min: 0, max: 1000 }),

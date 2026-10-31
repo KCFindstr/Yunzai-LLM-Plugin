@@ -116,6 +116,8 @@ export interface ChatSection {
   /** Output budget, including reasoning, for history summaries and daily digests. */
   summaryMaxTokens: number
   groupContext: number
+  /** Maximum age of ambient group messages, in minutes (independent of session expiry). */
+  groupContextMaxAgeMinutes: number
   groupContextMaxChars: number
   maxToolRounds: number
   /** Non-exempt tool-call attempts per reply, including calls in parallel batches. */

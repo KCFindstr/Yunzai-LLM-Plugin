@@ -1173,6 +1173,7 @@ var init_schema = __esm({
         summarize: bool("\u538B\u7F29\u65E7\u5BF9\u8BDD\u4E3A\u6458\u8981"),
         summaryMaxTokens: int("\u6458\u8981\u8F93\u51FA token \u4E0A\u9650\uFF08\u542B\u601D\u8003\uFF1B\u6EDA\u52A8\u6458\u8981\u3001\u7FA4\u804A\u6863\u6848\u548C\u6BCF\u65E5\u6982\u8981\uFF09", { min: 64, max: 131072 }),
         groupContext: int("\u9644\u5E26\u6700\u8FD1\u7FA4\u804A\u6761\u6570", { min: 0, max: 100 }),
+        groupContextMaxAgeMinutes: int("\u6700\u8FD1\u7FA4\u804A\u65F6\u95F4\u8303\u56F4\uFF08\u5206\u949F\uFF09", { min: 1 }),
         groupContextMaxChars: int("\u7FA4\u804A\u6BCF\u6761\u6700\u591A\u5B57\u6570", { min: 10 }),
         maxToolRounds: int("\u5DE5\u5177\u8F6E\u6570\u4E0A\u9650\uFF08\u542B\u53EA\u8C03\u7528\u8F85\u52A9\u5DE5\u5177\u7684\u8F6E\u6B21\uFF1B0\u5173\u95ED\u5DE5\u5177\uFF09", { min: 0, max: 100 }),
         maxToolCalls: int("\u666E\u901A\u5DE5\u5177\u5408\u8BA1\u6B21\u6570\u4E0A\u9650\uFF08\u5E76\u884C\u5206\u522B\u8BA1\u6570\uFF1B\u4E0D\u542B\u53D1\u9001/\u8BFB\u53D6\u56FE\u7247\u3001\u52A0\u8F7D\u6280\u80FD\u3001\u8868\u60C5\u5217\u8868\uFF09", { min: 0, max: 1e3 }),
@@ -1546,6 +1547,8 @@ function normalize(raw) {
   const summaryBudget2 = Number(c.chat.summaryMaxTokens ?? 8192);
   c.chat.summaryMaxTokens = Number.isFinite(summaryBudget2) ? Math.min(131072, Math.max(64, Math.floor(summaryBudget2))) : 8192;
   c.chat.groupContext = Math.min(100, Math.max(0, Math.floor(Number(c.chat.groupContext ?? 6) || 0)));
+  const contextAge = Number(c.chat.groupContextMaxAgeMinutes ?? 720);
+  c.chat.groupContextMaxAgeMinutes = Number.isFinite(contextAge) ? Math.max(1, Math.floor(contextAge)) : 720;
   c.chat.maxToolCalls = Math.min(1e3, Math.max(0, Math.floor(Number(c.chat.maxToolCalls ?? 20) || 0)));
   c.quota = isPlainObject(c.quota) ? c.quota : {};
   c.quota.defaultScope ??= "user";
@@ -1916,6 +1919,8 @@ var init_config = __esm({
         const c = this.cfg;
         const g = groupId != null && c.groups[String(groupId)] || {};
         const chat3 = deepMerge(c.chat, g.chat ?? {});
+        const contextAge = Number(chat3.groupContextMaxAgeMinutes);
+        chat3.groupContextMaxAgeMinutes = Number.isFinite(contextAge) ? Math.max(1, Math.floor(contextAge)) : c.chat.groupContextMaxAgeMinutes;
         if (g.thinking) chat3.thinking = g.thinking;
         const personaKey = g.persona ?? c.persona.active;
         let personaPrompt = c.persona.presets[personaKey];
@@ -5415,7 +5420,7 @@ function markHandled(e, conv) {
   const l = (logs.get(keyOf(e)) ?? []).find((x) => x.mid === String(e.message_id));
   if (l) l.conv = conv;
 }
-function recentLines(e, n, maxChars, conv, withinMs = 30 * 6e4) {
+function recentLines(e, n, maxChars, conv, withinMs = config.effective(e?.group_id).chat.groupContextMaxAgeMinutes * 6e4) {
   n = Math.min(100, Math.max(0, Math.floor(n)));
   if (!e?.group_id || n <= 0) return [];
   const list2 = logs.get(keyOf(e)) ?? [];
@@ -6109,8 +6114,27 @@ async function renderDocument(html, opts, paginate) {
 }
 async function downscaleImage(buf, mime, max) {
   const src = `data:${mime};base64,${buf.toString("base64")}`;
-  const html = `<!doctype html><html><head><style>html,body{margin:0;padding:0;background:transparent}img{display:block;max-width:${max}px;max-height:${max}px}</style></head><body><img src="${src}"></body></html>`;
-  return renderHtml(html, { width: max, maxHeight: max, scale: 1, transparent: true });
+  const browser = await getBrowser();
+  const page = await browser.newPage();
+  try {
+    const png = await page.evaluate(async (src2, max2) => {
+      const image = new Image();
+      image.src = src2;
+      await image.decode();
+      const ratio = Math.min(1, max2 / Math.max(image.naturalWidth, image.naturalHeight));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(image.naturalWidth * ratio));
+      canvas.height = Math.max(1, Math.round(image.naturalHeight * ratio));
+      const context = canvas.getContext("2d");
+      if (!context) throw new Error("\u56FE\u7247\u7F29\u653E\u5931\u8D25\uFF1ACanvas \u4E0D\u53EF\u7528");
+      context.drawImage(image, 0, 0, canvas.width, canvas.height);
+      return canvas.toDataURL("image/png").split(",")[1];
+    }, src, max);
+    return Buffer.from(png, "base64");
+  } finally {
+    await page.close().catch(() => {
+    });
+  }
 }
 var ownBrowser, BASE_CSS;
 var init_browser = __esm({
@@ -6180,7 +6204,7 @@ async function sendableImage(file, max) {
     return buf;
   }
   if (dim.type === "gif" || Math.max(dim.width ?? 0, dim.height ?? 0) <= max) return buf;
-  const cached = path13.join(path13.dirname(file), `${path13.parse(file).name}.s${max}.png`);
+  const cached = path13.join(path13.dirname(file), `${path13.parse(file).name}.s${max}.v2.png`);
   if (fs13.existsSync(cached)) return fs13.readFileSync(cached);
   try {
     const out = await downscaleImage(buf, `image/${dim.type === "jpg" ? "jpeg" : dim.type}`, max);
@@ -6379,9 +6403,11 @@ function markdownEnabled(e, reply2) {
   if (reply2.markdown === "auto") return isQQBotEvent(e);
   return reply2.markdown === true;
 }
+var SKIP_REPLY;
 var init_format = __esm({
   "src/chat/format.ts"() {
     "use strict";
+    SKIP_REPLY = /^\s*[\[［【]?\s*(skip|不回复|跳过)\s*[\]］】]?\s*$/i;
   }
 });
 
@@ -6431,6 +6457,7 @@ function stripMarkdown(text2) {
   return text2.replace(/```[\w-]*\n?([\s\S]*?)```/g, (block, code) => code.includes("[at:") ? block : code.trimEnd()).replace(/^[ \t]{0,3}#{1,6}[ \t]+/gm, "").replace(/\*\*([^*\n]+)\*\*/g, "$1").replace(/__([^_\n]+)__/g, "$1").replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, "$1$2").replace(/`([^`\n]+)`/g, (inline, code) => code.includes("[at:") ? inline : code).replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, "$2").replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, (_, t, u) => t === u ? u : `${t} ${u}`).replace(/^[ \t]*[-*+][ \t]+/gm, "\xB7 ").replace(/^[ \t]*>[ \t]?/gm, "").replace(/^[ \t]*([-*_][ \t]*){3,}$/gm, "");
 }
 function prepareReply(raw, cfg, markdown = false) {
+  if (SKIP_REPLY.test(raw)) return { bubbles: [], stickerNames: [] };
   const { text: noMarkers, names: names3 } = extractStickerMarkers(raw);
   let text2 = cfg.stripMarkdown && !markdown ? stripMarkdown(noMarkers) : noMarkers;
   text2 = text2.replace(/\n{3,}/g, "\n\n").trim();
@@ -7603,7 +7630,8 @@ function messageHeading(e, isAdmin = false) {
   return e.group_id ? `\u3010\u6D88\u606F\uFF5C${formatNow()}\uFF5C\u7FA4\u300C${truncate(String(e.group_name ?? e.group_id), 20)}\u300D\uFF5C\u53D1\u8A00\u4EBA ${who}\u3011` : `\u3010\u6D88\u606F\uFF5C${formatNow()}\uFF5C\u79C1\u804A\uFF5C\u5BF9\u65B9 ${who}\u3011`;
 }
 function groupLines(e, n, conv) {
-  return recentLines(e, n, config.effective(e?.group_id).chat.groupContextMaxChars, conv);
+  const chat3 = config.effective(e?.group_id).chat;
+  return recentLines(e, n, chat3.groupContextMaxChars, conv, chat3.groupContextMaxAgeMinutes * 6e4);
 }
 function judgeTarget(id) {
   const so = config.getSystemoneModel(id);
@@ -7775,7 +7803,7 @@ function buildHeader(e, eff, input, isAdmin, opts = {}) {
   if (e.group_id) {
     context.roster = rosterLines(e, eff.chat.rosterSize);
     if (context.roster.length) roster.push("\u3010\u6700\u8FD1\u7FA4\u53CB\xB7\u4EC5\u8EAB\u4EFD\u53C2\u8003\u3011", ...context.roster);
-    context.recent = recentLines(e, eff.chat.groupContext, eff.chat.groupContextMaxChars, opts.conv);
+    context.recent = recentLines(e, eff.chat.groupContext, eff.chat.groupContextMaxChars, opts.conv, eff.chat.groupContextMaxAgeMinutes * 6e4);
     if (context.recent.length) recent2.push("\u3010\u6700\u8FD1\u7FA4\u804A\u3011", "\u4EE5\u4E0B\u6309\u7FA4\u5185\u5B9E\u9645\u5148\u540E\u6392\u5217\uFF0C\u53EF\u80FD\u4E0E\u524D\u9762\u7684\u5BF9\u8BDD\u5386\u53F2\u91CD\u53E0\uFF1B\u91CD\u53E0\u5185\u5BB9\u662F\u540C\u4E00\u6B21\u53D1\u8A00\uFF0C\u5E76\u975E\u518D\u6B21\u53D1\u751F\u3002\u7528\u6B64\u5904\u5224\u65AD\u7FA4\u804A\u987A\u5E8F\uFF0C\u53EA\u56DE\u5E94\u672B\u5C3E\u6D88\u606F\u6BB5\u4E2D\u7684\u5F53\u524D\u8BF7\u6C42\u3002", ...context.recent);
   }
   const quote = [];
@@ -8222,7 +8250,7 @@ async function runTurn(req) {
       return runTurnInner(req, ref);
     });
     if (result.kind === "reply") {
-      const text2 = result.skipped ? req.scheduled ? "\uFF08\u5B9A\u65F6\u4EFB\u52A1\uFF1A\u6A21\u578B\u5224\u65AD\u65E0\u9700\u53D1\u6D88\u606F\uFF09" : "\uFF08\u4E3B\u52A8\u53D1\u8A00\uFF1A\u6A21\u578B\u9009\u62E9\u4E0D\u63A5\u8BDD\uFF09" : result.text || (result.dispatched ? `\uFF08\u6267\u884C\u6307\u4EE4 ${result.dispatched}\uFF09` : "\uFF08\u65E0\u6587\u5B57\u56DE\u590D\uFF09");
+      const text2 = result.skipped ? req.scheduled ? "\uFF08\u5B9A\u65F6\u4EFB\u52A1\uFF1A\u6A21\u578B\u5224\u65AD\u65E0\u9700\u53D1\u6D88\u606F\uFF09" : req.proactive ? "\uFF08\u4E3B\u52A8\u53D1\u8A00\uFF1A\u6A21\u578B\u9009\u62E9\u4E0D\u63A5\u8BDD\uFF09" : "\uFF08\u6A21\u578B\u9009\u62E9\u4E0D\u56DE\u590D\uFF09" : result.text || (result.dispatched ? `\uFF08\u6267\u884C\u6307\u4EE4 ${result.dispatched}\uFF09` : "\uFF08\u65E0\u6587\u5B57\u56DE\u590D\uFF09");
       recordRolloutEvent(rolloutId, { kind: "reply", text: text2 });
       updateRollout(rolloutId, { status: hasPendingJobs(rolloutId) ? "waiting_callback" : "completed", reply: text2 });
     } else {
@@ -8499,8 +8527,10 @@ ${session.summary}` }] });
     `[${model2.id}] ${Date.now() - started}ms think=${thinking} in=${usage2.input} cache=${usage2.cacheRead}/${usage2.cacheWrite + usage2.cacheWrite1h} out=${usage2.output}${usage2.reasoning ? `(\u601D\u8003${usage2.reasoning})` : ""}${usage2.webSearches ? ` \u81EA\u5E26\u641C\u7D22${usage2.webSearches}\u6B21` : ""} $${cost.toFixed(5)}${usage2.inputIncomplete ? " (\u4E0A\u6E38\u5386\u53F2\u7528\u91CF\u53EF\u80FD\u7F3A\u5931)" : ""}${turn.dispatched ? ` cmd=${turn.dispatched}` : ""}`
   );
   if (finalText) log.debug(`[${model2.id}] \u56DE\u590D\uFF1A${brief(finalText, 500)}`);
-  if ((req.proactive || req.scheduled) && !turn.dispatched && !turn.images.length && (!finalText.trim() || SKIP_REPLY.test(finalText))) {
-    recordTurn({ ...turnInfo(), reply: req.scheduled ? "\uFF08\u5B9A\u65F6\u4EFB\u52A1\uFF1A\u65E0\u9700\u53D1\u6D88\u606F\uFF09" : "\uFF08\u4E3B\u52A8\u53D1\u8A00\uFF1A\u4E0D\u63A5\u8BDD\uFF09" });
+  const skipReply = SKIP_REPLY.test(finalText);
+  if (skipReply) finalText = "";
+  if (!turn.dispatched && !turn.images.length && (skipReply || (req.proactive || req.scheduled) && !finalText.trim())) {
+    recordTurn({ ...turnInfo(), reply: req.scheduled ? "\uFF08\u5B9A\u65F6\u4EFB\u52A1\uFF1A\u65E0\u9700\u53D1\u6D88\u606F\uFF09" : req.proactive ? "\uFF08\u4E3B\u52A8\u53D1\u8A00\uFF1A\u4E0D\u63A5\u8BDD\uFF09" : "\uFF08\u6A21\u578B\u9009\u62E9\u4E0D\u56DE\u590D\uFF09" });
     return { kind: "reply", text: "", modelId: model2.id, cost, images: [], thinking, skipped: true };
   }
   recordTurn({ ...turnInfo(), reply: finalText || (turn.dispatched ? `\uFF08\u6267\u884C\u6307\u4EE4 ${turn.dispatched}\uFF09` : "") });
@@ -8567,7 +8597,7 @@ function parseSummary(text2) {
   if (m) return { episode: m[1].trim() || void 0, summary: m[2].trim() || void 0 };
   return { summary: text2.trim() || void 0 };
 }
-var NATIVE_SEARCH_TYPES, semaphore, degraded, SKIP_REPLY, JOB_TOOLS;
+var NATIVE_SEARCH_TYPES, semaphore, degraded, JOB_TOOLS;
 var init_agent = __esm({
   "src/chat/agent.ts"() {
     "use strict";
@@ -8599,10 +8629,10 @@ var init_agent = __esm({
     init_dates();
     init_archiveJobs();
     init_tool();
+    init_format();
     NATIVE_SEARCH_TYPES = /* @__PURE__ */ new Set(["anthropic", "openai-responses", "gemini"]);
     semaphore = new Semaphore(3);
     degraded = /* @__PURE__ */ new Map();
-    SKIP_REPLY = /^\s*[\[［【]?\s*(skip|不回复|跳过)\s*[\]］】]?\s*$/i;
     JOB_TOOLS = { agy: "agy", computer_task: "computer" };
   }
 });

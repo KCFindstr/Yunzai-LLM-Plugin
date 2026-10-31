@@ -16,7 +16,7 @@ import { resolveThinkingDecision, type ThinkingDecision } from './thinking.ts'
 import { botLineFor, groupLines, historyLines, messageHeading, type JudgeTranscript } from './judge.ts'
 import { quoteLabel } from './message.ts'
 import { markHandled } from './groupLog.ts'
-import { markdownEnabled } from './format.ts'
+import { markdownEnabled, SKIP_REPLY } from './format.ts'
 import { buildHeader, buildMemoryBlock, buildSystemPrompt, SUMMARY_PROMPT } from './prompt.ts'
 import { maybeCompact } from '../memory/compact.ts'
 import { memoryHash } from '../memory/store.ts'
@@ -83,8 +83,7 @@ export interface TurnRequest {
   scheduled?: { id: string; chain: number }
 }
 
-/** A proactive reply's way of saying it has nothing to add. */
-export const SKIP_REPLY = /^\s*[\[［【]?\s*(skip|不回复|跳过)\s*[\]］】]?\s*$/i
+export { SKIP_REPLY } from './format.ts'
 
 /** The judge sees what the main model sees around the message: recent turns, the group chat and the message itself. */
 export function judgeTranscript(req: Pick<TurnRequest, 'e' | 'input' | 'convKey' | 'isAdmin'>): JudgeTranscript {
@@ -150,7 +149,7 @@ export async function runTurn(req: TurnRequest): Promise<TurnOutcome> {
       return runTurnInner(req, ref)
     })
     if (result.kind === 'reply') {
-      const text = result.skipped ? (req.scheduled ? '（定时任务：模型判断无需发消息）' : '（主动发言：模型选择不接话）') : result.text || (result.dispatched ? `（执行指令 ${result.dispatched}）` : '（无文字回复）')
+      const text = result.skipped ? (req.scheduled ? '（定时任务：模型判断无需发消息）' : req.proactive ? '（主动发言：模型选择不接话）' : '（模型选择不回复）') : result.text || (result.dispatched ? `（执行指令 ${result.dispatched}）` : '（无文字回复）')
       recordRolloutEvent(rolloutId, { kind: 'reply', text })
       updateRollout(rolloutId, { status: hasPendingJobs(rolloutId) ? 'waiting_callback' : 'completed', reply: text })
     } else {
@@ -411,9 +410,11 @@ async function runTurnInner(req: TurnRequest, ref: { turn?: TurnState; rolloutId
     `[${model.id}] ${Date.now() - started}ms think=${thinking} in=${usage.input} cache=${usage.cacheRead}/${usage.cacheWrite + usage.cacheWrite1h} out=${usage.output}${usage.reasoning ? `(思考${usage.reasoning})` : ''}${usage.webSearches ? ` 自带搜索${usage.webSearches}次` : ''} $${cost.toFixed(5)}${usage.inputIncomplete ? ' (上游历史用量可能缺失)' : ''}${turn.dispatched ? ` cmd=${turn.dispatched}` : ''}`,
   )
   if (finalText) log.debug(`[${model.id}] 回复：${brief(finalText, 500)}`)
-  // a proactive or scheduled turn that decided to stay quiet leaves no trace in the conversation
-  if ((req.proactive || req.scheduled) && !turn.dispatched && !turn.images.length && (!finalText.trim() || SKIP_REPLY.test(finalText))) {
-    recordTurn({ ...turnInfo(), reply: req.scheduled ? '（定时任务：无需发消息）' : '（主动发言：不接话）' })
+  // Control replies are silent for every trigger. Keep any tool-produced output.
+  const skipReply = SKIP_REPLY.test(finalText)
+  if (skipReply) finalText = ''
+  if (!turn.dispatched && !turn.images.length && (skipReply || ((req.proactive || req.scheduled) && !finalText.trim()))) {
+    recordTurn({ ...turnInfo(), reply: req.scheduled ? '（定时任务：无需发消息）' : req.proactive ? '（主动发言：不接话）' : '（模型选择不回复）' })
     return { kind: 'reply', text: '', modelId: model.id, cost, images: [], thinking, skipped: true }
   }
   recordTurn({ ...turnInfo(), reply: finalText || (turn.dispatched ? `（执行指令 ${turn.dispatched}）` : '') })
