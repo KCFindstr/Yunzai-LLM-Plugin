@@ -11757,12 +11757,41 @@ function decodeEntities(s) {
     return ENTITIES[g.toLowerCase()] ?? m;
   });
 }
-function htmlToText(html) {
+function htmlAttribute(tag, name) {
+  const value = new RegExp(`(?:^|\\s)${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, "i").exec(tag);
+  return decodeEntities(value?.[1] ?? value?.[2] ?? value?.[3] ?? "");
+}
+function pageLink(value, baseUrl) {
+  if (!value.trim() || value.trim().startsWith("#")) return "";
+  try {
+    const url = new URL(value, baseUrl);
+    return /^https?:$/.test(url.protocol) && !url.username && !url.password ? url.href : "";
+  } catch {
+    return "";
+  }
+}
+function htmlToText(html, baseUrl) {
   const title = decodeEntities(/<title[^>]*>([\s\S]*?)<\/title>/i.exec(html)?.[1]?.trim() ?? "");
-  let body = html.replace(/<!--[\s\S]*?-->/g, "").replace(/<(script|style|noscript|svg|template|iframe|head)\b[\s\S]*?<\/\1>/gi, "");
-  const main = /<(article|main)\b[^>]*>([\s\S]*?)<\/\1>/i.exec(body)?.[2];
+  let body = html.replace(/<!--[\s\S]*?-->/g, "").replace(/<(script|style|noscript|svg|template|head)\b[\s\S]*?<\/\1>/gi, "");
+  const article = /<article\b[^>]*>([\s\S]*?)<\/article>/i.exec(body)?.[1];
+  const main = article && article.length > 500 ? article : /<main\b[^>]*>([\s\S]*?)<\/main>/i.exec(body)?.[1];
   if (main && main.length > 500) body = main;
   else body = body.replace(/<(nav|footer|header|aside|form)\b[\s\S]*?<\/\1>/gi, "");
+  body = body.replace(/<(img|video|audio|source|iframe)\b[^>]*>/gi, (tag, kind) => {
+    const srcset = htmlAttribute(tag, "srcset") || htmlAttribute(tag, "data-srcset");
+    const src = htmlAttribute(tag, "data-src") || htmlAttribute(tag, "src") || srcset.split(",").at(-1)?.trim().split(/\s+/)[0] || "";
+    const url = pageLink(src, baseUrl);
+    const alt = htmlAttribute(tag, "alt").replace(/[<>]/g, "");
+    const poster = pageLink(htmlAttribute(tag, "poster"), baseUrl);
+    return `${url ? `
+[${kind}${alt ? `: ${alt}` : ""}] ${url}
+` : ""}${poster ? `
+[poster] ${poster}
+` : ""}`;
+  }).replace(/<a\b([^>]*)>([\s\S]*?)<\/a>/gi, (_tag, attrs, label) => {
+    const url = pageLink(htmlAttribute(attrs, "href"), baseUrl);
+    return url ? `${label} (${url})` : label;
+  });
   const text2 = decodeEntities(
     body.replace(/<br\s*\/?>/gi, "\n").replace(/<li\b[^>]*>/gi, "\n- ").replace(/<\/(p|div|section|article|h[1-6]|li|tr|table|ul|ol|blockquote|pre)>/gi, "\n").replace(/<[^>]+>/g, "")
   ).replace(/[ \t ]+/g, " ").replace(/\n\s*\n\s*/g, "\n\n").trim();
@@ -11875,7 +11904,7 @@ async function fetchPage(url, ctx) {
     text2 = buf.toString("utf8");
   }
   if (/html|xml/i.test(ct) || /^\s*</.test(text2)) {
-    const page = htmlToText(text2);
+    const page = htmlToText(text2, res.url || url);
     return truncate(`${page.title ? `\u6807\u9898: ${page.title}
 
 ` : ""}${page.text}`, max);
@@ -11914,7 +11943,7 @@ ${truncate((h.snippet ?? "").replace(/\s+/g, " "), 300)}`).join("\n\n");
   registry.register({
     name: "web_fetch",
     source: "builtin",
-    description: "\u6253\u5F00\u4E00\u4E2A\u7F51\u9875\u94FE\u63A5\u5E76\u8BFB\u53D6\u6B63\u6587\u6587\u672C\uFF08\u81EA\u52A8\u622A\u65AD\uFF09\u3002\u7528\u4E8E\u67E5\u770B\u7528\u6237\u53D1\u6765\u7684\u94FE\u63A5\u6216\u641C\u7D22\u7ED3\u679C\u91CC\u7684\u9875\u9762\u8BE6\u60C5\u3002\u82E5\u94FE\u63A5\u662F\u56FE\u7247\uFF08png/jpg/gif/webp\uFF09\u4E14\u4F60\u80FD\u770B\u56FE\uFF0C\u4F1A\u628A\u56FE\u7247\u672C\u8EAB\u4EA4\u7ED9\u4F60\u67E5\u770B\u3002",
+    description: "\u6253\u5F00\u4E00\u4E2A\u7F51\u9875\u94FE\u63A5\u5E76\u8BFB\u53D6\u6B63\u6587\u6587\u672C\u3001\u9875\u9762\u94FE\u63A5\u548C\u5A92\u4F53\u94FE\u63A5\uFF08\u81EA\u52A8\u622A\u65AD\uFF09\u3002\u9875\u9762\u91CC\u7684\u5A92\u4F53\u94FE\u63A5\u4E0D\u4EE3\u8868\u5DF2\u67E5\u770B\uFF0C\u53EF\u518D\u6B21\u6253\u5F00\u56FE\u7247\u94FE\u63A5\u770B\u56FE\u3002\u82E5\u94FE\u63A5\u662F\u56FE\u7247\uFF08png/jpg/gif/webp\uFF09\u4E14\u4F60\u80FD\u770B\u56FE\uFF0C\u4F1A\u628A\u56FE\u7247\u672C\u8EAB\u4EA4\u7ED9\u4F60\u67E5\u770B\u3002",
     parameters: {
       type: "object",
       properties: { url: { type: "string", description: "\u5B8C\u6574\u7684 http(s) \u94FE\u63A5" } },

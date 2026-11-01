@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import http from 'node:http'
 import { after, before, it } from 'node:test'
 import { normalize } from '../src/core/config.ts'
-import { registerWebTools } from '../src/tools/web.ts'
+import { htmlToText, registerWebTools } from '../src/tools/web.ts'
 import { registry, type ToolCtx } from '../src/tools/registry.ts'
 
 const PNG = Buffer.concat([Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex'), Buffer.alloc(64, 1)])
@@ -15,8 +15,13 @@ const routes: Record<string, [string, Buffer | string]> = {
   '/pic.bmp': ['image/bmp', BMP],
   '/huge.png': ['image/png', Buffer.concat([PNG, Buffer.alloc(3_800_000)])],
   '/page': ['text/html', '<html><title>T</title><body><p>正文内容</p></body></html>'],
+  '/gallery/page': ['text/html', '<main><p>Chart gallery</p><a href="./full.png"><img src="../pic.png" alt="Score chart"></a><video poster="../pic.png"><source src="./movie.mp4" type="video/mp4"></video><a href="/details?a=1&amp;b=2">Details</a></main>'],
 }
 const server = http.createServer((req, res) => {
+  if (req.url === '/redirect') {
+    res.writeHead(302, { location: '/gallery/page' })
+    return res.end()
+  }
   const [type, body] = routes[req.url ?? ''] ?? ['text/plain', 'missing']
   res.writeHead(routes[req.url ?? ''] ? 200 : 404, { 'content-type': type })
   res.end(body)
@@ -66,4 +71,36 @@ it('keeps text pages and non-vision models text-only', async () => {
 
 it('hints the image behaviour in the tool description', () => {
   assert.match(registry.get('web_fetch')!.description, /图片/)
+})
+
+it('preserves usable page and media links relative to the final redirected page', async () => {
+  const r = await fetchVia('/redirect')
+  assert.match(r.content, /Chart gallery/)
+  for (const path of ['/pic.png', '/gallery/full.png', '/gallery/movie.mp4', '/details?a=1&b=2']) {
+    assert.ok(r.content.includes(base + path), path)
+  }
+  assert.match(r.content, /Score chart/)
+  assert.match(r.content, /poster/)
+  assert.equal(r.images, undefined, 'embedded media is discoverable but not automatically downloaded')
+})
+
+it('preserves lazy, responsive, audio and player media while dropping executable URLs and hidden content', () => {
+  const { text } = htmlToText(`<head><script>secret</script></head>
+    <img src="placeholder.gif" data-src="/original.webp" alt="Original">
+    <img srcset="/small.png 1x, /large.png 2x">
+    <audio src='/song.mp3'></audio><iframe src="//player.example/embed/123"></iframe>
+    <a href=/article>Article</a><a href="javascript:alert(1)">Unsafe</a>
+    <img src="data:image/png;base64,secret"><img src="file:///private">
+    <script><img src="https://hidden.example/secret"></script>`, 'https://example.com/gallery/')
+  for (const url of ['https://example.com/original.webp', 'https://example.com/large.png', 'https://example.com/song.mp3', 'https://player.example/embed/123', 'https://example.com/article']) {
+    assert.ok(text.includes(url), url)
+  }
+  assert.doesNotMatch(text, /placeholder|javascript:|data:image|file:|secret|hidden\.example/)
+})
+
+it('prefers article content over surrounding main navigation so media stays inside the output budget', () => {
+  const { text } = htmlToText(`<main><div>${'Repository menu '.repeat(500)}</div>
+    <article><p>${'Article text '.repeat(50)}</p><img src="/chart.png"></article></main>`, 'https://example.com/repo')
+  assert.doesNotMatch(text, /Repository menu/)
+  assert.ok(text.slice(0, 1000).includes('https://example.com/chart.png'))
 })

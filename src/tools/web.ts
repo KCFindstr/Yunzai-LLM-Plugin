@@ -114,14 +114,43 @@ function decodeEntities(s: string): string {
   })
 }
 
-export function htmlToText(html: string): { title: string; text: string } {
+function htmlAttribute(tag: string, name: string): string {
+  const value = new RegExp(`(?:^|\\s)${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, 'i').exec(tag)
+  return decodeEntities(value?.[1] ?? value?.[2] ?? value?.[3] ?? '')
+}
+
+function pageLink(value: string, baseUrl?: string): string {
+  if (!value.trim() || value.trim().startsWith('#')) return ''
+  try {
+    const url = new URL(value, baseUrl)
+    return /^https?:$/.test(url.protocol) && !url.username && !url.password ? url.href : ''
+  } catch { return '' }
+}
+
+export function htmlToText(html: string, baseUrl?: string): { title: string; text: string } {
   const title = decodeEntities(/<title[^>]*>([\s\S]*?)<\/title>/i.exec(html)?.[1]?.trim() ?? '')
   let body = html
     .replace(/<!--[\s\S]*?-->/g, '')
-    .replace(/<(script|style|noscript|svg|template|iframe|head)\b[\s\S]*?<\/\1>/gi, '')
-  const main = /<(article|main)\b[^>]*>([\s\S]*?)<\/\1>/i.exec(body)?.[2]
+    .replace(/<(script|style|noscript|svg|template|head)\b[\s\S]*?<\/\1>/gi, '')
+  const article = /<article\b[^>]*>([\s\S]*?)<\/article>/i.exec(body)?.[1]
+  const main = article && article.length > 500 ? article : /<main\b[^>]*>([\s\S]*?)<\/main>/i.exec(body)?.[1]
   if (main && main.length > 500) body = main
   else body = body.replace(/<(nav|footer|header|aside|form)\b[\s\S]*?<\/\1>/gi, '')
+  // Preserve discoverable URLs before stripping tags. Do not download embedded media:
+  // the model can choose which link to open, using the usual fetch safety checks.
+  body = body
+    .replace(/<(img|video|audio|source|iframe)\b[^>]*>/gi, (tag, kind: string) => {
+      const srcset = htmlAttribute(tag, 'srcset') || htmlAttribute(tag, 'data-srcset')
+      const src = htmlAttribute(tag, 'data-src') || htmlAttribute(tag, 'src') || srcset.split(',').at(-1)?.trim().split(/\s+/)[0] || ''
+      const url = pageLink(src, baseUrl)
+      const alt = htmlAttribute(tag, 'alt').replace(/[<>]/g, '')
+      const poster = pageLink(htmlAttribute(tag, 'poster'), baseUrl)
+      return `${url ? `\n[${kind}${alt ? `: ${alt}` : ''}] ${url}\n` : ''}${poster ? `\n[poster] ${poster}\n` : ''}`
+    })
+    .replace(/<a\b([^>]*)>([\s\S]*?)<\/a>/gi, (_tag, attrs: string, label: string) => {
+      const url = pageLink(htmlAttribute(attrs, 'href'), baseUrl)
+      return url ? `${label} (${url})` : label
+    })
   const text = decodeEntities(
     body
       .replace(/<br\s*\/?>/gi, '\n')
@@ -255,7 +284,7 @@ export async function fetchPage(url: string, ctx: ToolCtx): Promise<ToolOutput |
     text = buf.toString('utf8')
   }
   if (/html|xml/i.test(ct) || /^\s*</.test(text)) {
-    const page = htmlToText(text)
+    const page = htmlToText(text, res.url || url)
     return truncate(`${page.title ? `标题: ${page.title}\n\n` : ''}${page.text}`, max)
   }
   return truncate(text, max)
@@ -293,7 +322,7 @@ export function registerWebTools() {
   registry.register({
     name: 'web_fetch',
     source: 'builtin',
-    description: '打开一个网页链接并读取正文文本（自动截断）。用于查看用户发来的链接或搜索结果里的页面详情。若链接是图片（png/jpg/gif/webp）且你能看图，会把图片本身交给你查看。',
+    description: '打开一个网页链接并读取正文文本、页面链接和媒体链接（自动截断）。页面里的媒体链接不代表已查看，可再次打开图片链接看图。若链接是图片（png/jpg/gif/webp）且你能看图，会把图片本身交给你查看。',
     parameters: {
       type: 'object',
       properties: { url: { type: 'string', description: '完整的 http(s) 链接' } },
