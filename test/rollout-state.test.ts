@@ -49,6 +49,13 @@ for (const protocol of ['gemini', 'openai-responses'] as const) {
       assert.equal(server.requests[4].body[previous], undefined)
       assert.doesNotMatch(JSON.stringify(server.requests[4].body.input), /private-tool-result|只回复 \[skip\]/)
       assert.match(JSON.stringify(server.requests[4].body.input), /answer/, 'explicit conversation history remains')
+      trackRolloutJob(first.rolloutId, 'late-job')
+      const late = await runTurn({ ...request(), input: { text: 'original-job-result: saved output is ready', images: [], imageSegments: [] }, rolloutId: first.rolloutId, asyncResult: { kind: 'agy', id: 'late-job' } })
+      assert.equal(late.kind, 'reply')
+      assert.equal(late.rolloutId, first.rolloutId, 'late results still return to the original rollout')
+      assert.equal(server.requests[5].body[previous], undefined, 'an intervening chat discards the stale chain, not the callback')
+      assert.match(JSON.stringify(server.requests[5].body.input), /original-job-result: saved output is ready/)
+      assert.match(JSON.stringify(server.requests[5].body.input), /answer/, 'the callback receives current explicit history')
     } finally { registry.unregisterWhere(tool => tool.name === 'rollout_probe'); await server.close() }
   })
 }
