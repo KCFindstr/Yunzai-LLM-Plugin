@@ -5821,17 +5821,44 @@ function markUsed(s) {
 function resolveSticker(query) {
   const q = query.trim();
   if (!q) return void 0;
+  const qLower = q.toLowerCase();
   const items = store6.data.items.filter((s) => s.indexed || s.name !== "\u672A\u547D\u540D");
-  const exact = items.find((s) => s.name === q);
-  if (exact) return exact;
-  const contains = items.filter((s) => s.name.includes(q) || q.includes(s.name));
+  const exactName = items.find((s) => s.name.toLowerCase() === qLower);
+  if (exactName) return exactName;
+  const exactText = items.find((s) => s.text && s.text.toLowerCase() === qLower);
+  if (exactText) return exactText;
+  const contains = items.filter((s) => {
+    const n = s.name.toLowerCase();
+    return n.includes(qLower) || qLower.includes(n);
+  });
   if (contains.length) return contains[Math.floor(Math.random() * contains.length)];
-  const tagged = items.filter((s) => s.tags.some((t) => t === q || t.includes(q) || q.includes(t)));
+  const tagged = items.filter((s) => s.tags.some((t) => {
+    const tl = t.toLowerCase();
+    return tl === qLower || tl.includes(qLower) || qLower.includes(tl);
+  }));
   if (tagged.length) return tagged[Math.floor(Math.random() * tagged.length)];
+  const texted = items.filter((s) => {
+    if (!s.text) return false;
+    const tl = s.text.toLowerCase();
+    return tl.includes(qLower) || qLower.length >= 2 && qLower.includes(tl);
+  });
+  if (texted.length) return texted[Math.floor(Math.random() * texted.length)];
+  if (qLower.length >= 2) {
+    const contextual = items.filter(
+      (s) => s.use && s.use.toLowerCase().includes(qLower) || s.desc && s.desc.toLowerCase().includes(qLower)
+    );
+    if (contextual.length) return contextual[Math.floor(Math.random() * contextual.length)];
+  }
   let best;
   let bestScore = 0.35;
   for (const s of items) {
-    const score = Math.max(similarity(q, s.desc), similarity(q, s.use), similarity(q, s.tags.join(" ")));
+    const score = Math.max(
+      similarity(q, s.name),
+      similarity(q, s.desc),
+      similarity(q, s.use),
+      similarity(q, s.tags.join(" ")),
+      similarity(q, s.text ?? "")
+    );
     if (score > bestScore) {
       best = s;
       bestScore = score;
@@ -12118,7 +12145,7 @@ ${res.lines.join("\n")}
       properties: {
         query: {
           type: "string",
-          description: "\u53EF\u9009\uFF0C\u641C\u7D22\u5173\u952E\u8BCD\uFF08\u6309\u540D\u79F0\u3001\u6807\u7B7E\u6216\u63CF\u8FF0\u641C\u7D22\uFF09\u3002\u7559\u7A7A\u5219\u5217\u51FA\u6700\u8FD1\u4FDD\u5B58\u7684\u8868\u60C5\u3002"
+          description: "\u53EF\u9009\uFF0C\u641C\u7D22\u5173\u952E\u8BCD\uFF08\u6309\u540D\u79F0\u3001\u753B\u9762\u63CF\u8FF0\u3001\u9002\u7528\u573A\u666F\u3001\u6807\u7B7E\u6216\u56FE\u4E2D\u6587\u5B57\u641C\u7D22\uFF09\u3002\u7559\u7A7A\u5219\u5217\u51FA\u6700\u8FD1\u4FDD\u5B58\u7684\u8868\u60C5\u3002"
         }
       }
     },
@@ -12129,14 +12156,15 @@ ${res.lines.join("\n")}
       const q = typeof args.query === "string" ? args.query.trim() : "";
       let matched = items;
       if (q) {
+        const qLower = q.toLowerCase();
         matched = items.filter(
-          (s) => s.name.includes(q) || s.desc.includes(q) || s.tags.some((t) => t.includes(q))
+          (s) => s.name.toLowerCase().includes(qLower) || s.desc.toLowerCase().includes(qLower) || s.use && s.use.toLowerCase().includes(qLower) || s.tags.some((t) => t.toLowerCase().includes(qLower)) || s.text && s.text.toLowerCase().includes(qLower)
         );
         if (!matched.length) return `\u672A\u627E\u5230\u4E0E\u201C${q}\u201D\u76F8\u5173\u7684\u8868\u60C5\u5305\u3002\u5F53\u524D\u8868\u60C5\u5E93\u5171\u6709 ${items.length} \u4E2A\u8868\u60C5\u3002`;
       }
       const top = matched.slice(-20).reverse();
       const lines = top.map(
-        (s) => `- \u300C${s.name}\u300D${s.desc ? `\uFF1A${s.desc}` : ""}${s.tags.length ? ` [${s.tags.slice(0, 3).join("/")}]` : ""}`
+        (s) => `- \u300C${s.name}\u300D${s.desc ? `\uFF1A${s.desc}` : ""}${s.use ? ` [\u573A\u666F: ${s.use}]` : ""}${s.text ? ` [\u6587\u5B57: ${s.text}]` : ""}${s.tags.length ? ` [${s.tags.slice(0, 3).join("/")}]` : ""}`
       );
       return `\u8868\u60C5\u5E93\u4E2D\u627E\u5230 ${matched.length} \u4E2A\u8868\u60C5\uFF08\u663E\u793A\u6700\u8FD1 ${top.length} \u4E2A\uFF09\uFF1A
 ${lines.join("\n")}`;

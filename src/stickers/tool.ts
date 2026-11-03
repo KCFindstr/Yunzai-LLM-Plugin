@@ -52,7 +52,7 @@ export function registerStickerTools() {
       properties: {
         query: {
           type: 'string',
-          description: '可选，搜索关键词（按名称、标签或描述搜索）。留空则列出最近保存的表情。',
+          description: '可选，搜索关键词（按名称、画面描述、适用场景、标签或图中文字搜索）。留空则列出最近保存的表情。',
         },
       },
     },
@@ -63,14 +63,20 @@ export function registerStickerTools() {
       const q = typeof args.query === 'string' ? args.query.trim() : ''
       let matched = items
       if (q) {
+        const qLower = q.toLowerCase()
         matched = items.filter(
-          s => s.name.includes(q) || s.desc.includes(q) || s.tags.some(t => t.includes(q)),
+          s =>
+            s.name.toLowerCase().includes(qLower) ||
+            s.desc.toLowerCase().includes(qLower) ||
+            (s.use && s.use.toLowerCase().includes(qLower)) ||
+            s.tags.some(t => t.toLowerCase().includes(qLower)) ||
+            (s.text && s.text.toLowerCase().includes(qLower)),
         )
         if (!matched.length) return `未找到与“${q}”相关的表情包。当前表情库共有 ${items.length} 个表情。`
       }
       const top = matched.slice(-20).reverse()
       const lines = top.map(
-        s => `- 「${s.name}」${s.desc ? `：${s.desc}` : ''}${s.tags.length ? ` [${s.tags.slice(0, 3).join('/')}]` : ''}`,
+        s => `- 「${s.name}」${s.desc ? `：${s.desc}` : ''}${s.use ? ` [场景: ${s.use}]` : ''}${s.text ? ` [文字: ${s.text}]` : ''}${s.tags.length ? ` [${s.tags.slice(0, 3).join('/')}]` : ''}`,
       )
       return `表情库中找到 ${matched.length} 个表情（显示最近 ${top.length} 个）：\n${lines.join('\n')}`
     },

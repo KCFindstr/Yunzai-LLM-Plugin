@@ -6,7 +6,7 @@ import { describe, it } from 'node:test'
 
 const { registry } = await import('../src/tools/registry.ts')
 const { registerStickerTools } = await import('../src/stickers/tool.ts')
-const { addImageSticker, listStickers, removeSticker, stickerFile } = await import('../src/stickers/store.ts')
+const { addImageSticker, listStickers, removeSticker, resolveSticker, stickerFile } = await import('../src/stickers/store.ts')
 const { extractStickerMarkers, sendSticker, stickerPromptLines } = await import('../src/stickers/picker.ts')
 
 registerStickerTools()
@@ -77,6 +77,79 @@ describe('sticker tools', () => {
     const res: any = await registry.get('add_sticker')!.run({}, { isAdmin: true, e: { user_id: '1', message: [{ type: 'text', text: '存一下' }] }, eff: { sticker: { enable: true } } } as any)
     assert.ok(res.isError)
     assert.match(res.content, /请提供要保存的图片 path/)
+  })
+
+  it('list_stickers queries across all fields: name, desc, use, tags, text', async () => {
+    for (const s of listStickers()) removeSticker(s.id)
+    const [s] = addImageSticker(Buffer.concat([PNG, Buffer.from('query_all_fields')]), {
+      name: '智械危机',
+      desc: 'Q版猫猫握拳笑',
+      use: '投喂时装凶卖萌',
+      tags: ['哈基米', '傲娇'],
+      text: '等智械危机了我放你一马',
+    })
+    try {
+      const tool = registry.get('list_stickers')!
+      // query by name
+      const byName = String(await tool.run({ query: '智械' }, {} as any))
+      assert.match(byName, /智械危机/)
+      // query by desc
+      const byDesc = String(await tool.run({ query: '握拳笑' }, {} as any))
+      assert.match(byDesc, /智械危机/)
+      // query by use
+      const byUse = String(await tool.run({ query: '装凶卖萌' }, {} as any))
+      assert.match(byUse, /智械危机/)
+      assert.match(byUse, /\[场景: 投喂时装凶卖萌\]/)
+      // query by tags
+      const byTag = String(await tool.run({ query: '傲娇' }, {} as any))
+      assert.match(byTag, /智械危机/)
+      // query by text
+      const byText = String(await tool.run({ query: '放你一马' }, {} as any))
+      assert.match(byText, /智械危机/)
+      assert.match(byText, /\[文字: 等智械危机了我放你一马\]/)
+      // query not found
+      const notFound = String(await tool.run({ query: '绝对不存在的关键词123' }, {} as any))
+      assert.match(notFound, /未找到与“绝对不存在的关键词123”相关的表情包/)
+    } finally {
+      removeSticker(s.id)
+    }
+  })
+
+  it('resolves stickers using name, tags, text, use, desc and fuzzy similarity', () => {
+    const [s] = addImageSticker(Buffer.concat([PNG, Buffer.from('robot_crisis')]), {
+      name: '智械危机放你一马',
+      desc: 'Q版哈基米握拳笑',
+      use: '群友发好玩的时装凶卖萌',
+      tags: ['哈基米', '傲娇威胁'],
+      text: '等智械危机了我放你一马',
+    })
+    try {
+      assert.equal(resolveSticker('智械危机放你一马')?.id, s.id)
+      assert.equal(resolveSticker('等智械危机了我放你一马')?.id, s.id)
+      assert.equal(resolveSticker('智械危机')?.id, s.id)
+      assert.equal(resolveSticker('傲娇威胁')?.id, s.id)
+      assert.equal(resolveSticker('放你一马')?.id, s.id)
+      assert.equal(resolveSticker('装凶卖萌')?.id, s.id)
+      assert.equal(resolveSticker('握拳笑')?.id, s.id)
+      const [eng] = addImageSticker(Buffer.concat([PNG, Buffer.from('english_test')]), {
+        name: 'CoolCat',
+        desc: 'Cat with sunglasses',
+        use: 'When feeling confident',
+        tags: ['Swag', 'AI'],
+        text: 'NO PROBLEM',
+      })
+      try {
+        assert.equal(resolveSticker('coolcat')?.id, eng.id)
+        assert.equal(resolveSticker('no problem')?.id, eng.id)
+        assert.equal(resolveSticker('swag')?.id, eng.id)
+        assert.equal(resolveSticker('confident')?.id, eng.id)
+        assert.equal(resolveSticker('sunglasses')?.id, eng.id)
+      } finally {
+        removeSticker(eng.id)
+      }
+    } finally {
+      removeSticker(s.id)
+    }
   })
 
   it('list_stickers reports an empty library', async () => {

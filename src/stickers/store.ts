@@ -158,21 +158,49 @@ export function markUsed(s: Sticker) {
   store.save()
 }
 
-/** Best sticker for an LLM-written name/mood: exact name > name contains > tag > fuzzy desc. */
+/** Best sticker for an LLM-written name/mood: exact name/text > name contains > tag > text contains > use/desc contains > fuzzy match. */
 export function resolveSticker(query: string): Sticker | undefined {
   const q = query.trim()
   if (!q) return undefined
+  const qLower = q.toLowerCase()
   const items = store.data.items.filter(s => s.indexed || s.name !== '未命名')
-  const exact = items.find(s => s.name === q)
-  if (exact) return exact
-  const contains = items.filter(s => s.name.includes(q) || q.includes(s.name))
+  const exactName = items.find(s => s.name.toLowerCase() === qLower)
+  if (exactName) return exactName
+  const exactText = items.find(s => s.text && s.text.toLowerCase() === qLower)
+  if (exactText) return exactText
+  const contains = items.filter(s => {
+    const n = s.name.toLowerCase()
+    return n.includes(qLower) || qLower.includes(n)
+  })
   if (contains.length) return contains[Math.floor(Math.random() * contains.length)]
-  const tagged = items.filter(s => s.tags.some(t => t === q || t.includes(q) || q.includes(t)))
+  const tagged = items.filter(s => s.tags.some(t => {
+    const tl = t.toLowerCase()
+    return tl === qLower || tl.includes(qLower) || qLower.includes(tl)
+  }))
   if (tagged.length) return tagged[Math.floor(Math.random() * tagged.length)]
+  const texted = items.filter(s => {
+    if (!s.text) return false
+    const tl = s.text.toLowerCase()
+    return tl.includes(qLower) || (qLower.length >= 2 && qLower.includes(tl))
+  })
+  if (texted.length) return texted[Math.floor(Math.random() * texted.length)]
+  if (qLower.length >= 2) {
+    const contextual = items.filter(s =>
+      (s.use && s.use.toLowerCase().includes(qLower)) ||
+      (s.desc && s.desc.toLowerCase().includes(qLower)),
+    )
+    if (contextual.length) return contextual[Math.floor(Math.random() * contextual.length)]
+  }
   let best: Sticker | undefined
   let bestScore = 0.35
   for (const s of items) {
-    const score = Math.max(similarity(q, s.desc), similarity(q, s.use), similarity(q, s.tags.join(' ')))
+    const score = Math.max(
+      similarity(q, s.name),
+      similarity(q, s.desc),
+      similarity(q, s.use),
+      similarity(q, s.tags.join(' ')),
+      similarity(q, s.text ?? ''),
+    )
     if (score > bestScore) {
       best = s
       bestScore = score
