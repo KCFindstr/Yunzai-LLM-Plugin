@@ -80,9 +80,40 @@ it('resumes an interrupted data move: what is still in the old folder replaces w
   assert.equal(fs.readFileSync(path.join(loc.data, 'sessions.json'), 'utf8'), 'real sessions')
   assert.equal(fs.readFileSync(path.join(loc.resources, 'agy-setup', 'agy.exe'), 'utf8'), 'new cli', 'a newer CLI download wins')
   assert.ok(!fs.existsSync(path.join(loc.data, '.moving-from-plugin-folder')), 'finished')
-  assert.deepEqual(fs.readdirSync(path.join(plugin, 'data')), ['agy-setup'])
-  assert.ok(notes.some(n => /还剩 agy-setup/.test(n)), notes.join('\n'))
+  // the older CLI left behind is parked outside plugins/ (Yunzai's pnpm workspace walks plugins/**)
+  assert.ok(!fs.existsSync(path.join(plugin, 'data')))
+  const [parked] = fs.readdirSync(path.join(loc.data, 'legacy-plugin-data'))
+  assert.equal(fs.readFileSync(path.join(loc.data, 'legacy-plugin-data', parked, 'agy-setup', 'agy.exe'), 'utf8'), 'old cli')
+  assert.ok(notes.some(n => /旧版本遗留数据 agy-setup/.test(n)), notes.join('\n'))
   assert.deepEqual(migrateLayout(plugin, loc), [], 'nothing left to do')
+})
+
+it('parks old-version leftovers in the plugin folder even after the data folder is in use', t => {
+  const saved = Object.fromEntries(Object.entries(process.env).filter(([k]) => k.startsWith('YZ_LLM_')))
+  for (const k of Object.keys(saved)) delete process.env[k]
+  t.after(() => Object.assign(process.env, saved))
+
+  const yz = path.join(TMP, 'layout-leftover')
+  const plugin = path.join(yz, 'plugins', 'Yunzai-LLM-Plugin')
+  const loc = locations(plugin)
+  write(path.join(loc.data, 'sessions.json'), 'live')
+  write(path.join(loc.resources, 'agy-setup', 'agy.exe'), 'new cli')
+  // an old AGY test profile and a stray checkout that would join Yunzai's pnpm workspace
+  write(path.join(plugin, 'data', 'agy-setup', 'profile', 'appdata', 'x.txt'))
+  write(path.join(plugin, 'data', 'agy-setup', 'commit-check', 'package.json'), '{"name":"yunzai-llm-plugin"}')
+  const notes = migrateLayout(plugin, loc)
+  assert.equal(notes.length, 1, notes.join('\n'))
+  assert.ok(!fs.existsSync(path.join(plugin, 'data')))
+  const [parked] = fs.readdirSync(path.join(loc.data, 'legacy-plugin-data'))
+  assert.ok(fs.existsSync(path.join(loc.data, 'legacy-plugin-data', parked, 'agy-setup', 'commit-check', 'package.json')))
+  assert.equal(fs.readFileSync(path.join(loc.data, 'sessions.json'), 'utf8'), 'live')
+  assert.equal(fs.readFileSync(path.join(loc.resources, 'agy-setup', 'agy.exe'), 'utf8'), 'new cli')
+
+  // an unfinished move owns the old folder: leave it alone
+  write(path.join(plugin, 'data', 'usage.sqlite'), 'real')
+  write(path.join(loc.data, '.moving-from-plugin-folder'), JSON.stringify({ from: path.join(plugin, 'data'), copied: ['usage.sqlite'] }))
+  assert.ok(!migrateLayout(plugin, loc).some(n => /旧版本遗留数据/.test(n)))
+  assert.ok(fs.existsSync(path.join(plugin, 'data', 'usage.sqlite')))
 })
 
 it('repoints the WSL image mount, unmounting an older location first', () => {

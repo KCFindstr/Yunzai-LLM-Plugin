@@ -111,8 +111,9 @@ function migrateLayout(pluginRoot, loc2 = locations(pluginRoot)) {
     if (failed.length) notes.push(`\u4EE5\u4E0B\u6570\u636E\u6682\u65F6\u65E0\u6CD5\u79FB\u52A8\uFF0C\u4E0B\u6B21\u542F\u52A8\u4F1A\u7EE7\u7EED\uFF08\u4E5F\u53EF\u505C\u6B62\u673A\u5668\u4EBA\u540E\u624B\u52A8\u79FB\u5230 ${loc2.data}\uFF09\uFF1A${failed.join("\u3001")}`);
     else {
       fs.rmSync(pending, { force: true });
+      const rest = left.filter((name) => !(name === "agy-setup" && !env.YZ_LLM_RESOURCES_DIR && fs.existsSync(path.join(loc2.resources, "agy-setup", "agy.exe"))));
       if (!left.length) fs.rmSync(oldData, { recursive: true, force: true });
-      else notes.push(`${oldData} \u91CC\u8FD8\u5269 ${left.join("\u3001")}\uFF08\u5DF2\u590D\u5236\u5230\u65B0\u4F4D\u7F6E\uFF0C\u6216\u5DF2\u6709\u66F4\u65B0\u7684 AGY CLI\uFF09\uFF0C\u786E\u8BA4\u65E0\u7528\u540E\u53EF\u4EE5\u5220\u9664`);
+      else if (rest.length) notes.push(`${oldData} \u91CC\u8FD8\u5269 ${rest.join("\u3001")}\uFF08\u5DF2\u590D\u5236\u5230\u65B0\u4F4D\u7F6E\uFF09\uFF0C\u786E\u8BA4\u65E0\u7528\u540E\u53EF\u4EE5\u5220\u9664`);
     }
   }
   const agy = path.join(loc2.data, "agy-setup");
@@ -120,7 +121,26 @@ function migrateLayout(pluginRoot, loc2 = locations(pluginRoot)) {
     move(agy, path.join(loc2.resources, "agy-setup"));
     notes.push(`AGY CLI\uFF1A${agy} \u2192 ${path.join(loc2.resources, "agy-setup")}`);
   }
+  notes.push(...evictLegacyPluginData(oldData, loc2));
   return notes;
+}
+function evictLegacyPluginData(oldData, loc2) {
+  const env = process.env;
+  if (env.YZ_LLM_DATA_DIR || env.YZ_LLM_RESOURCES_DIR || path.resolve(oldData) === path.resolve(loc2.data)) return [];
+  if (fs.existsSync(path.join(loc2.data, PENDING))) return [];
+  const from = path.join(oldData, "agy-setup");
+  if (!fs.existsSync(from) || !fs.existsSync(path.join(loc2.resources, "agy-setup", "agy.exe"))) return [];
+  const remaining = fs.readdirSync(oldData).filter((name) => name !== "agy-setup");
+  if (remaining.length > 0) return [];
+  const dest = path.join(loc2.data, "legacy-plugin-data", (/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-"));
+  try {
+    fs.mkdirSync(dest, { recursive: true });
+    fs.renameSync(from, path.join(dest, "agy-setup"));
+  } catch (err) {
+    return [`\u65E7\u7248\u672C\u9057\u7559\u7684 ${from} \u65E0\u6CD5\u79FB\u51FA\u63D2\u4EF6\u76EE\u5F55\uFF08${err?.code ?? err?.message ?? err}\uFF09\uFF0C\u5B83\u4F1A\u5BFC\u81F4 Yunzai \u7684 pnpm install \u5931\u8D25\uFF0C\u8BF7\u505C\u6B62\u673A\u5668\u4EBA\u540E\u624B\u52A8\u79FB\u51FA`];
+  }
+  if (isEmptyDir(oldData)) fs.rmSync(oldData, { recursive: true, force: true });
+  return [`\u65E7\u7248\u672C\u9057\u7559\u6570\u636E agy-setup\uFF1A${from} \u2192 ${path.join(dest, "agy-setup")}\uFF08\u7559\u5728\u63D2\u4EF6\u76EE\u5F55\u4F1A\u5BFC\u81F4 Yunzai \u7684 pnpm install \u5931\u8D25\uFF0C\u786E\u8BA4\u65E0\u7528\u540E\u53EF\u4EE5\u5220\u9664\uFF09`];
 }
 var STORE_NAME, SHIPPED, SHIPPED_SKILLS, MOVED_MARKER, PENDING, isEmptyDir;
 var init_layout = __esm({

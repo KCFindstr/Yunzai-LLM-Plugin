@@ -137,8 +137,10 @@ export function migrateLayout(pluginRoot, loc = locations(pluginRoot)) {
     if (failed.length) notes.push(`以下数据暂时无法移动，下次启动会继续（也可停止机器人后手动移到 ${loc.data}）：${failed.join('、')}`)
     else {
       fs.rmSync(pending, { force: true })
+      // an older AGY CLI left here is parked by evictLegacyPluginData below
+      const rest = left.filter(name => !(name === 'agy-setup' && !env.YZ_LLM_RESOURCES_DIR && fs.existsSync(path.join(loc.resources, 'agy-setup', 'agy.exe'))))
       if (!left.length) fs.rmSync(oldData, { recursive: true, force: true })
-      else notes.push(`${oldData} 里还剩 ${left.join('、')}（已复制到新位置，或已有更新的 AGY CLI），确认无用后可以删除`)
+      else if (rest.length) notes.push(`${oldData} 里还剩 ${rest.join('、')}（已复制到新位置），确认无用后可以删除`)
     }
   }
   // the AGY CLI is downloaded after install: a resource, not data
@@ -147,5 +149,36 @@ export function migrateLayout(pluginRoot, loc = locations(pluginRoot)) {
     move(agy, path.join(loc.resources, 'agy-setup'))
     notes.push(`AGY CLI：${agy} → ${path.join(loc.resources, 'agy-setup')}`)
   }
+  notes.push(...evictLegacyPluginData(oldData, loc))
   return notes
+}
+
+/**
+ * An old `agy-setup` must not stay under plugins/<name>/data: Yunzai's pnpm workspace covers `plugins/**`, and the
+ * AGY test profile older versions kept there holds Windows' protected `Content.IE5` junction (Everyone is denied
+ * listing it), which makes every `pnpm install` in Yunzai fail with ERR_PNPM_WORKSPACE_WALK_ERROR; its stray
+ * package.json checkouts would also join the workspace. The data move above skips `agy-setup` once a newer CLI
+ * exists in resources/, and never runs again once the new data folder is in use, so the leftover is parked under
+ * the data folder (outside the workspace) instead of being deleted. Other entries are left alone: without the move
+ * marker they may be the only copy of real data.
+ */
+export function evictLegacyPluginData(oldData, loc) {
+  const env = process.env
+  if (env.YZ_LLM_DATA_DIR || env.YZ_LLM_RESOURCES_DIR || path.resolve(oldData) === path.resolve(loc.data)) return []
+  if (fs.existsSync(path.join(loc.data, PENDING))) return [] // an unfinished move owns these entries
+  const from = path.join(oldData, 'agy-setup')
+  if (!fs.existsSync(from) || !fs.existsSync(path.join(loc.resources, 'agy-setup', 'agy.exe'))) return []
+  // If oldData still has other unmigrated data, do not touch it unless the move is active
+  const remaining = fs.readdirSync(oldData).filter(name => name !== 'agy-setup')
+  if (remaining.length > 0) return []
+  const dest = path.join(loc.data, 'legacy-plugin-data', new Date().toISOString().replace(/[:.]/g, '-'))
+  try {
+    fs.mkdirSync(dest, { recursive: true })
+    // rename keeps protected junctions intact; a copy would try to read them
+    fs.renameSync(from, path.join(dest, 'agy-setup'))
+  } catch (err) {
+    return [`旧版本遗留的 ${from} 无法移出插件目录（${err?.code ?? err?.message ?? err}），它会导致 Yunzai 的 pnpm install 失败，请停止机器人后手动移出`]
+  }
+  if (isEmptyDir(oldData)) fs.rmSync(oldData, { recursive: true, force: true })
+  return [`旧版本遗留数据 agy-setup：${from} → ${path.join(dest, 'agy-setup')}（留在插件目录会导致 Yunzai 的 pnpm install 失败，确认无用后可以删除）`]
 }
