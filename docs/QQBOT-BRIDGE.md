@@ -6,14 +6,43 @@
 
 2026-10-23 的表情发送失败来自 QQBot SDK `qq-group-bot@1.1.0`：没有 `msg_id` 的 v2 图片先上传媒体，随后错误地把上传返回对象当作 `file_data` 再调用 `/files`，QQ 返回 `40011000 请求数据异常`。PNG 和 `sub_type: 1` 不是这次错误的原因。
 
-远端 `/data/trss/TRSS-Yunzai/lib/modules/qq-group-bot@1.1.0.patch` 已修复此路径：先以 `srv_send_msg: false` 上传一次，再发送包含 `media.file_info` 的 `msg_type: 7` 消息。补丁文件仍在，但此前 `pnpm-workspace.yaml` 丢失了注册项，安装后实际加载了未修复的 SDK。修复时恢复以下注册并重新安装、重载远端桥接机器人：
+远端 `/data/trss/TRSS-Yunzai/lib/modules/qq-group-bot@1.1.0.patch` 已修复此路径：先以 `srv_send_msg: false` 上传一次，再发送包含 `media.file_info` 的 `msg_type: 7` 消息。补丁文件仍在，但此前由于 `pnpm-workspace.yaml` 是上游 git 跟踪文件，TRSS AllBot 的每日自动更新（`Main.sh update all`）执行 `git pull` / `git reset` 时会覆盖该文件，导致写入的 `patchedDependencies` 注册项丢失，重新安装时回退为官方未打补丁的 SDK。
 
-```yaml
-patchedDependencies:
-  qq-group-bot@1.1.0: lib/modules/qq-group-bot@1.1.0.patch
+根治方案：在远端 TRSS-Yunzai 根目录放置本地未跟踪的 `.pnpmfile.cjs`，利用 pnpm 的 `hooks.updateConfig(config)` 钩子在每次 `pnpm install` 时动态注入补丁依赖项，不受上游 git 更新覆盖的影响：
+
+```javascript
+// .pnpmfile.cjs
+const fs = require('node:fs')
+const path = require('node:path')
+
+const LOCAL_PATCHES = {
+  'qq-group-bot@1.1.0': 'lib/modules/qq-group-bot@1.1.0.patch',
+}
+
+module.exports = {
+  hooks: {
+    updateConfig(config) {
+      const patched = { ...(config.patchedDependencies || {}) }
+      for (const [pkg, file] of Object.entries(LOCAL_PATCHES)) {
+        if (patched[pkg]) continue
+        if (!fs.existsSync(path.join(__dirname, file))) {
+          throw new Error(`[local-patches] missing ${file}; refusing to install unpatched ${pkg}`)
+        }
+        patched[pkg] = file
+      }
+      config.patchedDependencies = patched
+      return config
+    },
+  },
+}
 ```
 
-升级桥接根项目或重新安装依赖时，应保留此注册项及对应锁文件。远端已有离线检查 `config/onebot-bridge-tools/verify-quotes.mjs --installed` 和 `audit-compatibility.mjs --installed`，使用模拟 SDK 请求，不会发送 QQ 消息。另验证了私聊/群聊、主动/被动、图片/视频/语音/文件共 16 种媒体发送组合，每次只调用一次 `/files`，然后一次 `/messages`。
+同时，`pnpm-workspace.yaml` 保持与上游一致以避免拉取冲突。远端已有离线检查 `config/onebot-bridge-tools/audit-compatibility.mjs --installed`，使用模拟 SDK 请求，不会发送 QQ 消息。另验证了私聊/群聊、主动/被动、图片/视频/语音/文件共 16 种媒体发送组合，每次只调用一次 `/files`，然后一次 `/messages`。
+
+### Windows 本地工作区 `ERR_PNPM_WORKSPACE_WALK_ERROR` 根治
+
+在 Windows 环境下，若早期版本在 `plugins/Yunzai-LLM-Plugin/data/agy-setup/` 下生成了 Chromium / IE 缓存目录（`Content.IE5` 具有系统级 `Everyone:(DENY)(RD)` 拒绝读取权限），Yunzai 根目录执行 `pnpm install` 遍历 `plugins/**` 时会报 `ERR_PNPM_WORKSPACE_WALK_ERROR: Access is denied. (os error 5)`。
+插件已在 `cli/layout.mjs` 中添加 `evictLegacyPluginData` 机制：当主数据目录已迁移生效后，启动或迁移时会自动检测并利用 `fs.renameSync`（不读取目录内部内容）将插件目录下的遗留 `agy-setup` 移入 `data/Yunzai-LLM-Plugin/legacy-plugin-data/`，确保插件目录完全脱离 pnpm 工作区扫描范围。
 
 本地 Yunzai 会把发送异常转成 `{ error: [err] }`，因此表情发送代码必须检查返回值；失败不能增加使用次数或写入已发送的群聊记录。
 
