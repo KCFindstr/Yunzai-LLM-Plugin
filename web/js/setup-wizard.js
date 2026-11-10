@@ -57,12 +57,19 @@ export function setupWizard(initialData, onChange) {
     const url = field('接口地址', presets[0]?.[2] || '', { required: true, type: 'url' })
     const key = secret('提供商 API Key')
     key.control.required = true
-    const newProvider = h('fieldset', { class: 'setup-provider' }, grid(preset.view, name.view, type.view, url.view, key.view))
+    const project = field('Google Cloud 项目 ID', '')
+    const location = field('Vertex 区域', 'global')
+    const newProvider = h('fieldset', { class: 'setup-provider' }, grid(preset.view, name.view, type.view, url.view, project.view, location.view, key.view))
     const upstream = combo([], '', { placeholder: '填写提供商的模型名称' })
     upstream.querySelector('select').setAttribute('aria-label', '上游模型预设')
     upstream.querySelector('input').setAttribute('aria-label', '自定义上游模型 ID')
     let previousSuggestions = []
     const syncModels = () => {
+      const vertex = type.control.value === 'vertex'
+      project.view.hidden = location.view.hidden = !vertex
+      project.control.required = vertex
+      key.control.required = !vertex
+      key.control.placeholder = vertex ? '留空使用 gcloud auth login 登录的账户' : 'API Key 或 env:变量名'
       const presetIndex = presets.findIndex(([, t, u]) => t === type.control.value && u === url.control.value.trim())
       const suggestions = provider.control.value === '__new'
         ? (data.presetModels?.[presetIndex] ?? [])
@@ -92,7 +99,9 @@ export function setupWizard(initialData, onChange) {
         if (!id || models.some(m => m.id === id)) throw new Error('请填写唯一的模型别名')
         const p = provider.control.value === '__new' ? name.control.value.trim() : provider.control.value
         if (provider.control.value === '__new' && providers.includes(p)) throw new Error('提供商名称已存在')
-        const changes = provider.control.value === '__new' ? [change(`providers.${p}`, { type: type.control.value, baseUrl: url.control.value.trim(), apiKey: keyValue(key.control.value.trim()) })] : []
+        const entry = { type: type.control.value, baseUrl: url.control.value.trim(), apiKey: keyValue(key.control.value.trim()) }
+        if (entry.type === 'vertex') { entry.project = project.control.value.trim(); entry.location = location.control.value.trim() || 'global' }
+        const changes = provider.control.value === '__new' ? [change(`providers.${p}`, entry)] : []
         changes.push(change(`models.${models.length}`, { id, provider: p, model, pricing: 'auto' }), change('defaultModel', id))
         await save(changes)
       }, '添加并设为默认模型'))]
@@ -102,23 +111,36 @@ export function setupWizard(initialData, onChange) {
     const providers = data.effective.providers ?? {}, names = Object.keys(providers)
     if (!names.length) return null
     const currentModel = data.effective.models.find(m => m.id === (status?.models.modelId || data.effective.defaultModel))
-    const selected = field('提供商', currentModel?.provider || names[0], { name: 'credentialProvider', options: names.map(name => [name, `${name} · ${providers[name].apiKey?.set ? '已配置 Key' : '未配置 Key'}`]) })
+    const selected = field('提供商', currentModel?.provider || names[0], { name: 'credentialProvider', options: names.map(name => [name, `${name} · ${providers[name].type === 'vertex' ? 'gcloud / OAuth' : providers[name].apiKey?.set ? '已配置 Key' : '未配置 Key'}`]) })
     const type = field('接口类型', '', { name: 'credentialType', options: data.schema.fields.providers.value.fields.type.values.map(v => [v, v]) })
     const url = field('接口地址', '', { name: 'credentialUrl', required: true, type: 'url' })
+    const project = field('Google Cloud 项目 ID', '', { name: 'credentialProject' })
+    const location = field('Vertex 区域', 'global', { name: 'credentialLocation' })
     const key = secret('提供商 API Key')
     key.control.name = 'credentialKey'
+    const syncType = () => {
+      const vertex = type.control.value === 'vertex'
+      project.view.hidden = location.view.hidden = !vertex
+      project.control.required = vertex
+      key.control.required = !vertex && !providers[selected.control.value].apiKey?.set
+      key.control.placeholder = vertex ? '留空使用 gcloud；已配置的令牌保留原值' : providers[selected.control.value].apiKey?.set ? '已配置，留空保留原值' : 'API Key 或 env:变量名'
+    }
     const sync = () => {
       const p = providers[selected.control.value]
       type.control.value = p.type; url.control.value = p.baseUrl
+      project.control.value = p.project || ''; location.control.value = p.location || 'global'
       key.control.value = ''; key.control.required = !p.apiKey?.set
       key.control.placeholder = p.apiKey?.set ? '已配置，留空保留原值' : 'API Key 或 env:变量名'
+      syncType()
     }
+    type.control.addEventListener('change', syncType)
     selected.control.addEventListener('change', sync); sync()
     return h('details', { class: 'quiet-details', open: !status?.models.ready }, h('summary', '提供商与 API Key'),
       h('p', { class: 'small muted' }, '可填写或更新已有提供商的 Key；多个 Key 用英文逗号分隔。留空保留已保存的 Key。'),
-      form(grid(selected.view, type.view, url.view, key.view), () => {
+      form(grid(selected.view, type.view, url.view, project.view, location.view, key.view), () => {
         const prefix = `providers.${selected.control.value}`
         const changes = [change(`${prefix}.type`, type.control.value), change(`${prefix}.baseUrl`, url.control.value.trim())]
+        if (type.control.value === 'vertex') changes.push(change(`${prefix}.project`, project.control.value.trim()), change(`${prefix}.location`, location.control.value.trim() || 'global'))
         if (key.control.value.trim()) changes.push(change(`${prefix}.apiKey`, keyValue(key.control.value.trim())))
         return save(changes)
       }, '保存提供商'))
@@ -166,7 +188,7 @@ export function setupWizard(initialData, onChange) {
       const model = data.effective.models.find(m => m.id === (status?.models.modelId || data.effective.defaultModel))
       const type = data.effective.providers[model?.provider]?.type
       hint.textContent = selected === 'native'
-        ? (model?.nativeSearch !== false && ['anthropic', 'openai-responses', 'gemini'].includes(type) ? '默认模型已支持自带搜索。' : '默认模型不支持自带搜索，请选择外部搜索服务。')
+        ? (model?.nativeSearch !== false && ['anthropic', 'openai-responses', 'gemini', 'vertex'].includes(type) ? '默认模型已支持自带搜索。' : '默认模型不支持自带搜索，请选择外部搜索服务。')
         : selected === 'deepseek' ? '留空复用 DeepSeek 提供商的 Key；DeepSeek Fetch 共用此密钥。' : ['anysearch', 'jina'].includes(selected) ? '此服务的 Key 可选；已有 Key 留空会保留。' : selected === 'none' ? '仍可单独开启网页读取。' : '填写服务所需的密钥或地址；已有 Key 留空会保留。'
     }
     provider.control.addEventListener('change', sync); reading.control.addEventListener('change', sync); sync()

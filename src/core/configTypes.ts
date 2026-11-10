@@ -1,5 +1,5 @@
 /** Provider types with a chat adapter in src/llm. */
-export type ProviderType = 'openai' | 'openai-responses' | 'anthropic' | 'gemini'
+export type ProviderType = 'openai' | 'openai-responses' | 'anthropic' | 'gemini' | 'vertex'
 /** Any provider: chat, Voyage embeddings, or a TypeSafe System One classifier (Jev / self-hosted Kev). */
 export type AnyProviderType = ProviderType | 'voyage' | 'systemone'
 export type ThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
@@ -10,6 +10,13 @@ export type QuotaScope = 'user' | 'group' | 'global'
 export interface ProviderConfig {
   type: AnyProviderType
   baseUrl?: string
+  /** Vertex AI Google Cloud project and location (default global). */
+  project?: string
+  location?: string
+  /** Vertex: gcloud executable; used for renewable OAuth when apiKey is empty. */
+  gcloudPath?: string
+  /** Vertex: mint renewable OAuth tokens for this service account using gcloud impersonation. */
+  serviceAccount?: string
   /** One key or several (rotated on 401/429). `env:NAME` reads process.env.NAME. */
   apiKey?: string | string[]
   headers?: Record<string, string>

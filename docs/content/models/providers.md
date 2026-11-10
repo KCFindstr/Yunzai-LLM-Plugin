@@ -18,6 +18,7 @@ Yunzai-LLM-Plugin 用统一的接口对接各家模型，处理各厂商在数�
 | **`openai-responses`** | OpenAI 官方、DeepSeek | `reasoning.summary` 推理摘要提取、模型自带联网搜索。 |
 | **`anthropic`** | Anthropic 官方 Claude 及兼容接口 | **显式提示词缓存 (Prompt Caching)**、细粒度思考控制 (`thinking.display: summarized`)、PDF 原生解析。 |
 | **`gemini`** | Google AI Studio (Gemini 系列) | **多模态输入**（直接读取图片、视频、音频、PDF）、服务端长会话状态保持 (Interactions API)。 |
+| **`vertex`** | Google Cloud Vertex AI Gemini | `generateContent`、OAuth Bearer 鉴权、gcloud 自动刷新令牌、签名工具轮次与多模态输入。 |
 | **`voyage`** | Voyage AI (`voyage-context-4`) | 只用于向量模型，支持上下文感知嵌入 (Contextualized Embeddings)。 |
 | **`systemone`** | TypeSafe Jev / 自建 Kev | 分类接口，可作为自动思考强度与主动发言的判断模型。 |
 
@@ -59,7 +60,32 @@ providers:
     apiKey: AIzaSyxxxxxxxxxxxxxxxx
 ```
 
-### 4. 接入 OpenRouter (聚合全网模型)
+### 4. 接入 Google Cloud Vertex AI
+
+Vertex 与 AI Studio 使用不同的接口、鉴权和模型可用范围；某模型在 Vertex 可用，不代表它在 Gemini Developer API 也可用。先在机器人运行账户下安装 Google Cloud CLI 并执行 `gcloud auth login`，然后配置：
+
+```yaml
+providers:
+  vertex:
+    type: vertex
+    baseUrl: https://aiplatform.googleapis.com
+    project: YOUR_PROJECT_ID
+    location: global
+    # 可选专用身份：调用者须对该服务账号拥有 iam.serviceAccounts.getAccessToken 权限，
+    # 并在项目启用 iamcredentials.googleapis.com。服务账号只需被授予模型推理所需权限。
+    # serviceAccount: yunzai-vertex@YOUR_PROJECT_ID.iam.gserviceaccount.com
+    # apiKey 留空，使用 gcloud auth print-access-token；令牌只缓存在内存，自动刷新。
+    # CLI 不在 PATH/标准安装目录时，填写 gcloudPath: C:/path/to/google-cloud-sdk/bin/gcloud.cmd
+models:
+  - id: vertex-carbon
+    provider: vertex
+    model: gemini-4-carbon
+    pricing: auto
+```
+
+模型必须已对所选项目开放。`baseUrl` 填 API 根地址，不要填写完整的 `:generateContent` URL。非 global 区域可填写对应的区域主机（例如 `https://us-central1-aiplatform.googleapis.com`）和 `location`。自动获取的令牌只发送到 Google 官方 Vertex HTTPS 主机；自定义代理须显式提供访问令牌。如有外部令牌刷新服务，也可将 OAuth access token 放入 `apiKey: env:GOOGLE_ACCESS_TOKEN`；此时由外部服务管理令牌有效期。不要将 AI Studio 的 `AIza...` 密钥当作 OAuth access token。
+
+### 5. 接入 OpenRouter (聚合全网模型)
 OpenRouter 聚合了大量模型，并在响应中返回实际花费，插件直接用于计费：
 
 ```yaml

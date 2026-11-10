@@ -8,6 +8,7 @@
  *  - memory.embedding {type, baseUrl, apiKey, model, ...} -> a voyage/openai provider + embeddingModels entry,
  *                                                            memory.embedding.model (an embedding model id)
  *  - groups.*.chat.{thinkingJudge, autoThinking}          -> removed (judging is no longer per group)
+ *  - null model-list placeholders                       -> removed (keep editor and runtime indexes aligned)
  *
  * Returns a human-readable note per change; an empty list means the document was already current.
  */
@@ -28,6 +29,27 @@ export function migrateConfig(doc, defaults = {}) {
   const notes = []
   if (!YAML.isMap(doc.contents)) return notes
   const get = keys => js(doc.getIn(keys))
+
+  // normalize() skips null model entries. Persist that same compaction before any index-based edit,
+  // otherwise models.5.thinking can target a blank YAML scalar while the UI shows a model at index 5.
+  for (const name of ['models', 'embeddingModels', 'systemoneModels']) {
+    const list = doc.getIn([name], true)
+    if (!YAML.isSeq(list)) continue
+    let removed = 0
+    for (let i = list.items.length - 1; i >= 0; i--) {
+      const item = list.items[i]
+      if (item !== null && !(YAML.isScalar(item) && item.value == null)) continue
+      const comments = [item?.commentBefore, item?.comment].filter(Boolean).join('\n')
+      if (comments) {
+        const next = list.items[i + 1]
+        if (YAML.isNode(next)) next.commentBefore = [comments, next.commentBefore].filter(Boolean).join('\n')
+        else list.comment = [comments, list.comment].filter(Boolean).join('\n')
+      }
+      list.items.splice(i, 1)
+      removed++
+    }
+    if (removed) notes.push(`${name} 已移除 ${removed} 个空列表项（修复模型编辑索引）`)
+  }
 
   const providers = () => {
     const out = structuredClone(isObj(defaults.providers) ? defaults.providers : {})

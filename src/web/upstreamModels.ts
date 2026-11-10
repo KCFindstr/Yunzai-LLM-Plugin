@@ -51,7 +51,7 @@ async function fetchList(p: ProviderConfig, kind: 'chat' | 'embedding'): Promise
 
 export async function liveModels(name: string, p: ProviderConfig, kind: 'chat' | 'embedding', refresh = false): Promise<{ models: string[]; known: string[]; live: number; error?: string }> {
   const known: string[] = p.type === 'systemone' ? KNOWN_SYSTEMONE_MODELS : kind === 'embedding' ? embeddingSuggestions(p) : modelSuggestions(p)
-  if (p.type === 'voyage' || p.type === 'systemone') return { models: known, known, live: 0 }
+  if (p.type === 'voyage' || p.type === 'systemone' || p.type === 'vertex') return { models: known, known, live: 0 }
   const key = `${name}|${kind}|${p.type}|${p.baseUrl ?? ''}`
   let hit = cache.get(key)
   let error: string | undefined

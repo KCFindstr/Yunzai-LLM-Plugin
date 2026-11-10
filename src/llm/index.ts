@@ -1,6 +1,7 @@
 import type { ProviderType } from '../core/configTypes.ts'
 import { anthropic } from './anthropic.ts'
 import { gemini } from './gemini.ts'
+import { vertex } from './vertex.ts'
 import { openaiChat } from './openaiChat.ts'
 import { openaiResponses } from './openaiResponses.ts'
 import type { Adapter, ChatParams, ChatResult } from './types.ts'
@@ -11,6 +12,7 @@ const adapters: Record<ProviderType, Adapter> = {
   'openai-responses': openaiResponses,
   anthropic,
   gemini,
+  vertex,
 }
 
 export const PROVIDER_TYPES = Object.keys(adapters) as ProviderType[]

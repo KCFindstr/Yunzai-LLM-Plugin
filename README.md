@@ -24,6 +24,7 @@
   - OpenAI Responses API（OpenAI、DeepSeek）
   - Anthropic Messages API（Claude，支持**显式提示词缓存断点**，降低重复输入的费用）
   - Google Gemini Interactions API（直接读取图片、音频、视频与 PDF）
+  - Google Vertex AI Gemini generateContent（Cloud OAuth，支持 Vertex 专有模型）
 - 💳 **额度控制与备用模型**：
   - 每个模型独立支持「5 小时滚动额度」与「7 天滚动额度」（美元计价），细分单人、单群与全局控制。
   - 自动同步 LiteLLM / OpenRouter 价格表，统计缓存与思考 Token。

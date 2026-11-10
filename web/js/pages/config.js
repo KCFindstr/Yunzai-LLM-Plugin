@@ -14,7 +14,7 @@ const BASIC = ['enable', 'admins', 'defaultModel', 'fallbackModels', 'utilityMod
 /** shown inside the 模型 section, not as sections of their own */
 const MODEL_LISTS = [['models', '聊天模型', 'chat'], ['embeddingModels', '向量模型', 'embedding'], ['systemoneModels', 'System One 模型', 'systemone']]
 const NESTED = ['embeddingModels', 'systemoneModels']
-const CHAT_TYPES = ['openai', 'openai-responses', 'anthropic', 'gemini']
+const CHAT_TYPES = ['openai', 'openai-responses', 'anthropic', 'gemini', 'vertex']
 const PROVIDER_KINDS = [['聊天模型提供商', p => CHAT_TYPES.includes(p.type)], ['向量提供商（voyage）', p => p.type === 'voyage'], ['System One 提供商', p => p.type === 'systemone']]
 /** tool config groups -> the tools they configure (the switch beside each name turns those on or off) */
 const TOOL_GROUPS = {
@@ -101,11 +101,14 @@ function providersBody() {
       const list = entries.filter(([, p]) => test(p))
       return card(title, list.length ? list.map(([k, v]) => {
         const keys = ['providers', k]
+        const builtin = (state.data.builtinProviders ?? []).includes(k)
         const remove = h('button', { class: 'btn sm ghost danger', onclick: async e => {
           e.preventDefault()
-          if (await confirmDanger(`删除 providers.${k}？`)) reset(keys, '已删除')
-        } }, '删除')
-        return group(node.value, keys, v, effective.providers, `${k}`, h('span', { class: 'row' }, badge(v.type), remove))
+          const question = builtin ? `恢复 providers.${k} 的默认设置？这会清除该提供商的项目、凭证等自定义设置。` : `删除 providers.${k}？`
+          if (await confirmDanger(question)) reset(keys, builtin ? '已恢复提供商默认设置' : '已删除')
+        } }, builtin ? '恢复默认' : '删除')
+        const auth = v.type === 'vertex' && !v.apiKey?.set ? badge(v.serviceAccount ? '服务账号 OAuth' : 'gcloud OAuth') : null
+        return group(node.value, keys, v, effective.providers, `${k}`, h('span', { class: 'row' }, badge(v.type), auth, remove))
       }) : h('div', { class: 'small muted', style: { padding: '6px 0' } }, '（空）'))
     }),
     h('button', { class: 'btn', style: { marginTop: '16px' }, onclick: () => addProvider() }, '＋ 添加提供商'),
@@ -131,6 +134,11 @@ function descFor(keys) {
   const d = state.data.descriptions
   const generic = keys.map(k => (typeof k === 'number' ? '*' : k))
   const tries = [generic.join('.')]
+  if (d[tries[0]]) return d[tries[0]]
+  if (keys[0] === 'providers' && state.data.effective.providers?.[keys[1]]?.type === 'vertex') {
+    const typed = d[`providers.vertex.${generic.slice(2).join('.')}`]
+    if (typed) return typed
+  }
   if (keys[0] === 'providers' || keys[0] === 'groups') {
     const tail = generic.slice(2).join('.')
     for (const [k, v] of Object.entries(d)) if (k.split('.')[0] === keys[0] && k.split('.').slice(2).join('.') === tail && tail) return v
@@ -320,16 +328,18 @@ function control(node, keys, value, parent) {
       return h('div', { class: 'col' }, ta, h('div', h('button', { class: 'btn sm primary', onclick: () => save(keys, ta.value) }, '保存')))
     }
     case 'secret': {
-      const input = h('input', { type: 'password', placeholder: value?.set ? '输入新值以替换' : '未配置', autocomplete: 'new-password' })
+      const automaticVertex = parent?.type === 'vertex' && keys.at(-1) === 'apiKey' && !value?.set
+      const identity = parent?.serviceAccount ? '服务账号 OAuth（自动刷新）' : 'gcloud OAuth（自动刷新）'
+      const input = h('input', { type: 'password', placeholder: automaticVertex ? '留空：自动获取 OAuth 令牌' : value?.set ? '输入新值以替换' : '未配置', autocomplete: 'new-password' })
       return h('div', { class: 'col' },
-        h('div', { class: 'row small' }, value?.set ? badge('已配置', 'ok') : badge('未配置', 'bad'), value?.shown ? h('span', { class: 'mono muted' }, value.shown) : null),
+        h('div', { class: 'row small' }, automaticVertex ? badge(identity) : value?.set ? badge('已配置', 'ok') : badge('未配置', 'bad'), !automaticVertex && value?.shown ? h('span', { class: 'mono muted' }, value.shown) : null),
         h('div', { class: 'row' }, input,
           h('button', { class: 'btn sm primary', onclick: () => {
             const raw = input.value.trim()
             if (!raw) return toast('请输入新值', 'bad')
             save(keys, raw.includes(',') ? raw.split(',').map(s => s.trim()).filter(Boolean) : raw)
           } }, '保存')),
-        h('span', { class: 'small muted' }, '多个 Key 用英文逗号分隔；env:变量名 从环境变量读取'))
+        h('span', { class: 'small muted' }, automaticVertex ? `无需填写 API Key；通过 gcloud 自动获取并刷新访问令牌${parent.serviceAccount ? `，身份：${parent.serviceAccount}` : ''}。` : '多个 Key 用英文逗号分隔；env:变量名 从环境变量读取'))
     }
     case 'enum': {
       // option values are strings; map back so enums mixing booleans (reply.markdown: false / true / auto) save the real value
@@ -431,16 +441,20 @@ async function addProvider() {
     { name: 'name', label: '名称（英文，用于模型配置）', value: autoName },
     { name: 'type', label: '接口类型', value: presets[0]?.[1] ?? 'openai', options: types },
     { name: 'baseUrl', label: '接口地址', value: presets[0]?.[2] ?? '' },
+    { name: 'project', label: 'Google Cloud 项目 ID（仅 Vertex）' },
+    { name: 'location', label: 'Vertex 区域', value: 'global' },
     { name: 'apiKey', label: 'API Key（可留空稍后设置；多个用英文逗号分隔；env:变量名 读取环境变量）', type: 'password' },
   ], '添加', r => {
     const n = r.name.trim()
     if (!/^[\w-]+$/.test(n)) return '名称只能包含字母数字下划线横线'
     if (existing.includes(n)) return '名称已存在'
     if (!/^https?:\/\/\S+$/.test(r.baseUrl.trim())) return '请输入 http(s) 接口地址'
+    if (r.type === 'vertex' && !/^[A-Za-z0-9.:-]+$/.test(r.project.trim())) return '请填写 Google Cloud 项目 ID'
   })
   if (!r) return
   const name = r.name.trim()
   const p = { type: r.type, baseUrl: r.baseUrl.trim() }
+  if (r.type === 'vertex') { p.project = r.project.trim(); p.location = r.location.trim() || 'global' }
   const key = r.apiKey.trim()
   if (key) p.apiKey = key.includes(',') ? key.split(',').map(s => s.trim()).filter(Boolean) : key
   if (/deepseek\.com/.test(p.baseUrl)) p.balance = 'deepseek'
@@ -564,8 +578,9 @@ async function addModel(providerName) {
   const id = r.id.trim()
   const caps = state.data.modelDefaults?.[r.model.trim()] ?? {}
   const entry = { id, provider: r.provider, model: r.model.trim(), thinking: r.thinking, pricing: 'auto', ...caps, vision: r.vision }
-  state.open.add(pathOf(['models', ids.length]))
-  if (!(await save(['models', ids.length], entry, `已添加模型 ${id}`))) return
+  const index = (effective.models ?? []).length
+  state.open.add(pathOf(['models', index]))
+  if (!(await save(['models', index], entry, `已添加模型 ${id}`))) return
   if (r.makeDefault) await save(['defaultModel'], id, `已设 ${id} 为默认模型`)
 }
 

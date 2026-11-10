@@ -101,7 +101,7 @@ export function searchReady(eff: EffectiveConfig, model?: ModelConfig): boolean 
   if (!ws.enable || ws.provider === 'none') return false
   if (ws.provider === 'native') {
     const selected = model ?? config.getModel(eff.model || config.defaultModelId())
-    return Boolean(selected && selected.nativeSearch !== false && ['anthropic', 'openai-responses', 'gemini'].includes(config.getProvider(selected.provider)?.type ?? ''))
+    return Boolean(selected && selected.nativeSearch !== false && ['anthropic', 'openai-responses', 'gemini', 'vertex'].includes(config.getProvider(selected.provider)?.type ?? ''))
   }
   if (ws.provider === 'deepseek') return Boolean(deepseekToolKey(ws.apiKey))
   if (ws.provider === 'searxng') return httpUrl(ws.baseUrl)

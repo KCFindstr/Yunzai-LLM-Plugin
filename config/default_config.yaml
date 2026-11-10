@@ -51,6 +51,17 @@ providers:
     apiKey: ''
     # 仅在同一次执行内使用服务端状态(previous_interaction_id)续接工具轮次；新执行发送完整上下文
     serverState: true
+  # Vertex AI：使用 gcloud auth login 登录机器人运行账户；令牌只缓存在内存，自动刷新。
+  vertex:
+    type: vertex
+    baseUrl: https://aiplatform.googleapis.com
+    project: ''
+    location: global
+    gcloudPath: ''
+    # 可选：专用服务账号邮箱；当前登录账户须有该账号的 iam.serviceAccounts.getAccessToken 权限。
+    serviceAccount: ''
+    # 可选：外部管理的 OAuth access token（支持 env:变量名），不是 Gemini API Key。
+    apiKey: ''
   # DeepSeek 提供商配置
   deepseek:
     # Responses API：支持工具调用、图片输入（deepseek-flash）和自带联网搜索（deepseek-v4-pro）

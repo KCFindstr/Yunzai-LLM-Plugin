@@ -52,7 +52,8 @@ export const geminiFile = (part: FilePart) => {
 /** Whether a provider's API takes this media type as native input; text files are always passed as text instead. */
 export function acceptsFile(provider: Pick<ProviderConfig, 'type' | 'baseUrl'>, mime: string): boolean {
   switch (provider.type) {
-    case 'gemini': return mime in GEMINI_FILES
+    case 'gemini':
+    case 'vertex': return mime in GEMINI_FILES
     case 'anthropic':
     case 'openai-responses': return mime === 'application/pdf'
     // Compatible chat endpoints rarely accept file parts; only OpenAI itself and OpenRouter document them.

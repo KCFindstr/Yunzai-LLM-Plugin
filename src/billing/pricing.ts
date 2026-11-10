@@ -23,6 +23,7 @@ const BUILTIN: Record<string, Omit<Price, 'source'>> = {
   'deepseek-r1': { input: 0.55, output: 2.19, cacheRead: 0.14 },
   // Gemini
   'gemini-4-argon': { input: 2, output: 10, cacheRead: 0.1 },
+  'gemini-4-carbon': { input: 2, output: 10, cacheRead: 0.1 },
   'claude-fable-5-1': { input: 10, output: 50, cacheRead: 0.25, cacheWrite: 12.5, cacheWrite1h: 20 },
   'claude-fable-5': { input: 10, output: 50, cacheRead: 1, cacheWrite: 12.5, cacheWrite1h: 20 },
   'claude-opus-5-5': { input: 4, output: 20, cacheRead: 0.2, cacheWrite: 5, cacheWrite1h: 8 },
@@ -60,6 +61,7 @@ const DEFAULT_SEARCH_PRICE: Partial<Record<ProviderType, number>> = {
   anthropic: 0.01,
   'openai-responses': 0.01,
   gemini: 0.014,
+  vertex: 0.014,
 }
 
 interface PriceCache {

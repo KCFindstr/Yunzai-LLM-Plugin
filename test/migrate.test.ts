@@ -23,6 +23,38 @@ const valid = (user: any) => {
 }
 
 describe('config migration', () => {
+  it('compacts null placeholders in model lists while preserving model settings and comments', () => {
+    const { doc, user, notes } = migrate(`# Keep this header\nmodels:\n  - { id: main, provider: gemini, model: gemini-4-argon, temperature: null }\n  - # Keep the empty-slot note\n  - null\n  - { id: carbon, provider: vertex, model: gemini-4-carbon, thinking: low } # Keep Carbon\nembeddingModels: [null, { id: vec, provider: voyage, model: voyage-4 }, null]\nsystemoneModels: [null, { id: judge, provider: typesafe, model: jev-latest }]\n`)
+    assert.deepEqual(user.models.map(m => m.id), ['main', 'carbon'])
+    assert.equal(user.models[0].temperature, null, 'nullable model fields are not placeholders')
+    assert.deepEqual(user.models[1], { id: 'carbon', provider: 'vertex', model: 'gemini-4-carbon', thinking: 'low' })
+    assert.deepEqual(user.embeddingModels.map(m => m.id), ['vec'])
+    assert.deepEqual(user.systemoneModels.map(m => m.id), ['judge'])
+    assert.equal(notes.length, 3)
+    assert.match(String(doc), /Keep this header/)
+    assert.match(String(doc), /Keep the empty-slot note/)
+    assert.match(String(doc), /Keep Carbon/)
+    assert.deepEqual(migrateConfig(doc, defaults), [])
+  })
+
+  it('keeps runtime model indexes aligned with YAML when editing a model after empty entries', () => {
+    writeUserConfig(`# Keep config comments\nmodels:\n  - { id: main, provider: gemini, model: gemini-4-argon, thinking: low }\n  -\n  - null\n  - { id: carbon, provider: vertex, model: gemini-4-carbon, thinking: low }\n`)
+    assert.equal(config.load(), true)
+    assert.equal(config.get().models[1].id, 'carbon')
+    config.set('models.1.thinking', 'high')
+    let saved = YAML.parse(config.readRaw())
+    assert.equal(saved.models.length, 2)
+    assert.equal(saved.models[0].thinking, 'low')
+    assert.equal(saved.models[1].id, 'carbon')
+    assert.equal(saved.models[1].thinking, 'high')
+    config.set('models.2', { id: 'third', provider: 'gemini', model: 'gemini-3.8-flash' })
+    config.delete('models.1.thinking')
+    saved = YAML.parse(config.readRaw())
+    assert.deepEqual(saved.models.map(m => m.id), ['main', 'carbon', 'third'])
+    assert.equal(saved.models[1].thinking, undefined)
+    assert.match(config.readRaw(), /Keep config comments/)
+  })
+
   it('moves a Jev judge and its key onto the default System One provider and model', () => {
     const { user, notes } = migrate(`# 我的配置\nchat:\n  sessionScope: group # 群共享\n  thinkingJudge: { mode: systemone, apiKey: jev-secret, timeoutMs: 3000, model: utility }\n  autoThinking: { question: low, complex: medium }\n`)
     assert.ok(notes.length)

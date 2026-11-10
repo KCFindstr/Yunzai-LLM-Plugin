@@ -10,7 +10,7 @@
  */
 
 /** Provider types that serve chat models (src/llm adapters). */
-export const CHAT_PROVIDER_TYPES = ['openai', 'openai-responses', 'anthropic', 'gemini']
+export const CHAT_PROVIDER_TYPES = ['openai', 'openai-responses', 'anthropic', 'gemini', 'vertex']
 /** Provider types that serve embedding models: Voyage, or any OpenAI-compatible /embeddings endpoint. */
 export const EMBEDDING_PROVIDER_TYPES = ['voyage', 'openai', 'openai-responses']
 /** Every provider type: chat, embedding (voyage) and TypeSafe System One classifiers (Jev, self-hosted Kev). */
@@ -55,7 +55,7 @@ export function effectiveThinking(provider) {
   const same = Object.fromEntries(THINKING.map(t => [t, t]))
   if (!provider) return same
   if (/deepseek\.com/.test(String(provider.baseUrl ?? ''))) return { ...same, minimal: 'low', medium: 'high', xhigh: 'high' }
-  if (provider.type === 'gemini') return { ...same, minimal: 'low', xhigh: 'high', max: 'high' }
+  if (provider.type === 'gemini' || provider.type === 'vertex') return { ...same, minimal: 'low', xhigh: 'high', max: 'high' }
   if (provider.type === 'anthropic') return { ...same, minimal: 'low' }
   if (provider.type === 'openai' || provider.type === 'openai-responses') return { ...same, max: 'xhigh' }
   return same
@@ -66,6 +66,7 @@ export const PRESET_PROVIDERS = [
   ['Anthropic', 'anthropic', 'https://api.anthropic.com'],
   ['OpenAI', 'openai-responses', 'https://api.openai.com/v1'],
   ['Google Gemini', 'gemini', 'https://generativelanguage.googleapis.com'],
+  ['Google Vertex AI（gcloud OAuth）', 'vertex', 'https://aiplatform.googleapis.com'],
   ['DeepSeek', 'openai-responses', 'https://api.deepseek.com'],
   ['OpenRouter', 'openai', 'https://openrouter.ai/api/v1'],
   ['通义千问 (DashScope)', 'openai', 'https://dashscope.aliyuncs.com/compatible-mode/v1'],
@@ -78,7 +79,7 @@ export const PRESET_PROVIDERS = [
   ['Kev 自建（System One）', 'systemone', 'http://127.0.0.1:8009/v1'],
 ]
 
-const hasKey = p => (Array.isArray(p?.apiKey) ? p.apiKey.length > 0 : Boolean(p?.apiKey))
+const hasKey = p => p?.type === 'vertex' ? Boolean(p.project?.trim()) : (Array.isArray(p?.apiKey) ? p.apiKey.length > 0 : Boolean(p?.apiKey))
 const isKeyless = p => p?.type === 'systemone' && !/typesafe\.ai/i.test(String(p.baseUrl ?? ''))
 
 /** Problems that leave the config loadable but models unusable (CLI `check`, web config page). */
@@ -91,6 +92,7 @@ export function configProblems(c) {
       const p = providers[m.provider]
       if (!p) problems.push(`${label} ${m.id} 的提供商 ${m.provider} 不存在`)
       else if (!types.includes(p.type)) problems.push(`${label} ${m.id} 的提供商 ${m.provider}（${p.type}）不能提供${label}`)
+      else if (p.type === 'vertex' && !p.project?.trim()) problems.push(`${label} ${m.id} 的 Vertex AI 提供商未配置 project`)
     }
   }
   kindOf(models, CHAT_PROVIDER_TYPES, '聊天模型')
@@ -158,6 +160,7 @@ export function modelSuggestions(provider) {
   const url = String(provider.baseUrl ?? '')
   if (provider.type === 'anthropic') return KNOWN_MODELS.anthropic
   if (provider.type === 'gemini') return KNOWN_MODELS.gemini
+  if (provider.type === 'vertex') return ['gemini-4-carbon', ...KNOWN_MODELS.gemini]
   if (provider.type === 'voyage' || provider.type === 'systemone') return []
   if (/deepseek\.com/.test(url)) return KNOWN_MODELS.deepseek
   if (!url || /api\.openai\.com/.test(url)) return KNOWN_MODELS.openai
@@ -200,7 +203,11 @@ const provider = obj(
   {
     type: oneOf(PROVIDER_TYPES, '接口类型', { required: true }),
     baseUrl: str('接口地址', { pattern: /^https?:\/\/\S+$/ }),
-    apiKey: secret('API Key（多个用英文逗号分隔，env:变量名 读取环境变量）'),
+    project: str('Google Cloud 项目 ID', { when: p => p.type === 'vertex', pattern: /^[A-Za-z0-9.:-]+$/ }),
+    location: str('Vertex 区域（默认 global）', { when: p => p.type === 'vertex', pattern: /^[a-z0-9-]+$/ }),
+    gcloudPath: str('gcloud 路径（留空自动查找）', { when: p => p.type === 'vertex' }),
+    serviceAccount: str('Vertex 服务账号（留空使用当前 gcloud 身份）', { when: p => p.type === 'vertex', pattern: /^[A-Za-z0-9._-]+@[A-Za-z0-9.-]+\.iam\.gserviceaccount\.com$/ }),
+    apiKey: secret('API Key（支持 env:变量名；Vertex 留空用 gcloud，或填写 OAuth access token）'),
     timeout: int('超时（秒）', { min: 1 }),
     maxRetries: int('重试次数', { min: 0, max: 10 }),
     headers: map(str('值'), '额外请求头', { keyLabel: '请求头名称', keyPattern: /^[\w-]+$/ }),

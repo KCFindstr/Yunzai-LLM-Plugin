@@ -229,6 +229,7 @@ class ConfigManager {
 
   hasKey(provider?: ProviderConfig): boolean {
     if (!provider) return false
+    if (provider.type === 'vertex') return Boolean(provider.project?.trim())
     return resolveKeys(provider.apiKey).length > 0
   }
 

@@ -193,6 +193,13 @@ it('walks existing configuration, saves embeddings, preserves keys and skips opt
     await page.select('[aria-label="上游模型预设"]', 'gpt-6-luna')
     await page.select(providerPreset, '2')
     assert.equal(await page.$eval('[aria-label="上游模型预设"]', (el: HTMLSelectElement) => el.value), 'gemini-4-argon')
+    await page.select(providerPreset, '3')
+    assert.equal(await page.$eval('[aria-label="上游模型预设"]', (el: HTMLSelectElement) => el.value), 'gemini-4-carbon')
+    assert.deepEqual(await page.$eval('.setup-provider', (el: Element) => ({
+      keyRequired: (el.querySelector('input[type=password]') as HTMLInputElement).required,
+      project: Array.from(el.querySelectorAll('.setup-field')).filter(field => field.textContent?.includes('Google Cloud 项目 ID')).map(field => ({ hidden: (field as HTMLElement).hidden, required: (field.querySelector('input') as HTMLInputElement).required })),
+    })), { keyRequired: false, project: [{ hidden: false, required: true }] })
+    await page.select(providerPreset, '2')
     await page.select('[aria-label="上游模型预设"]', '\u0000custom')
     await page.$eval('[aria-label="自定义上游模型 ID"]', (el: HTMLInputElement) => { el.value = 'custom-model'; el.dispatchEvent(new Event('change')) })
     await page.select(providerPreset, '0')

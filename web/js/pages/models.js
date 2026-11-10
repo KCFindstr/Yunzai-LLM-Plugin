@@ -3,8 +3,9 @@ import { menuButton } from '../main.js'
 import { act, badge, card, empty, fmt, h, icon, mount, spinner } from '../ui.js'
 
 const price = p => (p ? `${fmt.usd(p.input)} / ${fmt.usd(p.output)}${p.cacheRead != null ? ` · 缓存 ${fmt.usd(p.cacheRead)}` : ''}` : '未知')
-const CHAT_TYPES = ['openai', 'openai-responses', 'anthropic', 'gemini']
+const CHAT_TYPES = ['openai', 'openai-responses', 'anthropic', 'gemini', 'vertex']
 const USE = { voyage: '向量', systemone: 'System One 判断' }
+const VERTEX_AUTH = { 'oauth-token': 'OAuth 访问令牌', 'service-account-oauth': '服务账号 OAuth', 'gcloud-oauth': 'gcloud OAuth' }
 
 export async function render(root) {
   const d = await get('/api/models')
@@ -71,10 +72,10 @@ export async function render(root) {
       h('a', { class: 'btn', href: '#/config/providers' }, '编辑提供商'), h('a', { class: 'btn', href: '#/config/models' }, '编辑模型')),
     card(h('span', { class: 'card-title' }, icon('settings'), '提供商', badge(`${d.providers.length} 个`)),
       d.providers.length ? h('div', { class: 'table-wrap' }, h('table',
-        h('thead', h('tr', h('th', '名称'), h('th', '类型'), h('th', '用途'), h('th', '接口地址'), h('th', 'Key'), h('th', '余额'))),
+        h('thead', h('tr', h('th', '名称'), h('th', '类型'), h('th', '用途'), h('th', '接口地址'), h('th', '鉴权'), h('th', '余额'))),
         h('tbody', d.providers.map(p => h('tr', h('td', h('b', p.name)), h('td', badge(p.type)), h('td', { class: 'small' }, USE[p.type] ?? '聊天'),
           h('td', { class: 'small mono' }, p.baseUrl ?? '默认'),
-          h('td', p.hasKey ? badge('已配置', 'ok') : badge(p.type === 'systemone' && !/typesafe\.ai/.test(p.baseUrl ?? '') ? '无需' : '未配置', p.type === 'systemone' && !/typesafe\.ai/.test(p.baseUrl ?? '') ? '' : 'bad')),
+          h('td', p.type === 'vertex' ? badge(p.hasKey ? VERTEX_AUTH[p.authMode] ?? 'OAuth' : '缺少项目 ID', p.hasKey ? 'ok' : 'bad') : p.hasKey ? badge('已配置', 'ok') : badge(p.type === 'systemone' && !/typesafe\.ai/.test(p.baseUrl ?? '') ? '无需' : '未配置', p.type === 'systemone' && !/typesafe\.ai/.test(p.baseUrl ?? '') ? '' : 'bad')),
           balanceCell(p)))),
       )) : empty('还没有提供商'),
     ),

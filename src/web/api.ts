@@ -409,6 +409,7 @@ export const routes: Route[] = [
     const known = Object.values(KNOWN_MODELS).flat() as string[]
     return { schema: serializeSchema(SCHEMA, cfg), effective: maskSecrets(SCHEMA, cfg), overridden: overriddenPaths(), descriptions: configDescriptions(), groups: groupList(),
       presets: PRESET_PROVIDERS,
+      builtinProviders: Object.keys(YAML.parse(fs.readFileSync(DEFAULT_CONFIG_FILE, 'utf8'))?.providers ?? {}),
       presetModels: PRESET_PROVIDERS.map(([, type, baseUrl]: string[]) => (type === 'voyage' ? KNOWN_EMBEDDING_MODELS.voyage : type === 'systemone' ? KNOWN_SYSTEMONE_MODELS : modelSuggestions({ type, baseUrl }))),
       knownEmbeddingModels: KNOWN_EMBEDDING_MODELS, knownSystemoneModels: KNOWN_SYSTEMONE_MODELS,
       embeddingSuggestions: Object.fromEntries(Object.entries(cfg.providers).map(([name, p]) => [name, embeddingSuggestions(p)])),
@@ -462,7 +463,8 @@ export const routes: Route[] = [
     const c = config.get()
     return {
       defaultModel: config.defaultModelId(),
-      providers: Object.entries(c.providers).map(([name, p]) => ({ name, type: p.type, baseUrl: p.baseUrl, hasKey: config.hasKey(p), balance: p.balance })),
+      providers: Object.entries(c.providers).map(([name, p]) => ({ name, type: p.type, baseUrl: p.baseUrl, hasKey: config.hasKey(p), balance: p.balance,
+        authMode: p.type === 'vertex' ? resolveKeys(p.apiKey).length ? 'oauth-token' : p.serviceAccount ? 'service-account-oauth' : 'gcloud-oauth' : undefined })),
       models: c.models.map(m => ({ ...m, hasKey: config.hasKey(c.providers[m.provider]), price: resolvePrice(m) })),
       embeddingModels: c.embeddingModels.map(m => ({ ...m, hasKey: config.hasKey(c.providers[m.provider]), active: c.memory.embedding.model === m.id })),
       systemoneModels: c.systemoneModels.map(m => ({ ...m, hasKey: config.hasKey(c.providers[m.provider]), judge: c.autoThinking.judge === m.id })),

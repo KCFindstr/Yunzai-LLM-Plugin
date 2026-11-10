@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import net from 'node:net'
 import path from 'node:path'
+import YAML from 'yaml'
 import { after, it } from 'node:test'
 
 // judge model for the playgrounds: a category for auto thinking, a score for proactive replies
@@ -17,6 +18,7 @@ after(() => llm.close())
 const port = await new Promise<number>(resolve => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const p = (s.address() as any).port; s.close(() => resolve(p)) }) })
 writeUserConfig(`providers:
   mock: { type: openai, baseUrl: '${llm.url}', apiKey: k, maxRetries: 0 }
+  vertex: { type: vertex, project: test-project, location: global, serviceAccount: 'bot@test-project.iam.gserviceaccount.com' }
 models:
   - { id: main, provider: mock, model: fake, thinking: auto }
 defaultModel: main
@@ -95,6 +97,51 @@ it('config page: unified models, provider groups, tool switches, levels, curve a
     await open('providers', 'details.group')
     const providerTitles = await page.$$eval('.card h2', (els: Element[]) => els.map(el => el.textContent))
     assert.deepEqual(providerTitles.slice(0, 3), ['聊天模型提供商', '向量提供商（voyage）', 'System One 提供商'])
+    const chatProviders = await page.evaluate(() => {
+      const card = Array.from(document.querySelectorAll('.card')).find(el => el.querySelector('h2')?.textContent === '聊天模型提供商')!
+      return Array.from(card.querySelectorAll('details.group > summary')).map(el => el.textContent)
+    })
+    assert.ok(chatProviders.some(title => title?.includes('vertex')), 'Vertex appears in chat-provider cards')
+    assert.ok(chatProviders.some(title => title?.includes('vertex') && title.includes('服务账号 OAuth') && title.includes('恢复默认')), 'built-in Vertex uses automatic OAuth and resets to defaults')
+    assert.ok(chatProviders.some(title => title?.includes('mock') && title.includes('删除')), 'custom providers can be deleted')
+    await page.evaluate(() => {
+      const summary = Array.from(document.querySelectorAll('details.group > summary')).find(el => el.textContent?.includes('vertex') && el.textContent.includes('服务账号 OAuth'))!
+      ;(summary.parentElement as HTMLDetailsElement).open = true
+    })
+    await page.waitForFunction(() => Array.from(document.querySelectorAll('.field .key')).some(el => el.textContent === 'providers.vertex.apiKey'))
+    const vertexKeyField = await page.evaluate(() => {
+      const key = Array.from(document.querySelectorAll('.field .key')).find(el => el.textContent === 'providers.vertex.apiKey')!
+      const field = key.closest('.field')!
+      return { text: field.textContent, placeholder: (field.querySelector('input') as HTMLInputElement).placeholder }
+    })
+    assert.match(vertexKeyField.text!, /服务账号 OAuth（自动刷新）/)
+    assert.match(vertexKeyField.text!, /无需填写 API Key/)
+    assert.doesNotMatch(vertexKeyField.text!, /未配置/)
+    assert.doesNotMatch(vertexKeyField.text!, /留空则不可用/)
+    assert.equal(vertexKeyField.placeholder, '留空：自动获取 OAuth 令牌')
+
+    // Vertex is also selectable when adding a model. Append to the chat list, not the total across model kinds.
+    const initialCount = config.get().models.length
+    const writes: string[] = []
+    const captureWrite = request => {
+      if (request.method() === 'PUT' && request.url().endsWith('/api/config')) writes.push(JSON.parse(request.postData()).path)
+    }
+    page.on('request', captureWrite)
+    await open('models', 'details.group')
+    await page.evaluate(() => {
+      const card = Array.from(document.querySelectorAll('.card')).find(el => el.querySelector('h2')?.textContent === '聊天模型')!
+      Array.from(card.querySelectorAll('button')).find(button => button.textContent === '＋ 添加')!.click()
+    })
+    await page.waitForSelector('.modal[aria-label="添加模型"]')
+    assert.ok((await page.$$eval('.modal select:first-of-type option', (els: HTMLOptionElement[]) => els.map(el => el.value))).includes('vertex'))
+    await page.select('.modal select', 'vertex')
+    await page.evaluate(() => Array.from(document.querySelectorAll<HTMLButtonElement>('.modal button')).find(button => button.textContent === '添加')!.click())
+    for (let i = 0; i < 50 && config.get().models.length === initialCount; i++) await new Promise(r => setTimeout(r, 100))
+    page.off('request', captureWrite)
+    assert.ok(writes.includes(`models.${initialCount}`), 'embedding and classifier counts do not create chat-list gaps')
+    assert.equal(config.get().models.at(-1)?.provider, 'vertex')
+    assert.equal(config.get().models.at(-1)?.model, 'gemini-4-carbon')
+    assert.equal(YAML.parse(config.readRaw()).models.length, initialCount + 1)
 
     // 工具: a switch beside each tool name, no separate list of disabled tools
     await open('tools', 'details.group summary .switch')

@@ -29,7 +29,7 @@ import { localDay, parseDateHints } from './dates.ts'
 import { maintainArchive } from './archiveJobs.ts'
 import { recallSources } from '../memory/tool.ts'
 
-const NATIVE_SEARCH_TYPES = new Set(['anthropic', 'openai-responses', 'gemini'])
+const NATIVE_SEARCH_TYPES = new Set(['anthropic', 'openai-responses', 'gemini', 'vertex'])
 const semaphore = new Semaphore(3)
 
 type Feature = 'nativeSearch' | 'thinking' | 'tools'
