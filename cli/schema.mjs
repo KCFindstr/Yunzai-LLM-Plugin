@@ -22,11 +22,11 @@ export const MODEL_ID = /^[\p{L}\p{N}_.-]+$/u
 /** auto-thinking category names: the judge model answers with one of them */
 export const CATEGORY_NAME = /^[\p{L}\p{N}_-]{1,32}$/u
 
-/** Official model ids per provider family (checked 2026-10-29). Suggestions only; any id can be typed. */
+/** Model presets, including requested upcoming IDs. Suggestions only; endpoint availability is separate. */
 export const KNOWN_MODELS = {
   anthropic: ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5', 'claude-fable-5-1'],
   openai: ['gpt-6.1-sol', 'gpt-6.1-terra', 'gpt-6-luna', 'gpt-6-astra'],
-  gemini: ['gemini-4-argon', 'gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-3.1-pro-preview', 'gemini-3.1-flash-lite'],
+  gemini: ['gemini-4-carbon', 'gemini-4-argon', 'gemini-4-hydrogen', 'gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-3.1-pro-preview', 'gemini-3.1-flash-lite'],
   deepseek: ['deepseek-flash', 'deepseek-v4-pro'],
 }
 export const KNOWN_EMBEDDING_MODELS = {
@@ -159,8 +159,7 @@ export function modelSuggestions(provider) {
   if (!provider) return []
   const url = String(provider.baseUrl ?? '')
   if (provider.type === 'anthropic') return KNOWN_MODELS.anthropic
-  if (provider.type === 'gemini') return KNOWN_MODELS.gemini
-  if (provider.type === 'vertex') return ['gemini-4-carbon', ...KNOWN_MODELS.gemini]
+  if (provider.type === 'gemini' || provider.type === 'vertex') return KNOWN_MODELS.gemini
   if (provider.type === 'voyage' || provider.type === 'systemone') return []
   if (/deepseek\.com/.test(url)) return KNOWN_MODELS.deepseek
   if (!url || /api\.openai\.com/.test(url)) return KNOWN_MODELS.openai

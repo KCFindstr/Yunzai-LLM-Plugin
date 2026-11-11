@@ -927,8 +927,7 @@ function modelSuggestions(provider2) {
   if (!provider2) return [];
   const url = String(provider2.baseUrl ?? "");
   if (provider2.type === "anthropic") return KNOWN_MODELS.anthropic;
-  if (provider2.type === "gemini") return KNOWN_MODELS.gemini;
-  if (provider2.type === "vertex") return ["gemini-4-carbon", ...KNOWN_MODELS.gemini];
+  if (provider2.type === "gemini" || provider2.type === "vertex") return KNOWN_MODELS.gemini;
   if (provider2.type === "voyage" || provider2.type === "systemone") return [];
   if (/deepseek\.com/.test(url)) return KNOWN_MODELS.deepseek;
   if (!url || /api\.openai\.com/.test(url)) return KNOWN_MODELS.openai;
@@ -1058,7 +1057,7 @@ var init_schema = __esm({
     KNOWN_MODELS = {
       anthropic: ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5", "claude-fable-5-1"],
       openai: ["gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-luna", "gpt-6-astra"],
-      gemini: ["gemini-4-argon", "gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite", "gemini-3.1-pro-preview", "gemini-3.1-flash-lite"],
+      gemini: ["gemini-4-carbon", "gemini-4-argon", "gemini-4-hydrogen", "gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite", "gemini-3.1-pro-preview", "gemini-3.1-flash-lite"],
       deepseek: ["deepseek-flash", "deepseek-v4-pro"]
     };
     KNOWN_EMBEDDING_MODELS = {

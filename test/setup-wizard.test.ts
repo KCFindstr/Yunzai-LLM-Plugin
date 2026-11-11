@@ -192,7 +192,7 @@ it('walks existing configuration, saves embeddings, preserves keys and skips opt
     assert.equal(await page.$eval('[aria-label="上游模型预设"]', (el: HTMLSelectElement) => el.value), 'gpt-6.1-sol')
     await page.select('[aria-label="上游模型预设"]', 'gpt-6-luna')
     await page.select(providerPreset, '2')
-    assert.equal(await page.$eval('[aria-label="上游模型预设"]', (el: HTMLSelectElement) => el.value), 'gemini-4-argon')
+    assert.equal(await page.$eval('[aria-label="上游模型预设"]', (el: HTMLSelectElement) => el.value), 'gemini-4-carbon')
     await page.select(providerPreset, '3')
     assert.equal(await page.$eval('[aria-label="上游模型预设"]', (el: HTMLSelectElement) => el.value), 'gemini-4-carbon')
     assert.deepEqual(await page.$eval('.setup-provider', (el: Element) => ({
